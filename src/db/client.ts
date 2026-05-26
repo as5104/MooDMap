@@ -1,19 +1,28 @@
 /**
  * MoodMap — SQLite Database Client
- * Initializes the database connection and runs migrations
+ * Lazily initializes the database connection and runs migrations
  */
 
-import * as SQLite from 'expo-sqlite';
-import { drizzle } from 'drizzle-orm/expo-sqlite';
-import * as schema from './schema';
+import { Platform } from 'react-native';
 
 const DB_NAME = 'moodmap.db';
 
-// Open or create the SQLite database
-const sqliteDb = SQLite.openDatabaseSync(DB_NAME);
+let dbInstance: any = null;
 
-// Create the Drizzle ORM instance
-export const db = drizzle(sqliteDb, { schema });
+/**
+ * Get or create the Drizzle ORM database instance
+ * Lazy-loaded to avoid Metro resolving wa-sqlite web worker at startup
+ */
+export const getDb = () => {
+  if (!dbInstance) {
+    const SQLite = require('expo-sqlite');
+    const { drizzle } = require('drizzle-orm/expo-sqlite');
+    const schema = require('./schema');
+    const sqliteDb = SQLite.openDatabaseSync(DB_NAME);
+    dbInstance = drizzle(sqliteDb, { schema });
+  }
+  return dbInstance;
+};
 
 /**
  * Initialize database tables
@@ -21,6 +30,15 @@ export const db = drizzle(sqliteDb, { schema });
  */
 export const initializeDatabase = async (): Promise<void> => {
   try {
+    // Skip DB init on web (uses wa-sqlite which causes resolution errors)
+    if (Platform.OS === 'web') {
+      console.log('[DB] Skipping database init on web');
+      return;
+    }
+
+    const SQLite = require('expo-sqlite');
+    const sqliteDb = SQLite.openDatabaseSync(DB_NAME);
+
     // Create tables if they don't exist
     sqliteDb.execSync(`
       CREATE TABLE IF NOT EXISTS mood_entries (
@@ -82,6 +100,9 @@ export const initializeDatabase = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_streaks_user ON streaks(user_id);
       CREATE INDEX IF NOT EXISTS idx_badges_user ON badges(user_id);
     `);
+
+    // Also init the drizzle instance
+    getDb();
 
     console.log('[DB] Database initialized successfully');
   } catch (error) {

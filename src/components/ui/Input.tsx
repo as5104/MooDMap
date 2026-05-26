@@ -1,14 +1,15 @@
 /**
  * MoodMap — Input Component
- * Glassmorphic text input with subtle glow on focus
+ * Glassmorphic text input — uses ref-based focus tracking to avoid re-render cursor jumps
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useRef } from 'react';
 import {
   StyleSheet,
   TextInput,
   View,
   Text,
+  Animated,
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
@@ -34,15 +35,50 @@ export const Input: React.FC<InputProps> = ({
   onBlur,
   ...props
 }) => {
-  const [isFocused, setIsFocused] = useState(false);
+  // Use Animated.Value instead of useState to avoid re-render on focus/blur
+  const focusAnim = useRef(new Animated.Value(0)).current;
+
+  const handleFocus = useCallback(
+    (e: any) => {
+      Animated.timing(focusAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: false,
+      }).start();
+      onFocus?.(e);
+    },
+    [onFocus, focusAnim]
+  );
+
+  const handleBlur = useCallback(
+    (e: any) => {
+      Animated.timing(focusAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: false,
+      }).start();
+      onBlur?.(e);
+    },
+    [onBlur, focusAnim]
+  );
+
+  const borderColor = focusAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(255, 255, 255, 0.08)', 'rgba(25, 199, 184, 0.4)'],
+  });
+
+  const bgColor = focusAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.07)'],
+  });
 
   return (
     <View style={[styles.container, containerStyle]}>
       {label && <Text style={styles.label}>{label}</Text>}
-      <View
+      <Animated.View
         style={[
           styles.inputWrapper,
-          isFocused && styles.inputFocused,
+          { borderColor, backgroundColor: bgColor },
           error ? styles.inputError : undefined,
         ]}
       >
@@ -50,7 +86,7 @@ export const Input: React.FC<InputProps> = ({
           <Feather
             name={icon}
             size={18}
-            color={isFocused ? Colors.accent.teal : 'rgba(255,255,255,0.3)'}
+            color="rgba(255,255,255,0.3)"
             style={styles.icon}
           />
         )}
@@ -58,17 +94,11 @@ export const Input: React.FC<InputProps> = ({
           style={[styles.input, icon ? { paddingLeft: 0 } : undefined, style]}
           placeholderTextColor="rgba(255,255,255,0.25)"
           selectionColor={Colors.accent.teal}
-          onFocus={(e) => {
-            setIsFocused(true);
-            onFocus?.(e);
-          }}
-          onBlur={(e) => {
-            setIsFocused(false);
-            onBlur?.(e);
-          }}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           {...props}
         />
-      </View>
+      </Animated.View>
       {error && <Text style={styles.error}>{error}</Text>}
     </View>
   );
@@ -88,19 +118,9 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: Radius.input,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: Spacing.lg,
-  },
-  inputFocused: {
-    borderColor: 'rgba(25, 199, 184, 0.4)',
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
-    shadowColor: '#19C7B8',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
   },
   inputError: {
     borderColor: 'rgba(255, 107, 107, 0.5)',
