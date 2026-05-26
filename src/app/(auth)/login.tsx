@@ -41,8 +41,11 @@ export default function LoginScreen() {
 
     if (!result.success) {
       setError(result.error ?? 'Login failed. Please try again.');
+      setLoading(false);
+    } else {
+      // Navigate to root — index.tsx will redirect to onboarding or home
+      router.replace('/');
     }
-    setLoading(false);
   };
 
   return (

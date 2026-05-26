@@ -51,13 +51,15 @@ export default function SignupScreen() {
 
     if (!result.success) {
       setError(result.error ?? 'Signup failed. Please try again.');
+      setLoading(false);
     } else if (result.needsConfirmation) {
       // Email confirmation is ON — show "check email" screen
       setSuccess(true);
+      setLoading(false);
+    } else {
+      // No confirmation needed — navigate to root for redirect
+      router.replace('/');
     }
-    // If no confirmation needed, the auth state listener in _layout.tsx
-    // will detect the new session and redirect to home automatically
-    setLoading(false);
   };
 
   if (success) {
