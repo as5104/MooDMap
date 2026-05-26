@@ -54,6 +54,6 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.hero,
-    color: Colors.accent.primary,
+    color: Colors.accent.olive,
   },
 });

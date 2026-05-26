@@ -1,6 +1,6 @@
 /**
- * MoodMap — Forgot Password Screen
- * Glassmorphic password reset
+ * MoodMap — Forgot Password Screen (Freud-Inspired)
+ * Warm earthy password reset
  */
 
 import React, { useState } from 'react';
@@ -112,12 +112,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(240,235,227,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xxxl,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(240,235,227,0.08)',
   },
   title: {
     fontFamily: Fonts.heading,
@@ -128,13 +128,13 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(240,235,227,0.45)',
     marginBottom: Spacing.xxxl,
     lineHeight: 24,
   },
   errorBanner: {
     marginBottom: Spacing.lg,
-    borderColor: 'rgba(255, 107, 107, 0.2)',
+    borderColor: 'rgba(196, 92, 74, 0.2)',
   },
   errorRow: {
     flexDirection: 'row',
@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
   successText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(240,235,227,0.5)',
     textAlign: 'center',
   },
 });

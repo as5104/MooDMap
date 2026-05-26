@@ -1,28 +1,48 @@
 /**
  * MoodMap — SQLite Database Client
- * Lazily initializes the database connection and runs migrations
+ * Uses expo-sqlite directly (no Drizzle) for reliable Android support
  */
 
 import { Platform } from 'react-native';
 
 const DB_NAME = 'moodmap.db';
 
-let dbInstance: any = null;
+let sqliteDb: any = null;
 
 /**
- * Get or create the Drizzle ORM database instance
- * Lazy-loaded to avoid Metro resolving wa-sqlite web worker at startup
+ * Get the raw expo-sqlite database instance
  */
-export const getDb = () => {
-  if (!dbInstance) {
+export const getDb = (): any => {
+  if (!sqliteDb) {
     const SQLite = require('expo-sqlite');
-    const { drizzle } = require('drizzle-orm/expo-sqlite');
-    const schema = require('./schema');
-    const sqliteDb = SQLite.openDatabaseSync(DB_NAME);
-    dbInstance = drizzle(sqliteDb, { schema });
+    sqliteDb = SQLite.openDatabaseSync(DB_NAME);
   }
-  return dbInstance;
+  return sqliteDb;
 };
+
+/**
+ * Run a SELECT query and return all rows
+ */
+export function queryAll<T = any>(sql: string, params: any[] = []): T[] {
+  const db = getDb();
+  return db.getAllSync(sql, params) as T[];
+}
+
+/**
+ * Run a SELECT query and return first row
+ */
+export function queryFirst<T = any>(sql: string, params: any[] = []): T | null {
+  const db = getDb();
+  return (db.getFirstSync(sql, params) as T) ?? null;
+}
+
+/**
+ * Run an INSERT/UPDATE/DELETE statement
+ */
+export function execute(sql: string, params: any[] = []): void {
+  const db = getDb();
+  db.runSync(sql, params);
+}
 
 /**
  * Initialize database tables
@@ -30,17 +50,15 @@ export const getDb = () => {
  */
 export const initializeDatabase = async (): Promise<void> => {
   try {
-    // Skip DB init on web (uses wa-sqlite which causes resolution errors)
+    // Skip DB init on web
     if (Platform.OS === 'web') {
       console.log('[DB] Skipping database init on web');
       return;
     }
 
-    const SQLite = require('expo-sqlite');
-    const sqliteDb = SQLite.openDatabaseSync(DB_NAME);
+    const db = getDb();
 
-    // Create tables if they don't exist
-    sqliteDb.execSync(`
+    db.execSync(`
       CREATE TABLE IF NOT EXISTS mood_entries (
         id TEXT PRIMARY KEY NOT NULL,
         created_at TEXT NOT NULL,
@@ -100,9 +118,6 @@ export const initializeDatabase = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_streaks_user ON streaks(user_id);
       CREATE INDEX IF NOT EXISTS idx_badges_user ON badges(user_id);
     `);
-
-    // Also init the drizzle instance
-    getDb();
 
     console.log('[DB] Database initialized successfully');
   } catch (error) {

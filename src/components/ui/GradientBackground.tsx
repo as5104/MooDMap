@@ -1,64 +1,56 @@
 /**
- * MoodMap — GradientBackground Component
- * Rich gradient with floating blurred orbs for color-mixing effect
+ * MoodMap — Gradient Background (Freud-Inspired)
+ * Warm charcoal base with earthy orbs (olive, brown, terracotta)
  */
 
-import React from 'react';
-import { StyleSheet, View, Dimensions, type ViewStyle } from 'react-native';
+import React, { type ReactNode } from 'react';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors } from '@/constants/colors';
-
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 interface GradientBackgroundProps {
-  children: React.ReactNode;
+  children: ReactNode;
+  variant?: 'default' | 'auth' | 'glow' | 'mood';
+  moodColor?: string;
   style?: ViewStyle;
-  /** Adds floating blurred gradient orbs for rich color mixing */
-  variant?: 'default' | 'glow' | 'auth' | 'minimal';
 }
 
 export const GradientBackground: React.FC<GradientBackgroundProps> = ({
   children,
-  style,
   variant = 'default',
+  moodColor,
+  style,
 }) => {
+  // Full-screen mood color variant
+  if (variant === 'mood' && moodColor) {
+    return (
+      <View style={[styles.container, { backgroundColor: moodColor }, style]}>
+        {/* Subtle topographic-style overlays */}
+        <View style={[styles.topoCircle, styles.topoCircle1, { borderColor: `${moodColor}CC` }]} />
+        <View style={[styles.topoCircle, styles.topoCircle2, { borderColor: `${moodColor}99` }]} />
+        <View style={[styles.topoCircle, styles.topoCircle3, { borderColor: `${moodColor}66` }]} />
+        {children}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, style]}>
-      {/* Base gradient */}
       <LinearGradient
-        colors={['#000814', '#001233', '#003566', '#001D3D', '#000814']}
-        locations={[0, 0.25, 0.5, 0.75, 1]}
-        start={{ x: 0.2, y: 0 }}
-        end={{ x: 0.8, y: 1 }}
-        style={StyleSheet.absoluteFill}
+        colors={['#1A1612', '#211D17', '#191510']}
+        locations={[0, 0.5, 1]}
+        style={StyleSheet.absoluteFill as ViewStyle}
       />
-
-      {/* Floating gradient orbs for color mixing */}
-      {(variant === 'glow' || variant === 'auth') && (
-        <View style={styles.orbLayer} pointerEvents="none">
-          {/* Primary golden-yellow orb — top-right */}
-          <View style={[styles.orb, styles.orbGold]} />
-
-          {/* Teal accent orb — mid-left */}
-          <View style={[styles.orb, styles.orbTeal]} />
-
-          {/* Deep blue orb — bottom */}
-          <View style={[styles.orb, styles.orbBlue]} />
-
-          {/* Subtle warm orb — center */}
-          {variant === 'auth' && (
-            <View style={[styles.orb, styles.orbWarm]} />
-          )}
-        </View>
-      )}
-
-      {variant === 'default' && (
-        <View style={styles.orbLayer} pointerEvents="none">
-          {/* Subtle ambient glow */}
-          <View style={[styles.orb, styles.orbSubtle]} />
-        </View>
-      )}
-
+      {/* Warm earthy orbs */}
+      <View style={styles.orbLayer}>
+        {/* Olive orb — top right */}
+        <View style={[styles.orb, styles.orbOlive]} />
+        {/* Brown orb — left */}
+        <View style={[styles.orb, styles.orbBrown]} />
+        {/* Terracotta orb — bottom right (only on auth/glow) */}
+        {(variant === 'auth' || variant === 'glow') && (
+          <View style={[styles.orb, styles.orbTerracotta]} />
+        )}
+      </View>
       {children}
     </View>
   );
@@ -67,7 +59,7 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000814',
+    backgroundColor: '#1A1612',
   },
   orbLayer: {
     ...(StyleSheet.absoluteFill as object),
@@ -76,77 +68,52 @@ const styles = StyleSheet.create({
 
   orb: {
     position: 'absolute',
-    borderRadius: 9999,
+    borderRadius: 999,
+  },
+  orbOlive: {
+    width: 300,
+    height: 300,
+    backgroundColor: 'rgba(168, 181, 114, 0.06)',
+    top: -80,
+    right: -60,
+  },
+  orbBrown: {
+    width: 250,
+    height: 250,
+    backgroundColor: 'rgba(139, 115, 85, 0.05)',
+    top: '40%',
+    left: -80,
+  },
+  orbTerracotta: {
+    width: 280,
+    height: 280,
+    backgroundColor: 'rgba(212, 132, 90, 0.04)',
+    bottom: -60,
+    right: -40,
   },
 
-  // Golden-yellow — top-right, large and soft
-  orbGold: {
-    width: SCREEN_W * 0.9,
-    height: SCREEN_W * 0.9,
-    top: -SCREEN_W * 0.15,
-    right: -SCREEN_W * 0.3,
-    backgroundColor: 'rgba(255, 214, 10, 0.07)',
-    shadowColor: '#FFD60A',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 80,
-    elevation: 0,
+  // Topographic circles for mood variant
+  topoCircle: {
+    position: 'absolute',
+    borderRadius: 999,
+    borderWidth: 1,
   },
-
-  // Teal accent — mid-left
-  orbTeal: {
-    width: SCREEN_W * 0.7,
-    height: SCREEN_W * 0.7,
-    top: SCREEN_H * 0.35,
-    left: -SCREEN_W * 0.35,
-    backgroundColor: 'rgba(25, 199, 184, 0.06)',
-    shadowColor: '#19C7B8',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 60,
-    elevation: 0,
+  topoCircle1: {
+    width: 500,
+    height: 500,
+    top: '20%',
+    left: -100,
   },
-
-  // Deep blue — bottom-right
-  orbBlue: {
-    width: SCREEN_W * 0.8,
-    height: SCREEN_W * 0.8,
-    bottom: -SCREEN_W * 0.2,
-    right: -SCREEN_W * 0.2,
-    backgroundColor: 'rgba(0, 53, 102, 0.15)',
-    shadowColor: '#003566',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 60,
-    elevation: 0,
+  topoCircle2: {
+    width: 400,
+    height: 400,
+    top: '25%',
+    left: -50,
   },
-
-  // Warm center glow — auth only
-  orbWarm: {
-    width: SCREEN_W * 0.6,
-    height: SCREEN_W * 0.6,
-    top: SCREEN_H * 0.15,
-    alignSelf: 'center',
-    left: SCREEN_W * 0.2,
-    backgroundColor: 'rgba(255, 214, 10, 0.04)',
-    shadowColor: '#FFD60A',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 100,
-    elevation: 0,
-  },
-
-  // Subtle ambient — default screens
-  orbSubtle: {
-    width: SCREEN_W * 0.8,
-    height: SCREEN_W * 0.8,
-    top: SCREEN_H * 0.1,
-    left: -SCREEN_W * 0.2,
-    backgroundColor: 'rgba(0, 53, 102, 0.12)',
-    shadowColor: '#003566',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 80,
-    elevation: 0,
+  topoCircle3: {
+    width: 300,
+    height: 300,
+    top: '30%',
+    left: 0,
   },
 });

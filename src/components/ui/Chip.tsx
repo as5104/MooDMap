@@ -25,7 +25,7 @@ export const Chip: React.FC<ChipProps> = ({
   emoji,
   selected = false,
   onPress,
-  color = Colors.accent.teal,
+  color = Colors.accent.olive,
   style,
   size = 'md',
 }) => {

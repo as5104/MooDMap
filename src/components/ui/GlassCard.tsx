@@ -1,88 +1,103 @@
 /**
- * MoodMap — GlassCard Component
- * Frosted glass card with translucent background and subtle border
+ * MoodMap — GlassCard (Freud-Inspired)
+ * Warm translucent surface with earthy tint + colored metric variant
  */
 
-import React from 'react';
-import { StyleSheet, View, type ViewStyle } from 'react-native';
-import { AnimatedPressable } from './AnimatedPressable';
-import { Colors } from '@/constants/colors';
+import React, { type ReactNode } from 'react';
+import { StyleSheet, View, type ViewStyle, Pressable } from 'react-native';
 import { Radius, Spacing } from '@/constants/layout';
 
+type Intensity = 'subtle' | 'medium' | 'strong';
+type MetricVariant = 'green' | 'orange' | 'brown' | 'olive';
+
 interface GlassCardProps {
-  children: React.ReactNode;
+  children: ReactNode;
+  intensity?: Intensity;
+  padding?: 'none' | 'sm' | 'md' | 'lg';
   style?: ViewStyle;
-  /** Glass intensity: how visible the frost is */
-  intensity?: 'subtle' | 'medium' | 'strong';
-  /** Accent border glow color */
   glowColor?: string;
-  /** Make the card pressable */
   onPress?: () => void;
-  /** Padding preset */
-  padding?: 'sm' | 'md' | 'lg' | 'none';
+  /** Colored metric card variant */
+  metric?: MetricVariant;
 }
+
+const INTENSITY_BG: Record<Intensity, string> = {
+  subtle: 'rgba(240, 235, 227, 0.03)',
+  medium: 'rgba(240, 235, 227, 0.05)',
+  strong: 'rgba(240, 235, 227, 0.07)',
+};
+
+const INTENSITY_BORDER: Record<Intensity, string> = {
+  subtle: 'rgba(240, 235, 227, 0.04)',
+  medium: 'rgba(240, 235, 227, 0.08)',
+  strong: 'rgba(240, 235, 227, 0.10)',
+};
+
+const METRIC_COLORS: Record<MetricVariant, string> = {
+  green: '#5A7D5A',
+  orange: '#D4845A',
+  brown: '#6B5E50',
+  olive: '#7D9B5A',
+};
+
+const PADDING_MAP = {
+  none: 0,
+  sm: Spacing.md,
+  md: Spacing.lg,
+  lg: Spacing.xxl,
+};
 
 export const GlassCard: React.FC<GlassCardProps> = ({
   children,
-  style,
   intensity = 'medium',
+  padding = 'md',
+  style,
   glowColor,
   onPress,
-  padding = 'md',
+  metric,
 }) => {
-  const paddingMap = {
-    none: 0,
-    sm: Spacing.md,
-    md: Spacing.lg + 4,
-    lg: Spacing.xxl,
-  };
-
-  const intensityStyles: Record<string, ViewStyle> = {
-    subtle: {
-      backgroundColor: 'rgba(255, 255, 255, 0.03)',
-      borderColor: 'rgba(255, 255, 255, 0.06)',
+  const cardStyle: ViewStyle[] = [
+    styles.card,
+    {
+      backgroundColor: metric ? METRIC_COLORS[metric] : INTENSITY_BG[intensity],
+      borderColor: metric ? 'transparent' : INTENSITY_BORDER[intensity],
+      padding: PADDING_MAP[padding],
     },
-    medium: {
-      backgroundColor: 'rgba(255, 255, 255, 0.05)',
-      borderColor: 'rgba(255, 255, 255, 0.10)',
-    },
-    strong: {
-      backgroundColor: 'rgba(255, 255, 255, 0.08)',
-      borderColor: 'rgba(255, 255, 255, 0.15)',
-    },
-  };
-
-  const glassStyle: ViewStyle = {
-    ...styles.glass,
-    padding: paddingMap[padding],
-    ...intensityStyles[intensity],
-    ...(glowColor
-      ? {
-          borderColor: glowColor + '30',
-          shadowColor: glowColor,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.15,
-          shadowRadius: 20,
-          elevation: 0,
-        }
-      : {}),
-  };
+    glowColor ? {
+      shadowColor: glowColor,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.15,
+      shadowRadius: 16,
+      elevation: 4,
+    } : {},
+    style ?? {},
+  ];
 
   if (onPress) {
     return (
-      <AnimatedPressable onPress={onPress} style={[glassStyle, style]}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [
+          ...cardStyle,
+          pressed && styles.pressed,
+        ]}
+      >
         {children}
-      </AnimatedPressable>
+      </Pressable>
     );
   }
 
-  return <View style={[glassStyle, style]}>{children}</View>;
+  return <View style={cardStyle}>{children}</View>;
 };
 
 const styles = StyleSheet.create({
-  glass: {
+  card: {
     borderRadius: Radius.card,
     borderWidth: 1,
     overflow: 'hidden',
+  },
+  pressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.98 }],
   },
 });

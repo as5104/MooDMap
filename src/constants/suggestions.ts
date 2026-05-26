@@ -1,6 +1,6 @@
 /**
  * MoodMap — Rule-Based Suggestion Definitions
- * Maps moods to actionable suggestions without AI
+ * Maps moods to actionable suggestions (Freud-Inspired warm palette)
  */
 
 import { type MoodType, type SuggestionType } from './moods';
@@ -20,7 +20,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Try a breathing exercise',
     subtitle: 'A 4-7-8 breathing pattern can help calm your mind',
     icon: 'wind',
-    color: '#E85D75',
+    color: '#B86B6B',
     route: '/activities',
   },
   sad: {
@@ -28,7 +28,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Listen to something calming',
     subtitle: 'Ambient sounds can help soothe your mood',
     icon: 'music',
-    color: '#6C7A89',
+    color: '#C67B4E',
     route: '/sound-player',
   },
   tired: {
@@ -36,7 +36,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Take a rest break',
     subtitle: 'Even a 5-minute pause can help recharge you',
     icon: 'moon',
-    color: '#4A5568',
+    color: '#6B5E50',
     route: '/activities',
   },
   anxious: {
@@ -44,7 +44,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Try a grounding exercise',
     subtitle: 'The 5-4-3-2-1 technique brings you back to the present',
     icon: 'anchor',
-    color: '#7C5CFC',
+    color: '#9B7DB8',
     route: '/activities',
   },
   happy: {
@@ -52,7 +52,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Capture what made you smile',
     subtitle: 'Write a quick gratitude note to remember this feeling',
     icon: 'heart',
-    color: '#FFD60A',
+    color: '#D4A843',
     route: '/journal-editor',
   },
   angry: {
@@ -60,7 +60,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Take a pause',
     subtitle: 'A short break can help you process your feelings',
     icon: 'pause-circle',
-    color: '#FF6B6B',
+    color: '#C45C4A',
     route: '/activities',
   },
   calm: {
@@ -68,7 +68,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Write a reflection',
     subtitle: 'Capture this peaceful moment in your journal',
     icon: 'edit-3',
-    color: '#19C7B8',
+    color: '#A8B572',
     route: '/journal-editor',
   },
   focused: {
@@ -76,14 +76,14 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Ride the wave!',
     subtitle: 'You\'re in the zone — make the most of it',
     icon: 'zap',
-    color: '#0B4D8A',
+    color: '#7D9B5A',
   },
   peaceful: {
     type: 'meditation',
     title: 'Enjoy a short meditation',
     subtitle: 'Deepen this sense of peace with a few mindful moments',
     icon: 'sun',
-    color: '#6EE7A8',
+    color: '#8BA88A',
     route: '/activities',
   },
   motivated: {
@@ -91,7 +91,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     title: 'Celebrate your energy!',
     subtitle: 'Journal about what\'s driving you today',
     icon: 'award',
-    color: '#00D9FF',
+    color: '#D4A843',
     route: '/journal-editor',
   },
 };

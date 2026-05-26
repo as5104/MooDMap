@@ -1,13 +1,19 @@
 /**
  * MoodMap — Root Layout
- * Loads fonts, initializes DB, listens to auth state, and manages routing
+ * Loads Poppins + Sora fonts, initializes DB, listens to auth state
  */
 
 import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Stack } from 'expo-router';
-import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
-import { Outfit_600SemiBold, Outfit_700Bold } from '@expo-google-fonts/outfit';
+import {
+  useFonts,
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+} from '@expo-google-fonts/poppins';
+import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet } from 'react-native';
@@ -27,12 +33,12 @@ export default function RootLayout() {
   const setAppReady = useAppStore((s) => s.setAppReady);
 
   const [fontsLoaded] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-    Outfit_600SemiBold,
-    Outfit_700Bold,
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
+    Sora_600SemiBold,
+    Sora_700Bold,
   });
 
   // Initialize app: DB + Auth

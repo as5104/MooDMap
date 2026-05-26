@@ -1,181 +1,248 @@
 /**
- * MoodMap — Home Dashboard
- * Clean glassmorphic layout with gradient background
+ * MoodMap — Home Dashboard (Real Data)
+ * Greeting, metric cards, weekly mood row, recommendations — all from DB
  */
 
-import React from 'react';
-import { StyleSheet, View, Text, ScrollView } from 'react-native';
-import { router } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+} from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, GlassCard, Button, AnimatedPressable } from '@/components/ui';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GradientBackground, GlassCard, MetricCard, WeeklyMoodRow } from '@/components/ui';
+import { MoodFace } from '@/components/ui/MoodFace';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
-import { Spacing, SCREEN_PADDING } from '@/constants/layout';
+import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
+import { MOOD_MAP, type MoodType } from '@/constants/moods';
+import { getSuggestion } from '@/constants/suggestions';
 import { useAppStore } from '@/stores/appStore';
-import { getMoodByType } from '@/constants/moods';
+import {
+  getTodayMood,
+  getWeeklyMoods,
+  getMoodScore,
+  getMoodStreak,
+  type DayMoodData,
+} from '@/services/moodService';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const user = useAppStore((s) => s.user);
   const todayMood = useAppStore((s) => s.todayMood);
-  const moodStreak = useAppStore((s) => s.moodStreak);
+  const setTodayMood = useAppStore((s) => s.setTodayMood);
+  const dataVersion = useAppStore((s) => s.dataVersion);
+  const isAppReady = useAppStore((s) => s.isAppReady);
+  const displayName = user?.user_metadata?.display_name ?? 'User';
+  const firstName = displayName.split(' ')[0];
 
-  const displayName = user?.user_metadata?.display_name ?? 'there';
-  const hour = new Date().getHours();
-  const greeting =
-    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const [moodScore, setMoodScore] = useState(0);
+  const [weeklyMoods, setWeeklyMoods] = useState<DayMoodData[]>([]);
+  const [streak, setStreak] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-US', {
+    weekday: 'short',
     day: 'numeric',
+    month: 'short',
+    year: 'numeric',
   });
 
-  const moodDef = todayMood ? getMoodByType(todayMood.moodType) : null;
+  // Load data from DB
+  const loadData = useCallback(() => {
+    if (!isAppReady) return;
+    try {
+      const userId = user?.id;
+      const todayEntry = getTodayMood(userId);
+      const weekly = getWeeklyMoods(userId);
+      const score = getMoodScore(userId);
+      const streakData = getMoodStreak(userId);
+
+      if (todayEntry) {
+        setTodayMood({
+          id: todayEntry.id,
+          moodType: todayEntry.mood_type as MoodType,
+          moodScore: todayEntry.mood_score,
+          energyLevel: todayEntry.energy_level ?? undefined,
+          stressLevel: todayEntry.stress_level ?? undefined,
+          tags: todayEntry.tags ? JSON.parse(todayEntry.tags) : undefined,
+          note: todayEntry.note ?? undefined,
+          date: todayEntry.date,
+        });
+      }
+
+      setWeeklyMoods(weekly);
+      setMoodScore(score);
+      setStreak(streakData.current);
+    } catch (e) {
+      console.error('[Home] Load error:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, isAppReady]);
+
+  // Reload on focus and when dataVersion changes
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData, dataVersion, isAppReady])
+  );
+
+  const currentMood = todayMood ? MOOD_MAP[todayMood.moodType] : null;
+  const suggestion = todayMood ? getSuggestion(todayMood.moodType) : null;
 
   return (
-    <GradientBackground variant="glow">
+    <GradientBackground>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + Spacing.lg },
+          {
+            paddingTop: insets.top + Spacing.lg,
+            paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_MARGIN + Spacing.xxxl,
+          },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── Greeting ─── */}
-        <View style={styles.greetingRow}>
-          <View style={styles.greetingText}>
-            <Text style={styles.greeting}>
-              {greeting}, {displayName} 👋
-            </Text>
-            <Text style={styles.date}>{today}</Text>
-          </View>
-          <AnimatedPressable
-            style={styles.profileButton}
-            onPress={() => router.push('/(tabs)/profile')}
-          >
-            <Text style={styles.profileInitial}>
-              {displayName.charAt(0).toUpperCase()}
-            </Text>
-          </AnimatedPressable>
+        {/* Date */}
+        <View style={styles.dateRow}>
+          <Feather name="calendar" size={14} color={Colors.text.secondary} />
+          <Text style={styles.dateText}>{dateStr}</Text>
         </View>
 
-        {/* ─── Today's Mood / Check-in CTA ─── */}
-        {todayMood && moodDef ? (
+        {/* Greeting */}
+        <View style={styles.greetingRow}>
+          <View style={styles.greetingText}>
+            <Text style={styles.greeting}>Hi, {firstName}!</Text>
+            <View style={styles.badges}>
+              <View style={styles.badge}>
+                <Feather name="star" size={12} color={Colors.accent.olive} />
+                <Text style={styles.badgeText}>Member</Text>
+              </View>
+              {currentMood && (
+                <View style={[styles.badge, styles.badgeMood]}>
+                  <View style={[styles.moodDot, { backgroundColor: currentMood.color }]} />
+                  <Text style={styles.badgeText}>{moodScore}%</Text>
+                  <Text style={styles.badgeLabel}>{currentMood.label}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
+          </View>
+        </View>
+
+        {/* No mood yet CTA */}
+        {!todayMood && (
           <GlassCard
-            glowColor={moodDef.color}
-            intensity="strong"
+            intensity="medium"
             padding="lg"
-            style={styles.moodCard}
+            style={styles.ctaCard}
+            onPress={() => router.push('/mood-entry')}
           >
-            <Text style={styles.moodCardLabel}>Today's Mood</Text>
-            <View style={styles.moodCardRow}>
-              <Text style={styles.moodEmoji}>{moodDef.emoji}</Text>
-              <View style={styles.moodCardInfo}>
-                <Text style={[styles.moodName, { color: moodDef.color }]}>
-                  {moodDef.label}
-                </Text>
-                <Text style={styles.moodScore}>
-                  Intensity: {todayMood.moodScore}/10
+            <View style={styles.ctaRow}>
+              <View style={styles.ctaLeft}>
+                <Text style={styles.ctaTitle}>How are you feeling?</Text>
+                <Text style={styles.ctaSubtitle}>
+                  Log your mood to get personalized insights
                 </Text>
               </View>
-            </View>
-          </GlassCard>
-        ) : (
-          <GlassCard
-            onPress={() => router.push('/mood-entry')}
-            glowColor={Colors.accent.teal}
-            intensity="strong"
-            padding="lg"
-            style={styles.moodCard}
-          >
-            <Text style={styles.checkinTitle}>How are you feeling?</Text>
-            <Text style={styles.checkinSubtitle}>
-              Tap to log your mood for today
-            </Text>
-            <View style={styles.checkinEmojis}>
-              {['😊', '😌', '😢', '😤', '🔥'].map((emoji) => (
-                <Text key={emoji} style={styles.checkinEmoji}>
-                  {emoji}
-                </Text>
-              ))}
+              <View style={styles.ctaIcon}>
+                <Feather name="plus" size={24} color={Colors.accent.olive} />
+              </View>
             </View>
           </GlassCard>
         )}
 
-        {/* ─── Quick Actions ─── */}
-        <View style={styles.quickActions}>
-          <AnimatedPressable
-            style={styles.quickAction}
-            onPress={() => router.push('/mood-entry')}
-          >
-            <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(255, 214, 10, 0.1)' }]}>
-              <Feather name="smile" size={20} color={Colors.accent.primary} />
-            </View>
-            <Text style={styles.quickActionText}>Check-in</Text>
-          </AnimatedPressable>
-
-          <AnimatedPressable
-            style={styles.quickAction}
-            onPress={() => router.push('/journal-editor')}
-          >
-            <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(25, 199, 184, 0.1)' }]}>
-              <Feather name="edit-3" size={20} color={Colors.accent.teal} />
-            </View>
-            <Text style={styles.quickActionText}>Journal</Text>
-          </AnimatedPressable>
-
-          <AnimatedPressable
-            style={styles.quickAction}
-            onPress={() => router.push('/sound-player')}
-          >
-            <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(124, 92, 252, 0.1)' }]}>
-              <Feather name="headphones" size={20} color="#7C5CFC" />
-            </View>
-            <Text style={styles.quickActionText}>Sounds</Text>
-          </AnimatedPressable>
+        {/* Mental Health Metrics */}
+        <Text style={styles.sectionTitle}>Mental Health Metrics</Text>
+        <View style={styles.metricsRow}>
+          <MetricCard
+            variant="green"
+            icon="heart"
+            label="Mood Score"
+            value={moodScore > 0 ? `${moodScore}` : '—'}
+            subtitle={moodScore >= 70 ? 'Healthy' : moodScore >= 40 ? 'Mixed' : moodScore > 0 ? 'Needs care' : 'No data yet'}
+          />
+          <View style={{ width: Spacing.md }} />
+          <MetricCard
+            variant="orange"
+            icon="activity"
+            label="Mood"
+            value={currentMood ? currentMood.emoji : '—'}
+            subtitle={currentMood ? currentMood.label : 'Not logged'}
+          />
         </View>
 
-        {/* ─── Streak Card ─── */}
-        <GlassCard intensity="subtle" padding="md" style={styles.streakCard}>
-          <View style={styles.streakRow}>
-            <Text style={styles.streakFire}>🔥</Text>
-            <View style={styles.streakInfo}>
-              <Text style={styles.streakCount}>{moodStreak} day streak</Text>
-              <Text style={styles.streakSubtext}>
-                {moodStreak === 0
-                  ? 'Start your streak today!'
-                  : 'Keep it going!'}
-              </Text>
-            </View>
-          </View>
-        </GlassCard>
+        {/* Streak Tracker */}
+        <MetricCard
+          variant="brown"
+          icon="zap"
+          label="Streak"
+          value={`${streak}`}
+          subtitle={streak === 1 ? 'day' : 'days in a row'}
+          style={styles.trackerCard}
+        />
 
-        {/* ─── Suggested Action ─── */}
-        <GlassCard intensity="subtle" padding="md" style={styles.suggestionCard}>
-          <View style={styles.suggestionRow}>
-            <View style={styles.suggestionIconBg}>
-              <Feather name="wind" size={20} color={Colors.accent.teal} />
-            </View>
-            <View style={styles.suggestionInfo}>
-              <Text style={styles.suggestionTitle}>Try a breathing exercise</Text>
-              <Text style={styles.suggestionSubtitle}>
-                A 4-7-8 pattern can help calm your mind
-              </Text>
-            </View>
-          </View>
-          <Button
-            title="Try it"
-            variant="teal"
-            size="sm"
-            onPress={() => router.push('/(tabs)/activities')}
-            style={styles.suggestionButton}
-          />
-        </GlassCard>
+        {/* Mood History */}
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Mood History</Text>
+          <Pressable onPress={() => router.push('/(tabs)/insights')}>
+            <Feather name="more-horizontal" size={20} color={Colors.text.secondary} />
+          </Pressable>
+        </View>
+        {weeklyMoods.length > 0 ? (
+          <GlassCard intensity="medium" padding="lg" style={styles.moodHistoryCard}>
+            <WeeklyMoodRow
+              days={weeklyMoods.map((d) => ({
+                day: d.day,
+                expression: d.expression,
+                faceColor: d.faceColor,
+              }))}
+            />
+          </GlassCard>
+        ) : (
+          <GlassCard intensity="subtle" padding="lg" style={styles.moodHistoryCard}>
+            <Text style={styles.emptyText}>
+              Complete your first mood check-in to see your weekly history
+            </Text>
+          </GlassCard>
+        )}
 
-        <View style={{ height: 100 }} />
+        {/* Recommendation */}
+        {suggestion && (
+          <>
+            <Text style={styles.sectionTitle}>Recommendation</Text>
+            <GlassCard
+              intensity="medium"
+              padding="lg"
+              onPress={() => {
+                if (suggestion.route) router.push(suggestion.route as any);
+              }}
+            >
+              <View style={styles.recRow}>
+                <View style={[styles.recIconBg, { backgroundColor: suggestion.color + '25' }]}>
+                  <Feather
+                    name={suggestion.icon as any}
+                    size={22}
+                    color={suggestion.color}
+                  />
+                </View>
+                <View style={styles.recContent}>
+                  <Text style={styles.recTitle}>{suggestion.title}</Text>
+                  <Text style={styles.recSubtitle}>{suggestion.subtitle}</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={Colors.text.tertiary} />
+              </View>
+            </GlassCard>
+          </>
+        )}
       </ScrollView>
     </GradientBackground>
   );
@@ -184,11 +251,19 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: {
-    paddingHorizontal: SCREEN_PADDING,
-    paddingBottom: Spacing.section,
+    paddingHorizontal: Spacing.xl,
   },
-
-  // Greeting
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  dateText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+  },
   greetingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -198,153 +273,139 @@ const styles = StyleSheet.create({
   greetingText: { flex: 1 },
   greeting: {
     fontFamily: Fonts.heading,
-    fontSize: FontSizes.h2,
-    color: Colors.text.primary,
-    marginBottom: Spacing.xs,
-  },
-  date: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.bodySmall,
-    color: 'rgba(255,255,255,0.4)',
-  },
-  profileButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 214, 10, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 214, 10, 0.3)',
-  },
-  profileInitial: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h3,
-    color: Colors.accent.primary,
-  },
-
-  // Mood Card
-  moodCard: { marginBottom: Spacing.xl },
-  moodCardLabel: {
-    fontFamily: Fonts.bodyMedium,
-    fontSize: FontSizes.caption,
-    color: 'rgba(255,255,255,0.4)',
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    marginBottom: Spacing.md,
-  },
-  moodCardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  moodEmoji: { fontSize: 48, marginRight: Spacing.lg },
-  moodCardInfo: { flex: 1 },
-  moodName: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h2,
-    marginBottom: Spacing.xs,
-  },
-  moodScore: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.bodySmall,
-    color: 'rgba(255,255,255,0.4)',
-  },
-
-  // Check-in CTA
-  checkinTitle: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h2,
+    fontSize: FontSizes.h1,
     color: Colors.text.primary,
     marginBottom: Spacing.sm,
   },
-  checkinSubtitle: {
+  badges: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(168, 181, 114, 0.12)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+  },
+  badgeMood: {
+    backgroundColor: 'rgba(212, 168, 67, 0.12)',
+  },
+  badgeText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.primary,
+  },
+  badgeLabel: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+  },
+  moodDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.accent.olive,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.onAccent,
+  },
+
+  // CTA
+  ctaCard: {
+    marginBottom: Spacing.xxl,
+    borderColor: 'rgba(168, 181, 114, 0.2)',
+  },
+  ctaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ctaLeft: { flex: 1 },
+  ctaTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.primary,
+    marginBottom: 4,
+  },
+  ctaSubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: 'rgba(255,255,255,0.4)',
+    color: Colors.text.secondary,
+  },
+  ctaIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(168, 181, 114, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: Spacing.lg,
+  },
+
+  // Sections
+  sectionTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.primary,
     marginBottom: Spacing.lg,
   },
-  checkinEmojis: {
+  sectionRow: {
     flexDirection: 'row',
-    gap: Spacing.lg,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
   },
-  checkinEmoji: { fontSize: 32 },
-
-  // Quick Actions
-  quickActions: {
+  metricsRow: {
     flexDirection: 'row',
-    gap: Spacing.md,
-    marginBottom: Spacing.xl,
-  },
-  quickAction: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderRadius: 20,
-    paddingVertical: Spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  quickActionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.sm,
-  },
-  quickActionText: {
-    fontFamily: Fonts.bodyMedium,
-    fontSize: FontSizes.caption,
-    color: 'rgba(255,255,255,0.5)',
-  },
-
-  // Streak
-  streakCard: { marginBottom: Spacing.xl },
-  streakRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  streakFire: { fontSize: 36, marginRight: Spacing.lg },
-  streakInfo: { flex: 1 },
-  streakCount: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h3,
-    color: Colors.text.primary,
-    marginBottom: Spacing.xs,
-  },
-  streakSubtext: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.bodySmall,
-    color: 'rgba(255,255,255,0.4)',
-  },
-
-  // Suggestion
-  suggestionCard: { marginBottom: Spacing.xl },
-  suggestionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginBottom: Spacing.md,
   },
-  suggestionIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: 'rgba(25, 199, 184, 0.1)',
+  trackerCard: {
+    marginBottom: Spacing.xxl,
+  },
+  moodHistoryCard: {
+    marginBottom: Spacing.xxl,
+  },
+  emptyText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+  },
+
+  // Recommendation
+  recRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recIconBg: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.md,
+    marginRight: Spacing.lg,
   },
-  suggestionInfo: { flex: 1 },
-  suggestionTitle: {
+  recContent: { flex: 1 },
+  recTitle: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
     color: Colors.text.primary,
-    marginBottom: Spacing.xs,
+    marginBottom: 2,
   },
-  suggestionSubtitle: {
+  recSubtitle: {
     fontFamily: Fonts.body,
-    fontSize: FontSizes.caption,
-    color: 'rgba(255,255,255,0.4)',
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
   },
-  suggestionButton: { alignSelf: 'flex-start' },
 });

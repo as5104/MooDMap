@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.text.tertiary,
   },
   dotActive: {
-    backgroundColor: Colors.accent.primary,
+    backgroundColor: Colors.accent.olive,
     width: 24,
   },
   ctaButton: {

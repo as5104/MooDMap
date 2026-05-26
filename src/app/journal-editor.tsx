@@ -28,7 +28,7 @@ export default function JournalEditorScreen() {
         </View>
 
         <View style={styles.center}>
-          <Feather name="edit-3" size={48} color={Colors.accent.teal} />
+          <Feather name="edit-3" size={48} color={Colors.accent.olive} />
           <Text style={styles.placeholder}>Journal editor coming in Phase 4...</Text>
         </View>
       </View>

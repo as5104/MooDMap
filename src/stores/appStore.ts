@@ -1,11 +1,12 @@
 /**
  * MoodMap — Zustand App Store
- * Global state management for auth, mood, and app state
+ * Global state: auth, mood data, streaks, XP
  */
 
 import { create } from 'zustand';
 import type { Session, User } from '@supabase/supabase-js';
 import type { MoodType } from '@/constants/moods';
+import type { DayMoodData, MoodEntryRow } from '@/services/moodService';
 
 interface TodayMood {
   id: string;
@@ -35,6 +36,14 @@ interface AppState {
   todayMood: TodayMood | null;
   setTodayMood: (mood: TodayMood | null) => void;
 
+  // ─── Weekly Moods (cached) ───
+  weeklyMoods: DayMoodData[];
+  setWeeklyMoods: (moods: DayMoodData[]) => void;
+
+  // ─── Mood Score (cached) ───
+  moodScore: number;
+  setMoodScore: (score: number) => void;
+
   // ─── Streaks ───
   moodStreak: number;
   journalStreak: number;
@@ -48,6 +57,10 @@ interface AppState {
   // ─── App State ───
   isAppReady: boolean;
   setAppReady: (ready: boolean) => void;
+
+  // ─── Data Refresh Flag ───
+  dataVersion: number;
+  refreshData: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -67,6 +80,14 @@ export const useAppStore = create<AppState>((set) => ({
   todayMood: null,
   setTodayMood: (todayMood) => set({ todayMood }),
 
+  // Weekly Moods
+  weeklyMoods: [],
+  setWeeklyMoods: (weeklyMoods) => set({ weeklyMoods }),
+
+  // Mood Score
+  moodScore: 0,
+  setMoodScore: (moodScore) => set({ moodScore }),
+
   // Streaks
   moodStreak: 0,
   journalStreak: 0,
@@ -80,4 +101,8 @@ export const useAppStore = create<AppState>((set) => ({
   // App State
   isAppReady: false,
   setAppReady: (isAppReady) => set({ isAppReady }),
+
+  // Data refresh — increment to trigger re-fetches
+  dataVersion: 0,
+  refreshData: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
 }));

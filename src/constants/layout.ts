@@ -1,6 +1,6 @@
 /**
- * MoodMap Layout System
- * Spacing, border radius, and shadow presets
+ * MoodMap Layout System — Freud-Inspired
+ * Spacing, radius, shadows, and tab bar dimensions
  */
 
 export const Spacing = {
@@ -22,32 +22,33 @@ export const Radius = {
   lg: 16,
   xl: 20,
   xxl: 24,
-  card: 24,
+  card: 20,
   button: 16,
   chip: 20,
-  input: 16,
+  input: 14,
+  pill: 9999,
   full: 9999,
 } as const;
 
 export const Shadows = {
   sm: {
-    shadowColor: '#000',
+    shadowColor: '#0D0A07',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 2,
   },
   md: {
-    shadowColor: '#000',
+    shadowColor: '#0D0A07',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
   },
   lg: {
-    shadowColor: '#000',
+    shadowColor: '#0D0A07',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.3,
     shadowRadius: 16,
     elevation: 8,
   },
@@ -63,8 +64,11 @@ export const Shadows = {
 /** Standard screen horizontal padding */
 export const SCREEN_PADDING = Spacing.xl;
 
-/** Bottom tab bar height */
-export const TAB_BAR_HEIGHT = 70;
+/** Floating tab bar */
+export const TAB_BAR_HEIGHT = 64;
+export const TAB_BAR_MARGIN = 16;
+export const TAB_BAR_RADIUS = 28;
+export const FAB_SIZE = 56;
 
 /** Animation durations in ms */
 export const Durations = {

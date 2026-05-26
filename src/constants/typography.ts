@@ -1,15 +1,15 @@
 /**
- * MoodMap Typography System
- * Uses Inter (body) + Outfit (headings) from Google Fonts
+ * MoodMap Typography System — Poppins + Sora
+ * Sora for headings (geometric, modern) + Poppins for body (clean, rounded)
  */
 
 export const Fonts = {
-  heading: 'Outfit_700Bold',
-  subheading: 'Outfit_600SemiBold',
-  body: 'Inter_400Regular',
-  bodyMedium: 'Inter_500Medium',
-  bodySemiBold: 'Inter_600SemiBold',
-  bodyBold: 'Inter_700Bold',
+  heading: 'Sora_700Bold',
+  subheading: 'Sora_600SemiBold',
+  body: 'Poppins_400Regular',
+  bodyMedium: 'Poppins_500Medium',
+  bodySemiBold: 'Poppins_600SemiBold',
+  bodyBold: 'Poppins_700Bold',
 } as const;
 
 export const FontSizes = {
@@ -17,9 +17,9 @@ export const FontSizes = {
   h1: 28,
   h2: 22,
   h3: 18,
-  body: 16,
-  bodySmall: 14,
-  caption: 12,
+  body: 15,
+  bodySmall: 13,
+  caption: 11,
   tiny: 10,
 } as const;
 
@@ -30,7 +30,7 @@ export const LineHeights = {
 } as const;
 
 /**
- * Pre-built text style presets for common use cases
+ * Pre-built text style presets
  */
 export const TextStyles = {
   hero: {

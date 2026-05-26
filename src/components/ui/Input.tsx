@@ -1,6 +1,6 @@
 /**
- * MoodMap — Input Component
- * Glassmorphic text input — uses ref-based focus tracking to avoid re-render cursor jumps
+ * MoodMap — Input (Freud-Inspired)
+ * Warm earthy input with olive focus border
  */
 
 import React, { useCallback, useRef } from 'react';
@@ -35,7 +35,6 @@ export const Input: React.FC<InputProps> = ({
   onBlur,
   ...props
 }) => {
-  // Use Animated.Value instead of useState to avoid re-render on focus/blur
   const focusAnim = useRef(new Animated.Value(0)).current;
 
   const handleFocus = useCallback(
@@ -64,12 +63,12 @@ export const Input: React.FC<InputProps> = ({
 
   const borderColor = focusAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(255, 255, 255, 0.08)', 'rgba(25, 199, 184, 0.4)'],
+    outputRange: ['rgba(240, 235, 227, 0.08)', 'rgba(168, 181, 114, 0.5)'],
   });
 
   const bgColor = focusAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.07)'],
+    outputRange: ['rgba(240, 235, 227, 0.04)', 'rgba(240, 235, 227, 0.06)'],
   });
 
   return (
@@ -86,14 +85,14 @@ export const Input: React.FC<InputProps> = ({
           <Feather
             name={icon}
             size={18}
-            color="rgba(255,255,255,0.3)"
+            color="rgba(240, 235, 227, 0.3)"
             style={styles.icon}
           />
         )}
         <TextInput
           style={[styles.input, icon ? { paddingLeft: 0 } : undefined, style]}
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          selectionColor={Colors.accent.teal}
+          placeholderTextColor="rgba(240, 235, 227, 0.25)"
+          selectionColor={Colors.accent.olive}
           onFocus={handleFocus}
           onBlur={handleBlur}
           {...props}
@@ -111,7 +110,7 @@ const styles = StyleSheet.create({
   label: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.bodySmall,
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(240, 235, 227, 0.5)',
     marginBottom: Spacing.sm,
     letterSpacing: 0.3,
   },
@@ -123,7 +122,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   inputError: {
-    borderColor: 'rgba(255, 107, 107, 0.5)',
+    borderColor: 'rgba(196, 92, 74, 0.5)',
   },
   icon: {
     marginRight: Spacing.md,

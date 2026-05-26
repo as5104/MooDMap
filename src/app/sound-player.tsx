@@ -25,7 +25,7 @@ export default function SoundPlayerScreen() {
 
         <View style={styles.center}>
           <View style={styles.iconCircle}>
-            <Feather name="headphones" size={48} color="#00D9FF" />
+            <Feather name="headphones" size={48} color={Colors.accent.olive} />
           </View>
           <Text style={styles.title}>Ambient Sounds</Text>
           <Text style={styles.subtitle}>
@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
   },
   iconCircle: {
     width: 100, height: 100, borderRadius: 50,
-    backgroundColor: 'rgba(0, 217, 255, 0.1)',
+    backgroundColor: 'rgba(168, 181, 114, 0.1)',
     alignItems: 'center', justifyContent: 'center',
     marginBottom: Spacing.xxl,
   },

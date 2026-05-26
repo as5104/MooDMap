@@ -1,242 +1,341 @@
 /**
- * MoodMap — Profile Tab
- * Glassmorphic profile with XP bar and settings
+ * MoodMap — Profile Screen (Real Data)
+ * Avatar, real stats, XP, settings
  */
 
-import React from 'react';
-import { StyleSheet, View, Text, ScrollView, Alert } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  Alert,
+} from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { GradientBackground, GlassCard, Button, AnimatedPressable } from '@/components/ui';
+import { GradientBackground, GlassCard, Button } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
-import { Spacing, SCREEN_PADDING } from '@/constants/layout';
+import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { useAppStore } from '@/stores/appStore';
 import { signOut } from '@/lib/auth';
-import { getLevelForXP, getNextLevel } from '@/constants/badges';
+import { getMoodScore, getMoodStreak, getMoodCount } from '@/services/moodService';
+import { getJournalCount } from '@/services/journalService';
+
+// XP thresholds per level
+const XP_PER_LEVEL = 500;
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const user = useAppStore((s) => s.user);
   const totalXP = useAppStore((s) => s.totalXP);
-
+  const dataVersion = useAppStore((s) => s.dataVersion);
+  const isAppReady = useAppStore((s) => s.isAppReady);
   const displayName = user?.user_metadata?.display_name ?? 'User';
   const email = user?.email ?? '';
-  const currentLevel = getLevelForXP(totalXP);
-  const nextLevel = getNextLevel(currentLevel.level);
-  const xpProgress = nextLevel
-    ? (totalXP - currentLevel.xpRequired) / (nextLevel.xpRequired - currentLevel.xpRequired)
-    : 1;
 
-  const handleSignOut = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            await signOut();
-          },
+  const [journalCount, setJournalCount] = useState(0);
+  const [moodCount, setMoodCount] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [score, setScore] = useState(0);
+
+  const loadData = useCallback(() => {
+    if (!isAppReady) return;
+    try {
+      const userId = user?.id;
+      const jCount = getJournalCount(userId);
+      const mCount = getMoodCount(userId);
+      const streakData = getMoodStreak(userId);
+      const scoreVal = getMoodScore(userId);
+
+      setJournalCount(jCount);
+      setMoodCount(mCount);
+      setStreak(streakData.current);
+      setScore(scoreVal);
+    } catch (e) {
+      console.error('[Profile] Load error:', e);
+    }
+  }, [user?.id, dataVersion, isAppReady]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
+
+  const currentLevel = Math.floor(totalXP / XP_PER_LEVEL) + 1;
+  const xpInLevel = totalXP % XP_PER_LEVEL;
+  const xpProgress = xpInLevel / XP_PER_LEVEL;
+
+  const handleLogout = async () => {
+    Alert.alert('Sign Out', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await signOut();
         },
-      ]
-    );
+      },
+    ]);
   };
 
+  const menuItems = [
+    { icon: 'bell' as const, label: 'Notifications', value: 'On' },
+    { icon: 'shield' as const, label: 'Privacy', value: '' },
+    { icon: 'download' as const, label: 'Export Data', value: '' },
+    { icon: 'moon' as const, label: 'Theme', value: 'Dark' },
+    { icon: 'info' as const, label: 'About', value: 'v1.0' },
+  ];
+
   return (
-    <GradientBackground variant="default">
+    <GradientBackground>
       <ScrollView
-        style={{ flex: 1 }}
+        style={styles.scroll}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + Spacing.lg },
+          {
+            paddingTop: insets.top + Spacing.lg,
+            paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_MARGIN + Spacing.xxxl,
+          },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.pageTitle}>Profile</Text>
+        <Text style={styles.title}>Profile</Text>
 
-        {/* Profile Card */}
+        {/* Avatar Card */}
         <GlassCard intensity="medium" padding="lg" style={styles.profileCard}>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarText}>
-              {displayName.charAt(0).toUpperCase()}
-            </Text>
+          <View style={styles.avatarRow}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {displayName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.profileInfo}>
+              <Text style={styles.name}>{displayName}</Text>
+              <Text style={styles.email}>{email}</Text>
+              <View style={styles.memberBadge}>
+                <Feather name="star" size={12} color={Colors.accent.olive} />
+                <Text style={styles.memberText}>Member</Text>
+              </View>
+            </View>
           </View>
-          <Text style={styles.userName}>{displayName}</Text>
-          <Text style={styles.userEmail}>{email}</Text>
         </GlassCard>
 
-        {/* Level Card */}
-        <GlassCard intensity="subtle" padding="md" style={styles.levelCard}>
-          <View style={styles.levelHeader}>
-            <Text style={styles.levelTitle}>Level {currentLevel.level}</Text>
-            <Text style={styles.levelName}>{currentLevel.title}</Text>
+        {/* Stats Row */}
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>{journalCount}</Text>
+            <Text style={styles.statLabel}>Journals</Text>
           </View>
-          <View style={styles.xpBar}>
-            <LinearGradient
-              colors={['#FFD60A', '#F0C000']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[
-                styles.xpFill,
-                { width: `${Math.min(xpProgress * 100, 100)}%` as any },
-              ]}
-            />
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>{streak}</Text>
+            <Text style={styles.statLabel}>Streak</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>{score || '—'}</Text>
+            <Text style={styles.statLabel}>Score</Text>
+          </View>
+        </View>
+
+        {/* XP Progress */}
+        <GlassCard intensity="medium" padding="lg" style={styles.xpCard}>
+          <View style={styles.xpRow}>
+            <Text style={styles.xpTitle}>Mood Level</Text>
+            <Text style={styles.xpLevel}>Lvl {currentLevel}</Text>
+          </View>
+          <View style={styles.xpBarBg}>
+            <View style={[styles.xpBarFill, { width: `${Math.max(xpProgress * 100, 2)}%` }]} />
           </View>
           <Text style={styles.xpText}>
-            {totalXP} XP{nextLevel ? ` / ${nextLevel.xpRequired} XP` : ' (Max Level!)'}
+            {xpInLevel} / {XP_PER_LEVEL} XP to next level • {moodCount} total entries
           </Text>
         </GlassCard>
 
-        {/* Settings */}
-        <Text style={styles.sectionTitle}>Settings</Text>
-
-        {[
-          { icon: 'bell' as const, label: 'Reminders', color: Colors.accent.primary },
-          { icon: 'moon' as const, label: 'Theme', color: Colors.accent.teal },
-          { icon: 'lock' as const, label: 'App Lock', color: '#7C5CFC' },
-          { icon: 'download' as const, label: 'Export Data', color: Colors.accent.green },
-          { icon: 'info' as const, label: 'About', color: 'rgba(255,255,255,0.4)' },
-        ].map((item) => (
-          <AnimatedPressable key={item.label} style={styles.settingRow}>
-            <View style={[styles.settingIcon, { backgroundColor: item.color + '15' }]}>
-              <Feather name={item.icon} size={18} color={item.color} />
-            </View>
-            <Text style={styles.settingLabel}>{item.label}</Text>
-            <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.2)" />
-          </AnimatedPressable>
-        ))}
+        {/* Menu */}
+        <GlassCard intensity="subtle" padding="none" style={styles.menuCard}>
+          {menuItems.map((item, i) => (
+            <Pressable key={item.label} style={[styles.menuItem, i < menuItems.length - 1 && styles.menuDivider]}>
+              <Feather name={item.icon} size={20} color={Colors.accent.olive} />
+              <Text style={styles.menuLabel}>{item.label}</Text>
+              <Text style={styles.menuValue}>{item.value}</Text>
+              <Feather name="chevron-right" size={16} color={Colors.text.tertiary} />
+            </Pressable>
+          ))}
+        </GlassCard>
 
         {/* Sign Out */}
         <Button
           title="Sign Out"
           variant="ghost"
-          onPress={handleSignOut}
+          size="md"
           fullWidth
-          style={styles.signOutButton}
-          icon={<Feather name="log-out" size={18} color={Colors.error} />}
+          onPress={handleLogout}
+          style={styles.signOutBtn}
         />
-
-        <View style={{ height: 100 }} />
       </ScrollView>
     </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: SCREEN_PADDING,
-  },
-  pageTitle: {
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: Spacing.xl },
+
+  title: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h1,
     color: Colors.text.primary,
     marginBottom: Spacing.xxl,
   },
 
-  // Profile
   profileCard: {
-    alignItems: 'center',
     marginBottom: Spacing.xl,
   },
-  avatarCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: 'rgba(255, 214, 10, 0.1)',
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.accent.olive,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 214, 10, 0.3)',
-    marginBottom: Spacing.md,
+    marginRight: Spacing.lg,
   },
   avatarText: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h1,
-    color: Colors.accent.primary,
+    color: Colors.text.onAccent,
   },
-  userName: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h2,
+  profileInfo: { flex: 1 },
+  name: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.h3,
     color: Colors.text.primary,
-    marginBottom: Spacing.xs,
+    marginBottom: 2,
   },
-  userEmail: {
+  email: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: 'rgba(255,255,255,0.4)',
+    color: Colors.text.secondary,
+    marginBottom: Spacing.sm,
+  },
+  memberBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(168, 181, 114, 0.12)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+    alignSelf: 'flex-start',
+  },
+  memberText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: Colors.accent.olive,
   },
 
-  // Level
-  levelCard: { marginBottom: Spacing.xxl },
-  levelHeader: {
+  statsRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(240, 235, 227, 0.04)',
+    borderRadius: Radius.card,
+    padding: Spacing.xl,
+    marginBottom: Spacing.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(240, 235, 227, 0.06)',
+  },
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h1,
+    color: Colors.text.primary,
+    marginBottom: 2,
+  },
+  statLabel: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.secondary,
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: 'rgba(240, 235, 227, 0.08)',
+  },
+
+  xpCard: {
+    marginBottom: Spacing.xl,
+  },
+  xpRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.md,
   },
-  levelTitle: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h3,
+  xpTitle: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.body,
     color: Colors.text.primary,
   },
-  levelName: {
-    fontFamily: Fonts.bodyMedium,
+  xpLevel: {
+    fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.bodySmall,
-    color: Colors.accent.primary,
+    color: Colors.accent.olive,
   },
-  xpBar: {
-    height: 6,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 3,
-    overflow: 'hidden',
+  xpBarBg: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(240, 235, 227, 0.08)',
     marginBottom: Spacing.sm,
   },
-  xpFill: {
-    height: '100%',
-    borderRadius: 3,
+  xpBarFill: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.accent.olive,
   },
   xpText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: 'rgba(255,255,255,0.4)',
+    color: Colors.text.secondary,
   },
 
-  // Settings
-  sectionTitle: {
-    fontFamily: Fonts.subheading,
-    fontSize: FontSizes.h3,
-    color: Colors.text.primary,
-    marginBottom: Spacing.lg,
+  menuCard: {
+    marginBottom: Spacing.xxl,
   },
-  settingRow: {
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderRadius: 16,
-    padding: Spacing.lg,
-    marginBottom: Spacing.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.md,
   },
-  settingIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
+  menuDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(240, 235, 227, 0.06)',
   },
-  settingLabel: {
-    flex: 1,
+  menuLabel: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.body,
     color: Colors.text.primary,
+    flex: 1,
   },
-  signOutButton: {
-    marginTop: Spacing.xxl,
+  menuValue: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+    marginRight: Spacing.sm,
+  },
+
+  signOutBtn: {
+    marginBottom: Spacing.xxl,
   },
 });

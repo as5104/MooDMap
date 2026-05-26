@@ -1,172 +1,153 @@
 /**
- * MoodMap — Button Component
- * Premium gradient button with glass secondary variants
+ * MoodMap — Button (Freud-Inspired)
+ * Primary: cream/white with dark text. Secondary: transparent outline.
+ * Pill variant for mood CTA.
  */
 
-import React from 'react';
-import { StyleSheet, Text, ActivityIndicator, type ViewStyle } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { AnimatedPressable } from './AnimatedPressable';
+import React, { type ReactNode } from 'react';
+import {
+  StyleSheet,
+  Pressable,
+  Text,
+  View,
+  ActivityIndicator,
+  type ViewStyle,
+} from 'react-native';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Radius, Spacing } from '@/constants/layout';
 
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'olive' | 'pill';
+type ButtonSize = 'sm' | 'md' | 'lg';
+
 interface ButtonProps {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'teal';
-  size?: 'sm' | 'md' | 'lg';
-  disabled?: boolean;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
   loading?: boolean;
-  icon?: React.ReactNode;
-  style?: ViewStyle;
+  disabled?: boolean;
   fullWidth?: boolean;
+  icon?: ReactNode;
+  style?: ViewStyle;
 }
+
+const SIZE_STYLES: Record<ButtonSize, ViewStyle> = {
+  sm: { paddingVertical: 10, paddingHorizontal: 18 },
+  md: { paddingVertical: 14, paddingHorizontal: 24 },
+  lg: { paddingVertical: 17, paddingHorizontal: 32 },
+};
 
 export const Button: React.FC<ButtonProps> = ({
   title,
   onPress,
   variant = 'primary',
   size = 'md',
-  disabled = false,
   loading = false,
+  disabled = false,
+  fullWidth = false,
   icon,
   style,
-  fullWidth = false,
 }) => {
-  const isDisabled = disabled || loading;
-
-  const sizeStyles = {
-    sm: { paddingVertical: Spacing.sm + 2, paddingHorizontal: Spacing.lg, fontSize: FontSizes.bodySmall },
-    md: { paddingVertical: Spacing.md + 4, paddingHorizontal: Spacing.xxl, fontSize: FontSizes.body },
-    lg: { paddingVertical: Spacing.lg + 2, paddingHorizontal: Spacing.xxxl, fontSize: FontSizes.body },
-  };
-
-  const currentSize = sizeStyles[size];
-
-  if (variant === 'primary') {
-    return (
-      <AnimatedPressable
-        onPress={onPress}
-        disabled={isDisabled}
-        style={[fullWidth && styles.fullWidth, style]}
-      >
-        <LinearGradient
-          colors={isDisabled ? ['#3A3A2A', '#2A2A20'] : ['#FFD60A', '#F0C000', '#E0A800']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[
-            styles.base,
-            {
-              paddingVertical: currentSize.paddingVertical,
-              paddingHorizontal: currentSize.paddingHorizontal,
-            },
-            isDisabled && styles.disabled,
-          ]}
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color={Colors.text.onAccent} />
-          ) : (
-            <>
-              {icon && <>{icon}</>}
-              <Text
-                style={[
-                  styles.primaryText,
-                  { fontSize: currentSize.fontSize },
-                  icon ? { marginLeft: Spacing.sm } : undefined,
-                ]}
-              >
-                {title}
-              </Text>
-            </>
-          )}
-        </LinearGradient>
-      </AnimatedPressable>
-    );
-  }
-
-  // Glass-style secondary variants
-  const variantStyles = {
-    secondary: {
-      bg: 'rgba(255, 255, 255, 0.05)',
-      border: 'rgba(255, 255, 255, 0.12)',
-      textColor: Colors.text.primary,
-    },
-    ghost: {
-      bg: 'transparent',
-      border: 'transparent',
-      textColor: Colors.text.secondary,
-    },
-    teal: {
-      bg: 'rgba(25, 199, 184, 0.08)',
-      border: 'rgba(25, 199, 184, 0.25)',
-      textColor: Colors.accent.teal,
-    },
-  };
-
-  const v = variantStyles[variant];
+  const isPrimary = variant === 'primary';
+  const isPill = variant === 'pill';
+  const isOlive = variant === 'olive';
+  const isGhost = variant === 'ghost';
+  const isSecondary = variant === 'secondary';
 
   return (
-    <AnimatedPressable
+    <Pressable
       onPress={onPress}
-      disabled={isDisabled}
-      style={[
+      disabled={disabled || loading}
+      style={({ pressed }) => [
         styles.base,
-        {
-          backgroundColor: v.bg,
-          borderColor: v.border,
-          borderWidth: variant === 'ghost' ? 0 : 1,
-          paddingVertical: currentSize.paddingVertical,
-          paddingHorizontal: currentSize.paddingHorizontal,
-        },
-        isDisabled && styles.disabled,
+        SIZE_STYLES[size],
+        isPrimary && styles.primary,
+        isPill && styles.pill,
+        isOlive && styles.olive,
+        isSecondary && styles.secondary,
+        isGhost && styles.ghost,
         fullWidth && styles.fullWidth,
+        (disabled || loading) && styles.disabled,
+        pressed && styles.pressed,
         style,
       ]}
     >
       {loading ? (
-        <ActivityIndicator size="small" color={v.textColor} />
+        <ActivityIndicator
+          size="small"
+          color={isPrimary || isPill ? Colors.text.onAccent : Colors.text.primary}
+        />
       ) : (
-        <>
-          {icon && <>{icon}</>}
+        <View style={styles.content}>
+          {icon && <View style={styles.icon}>{icon}</View>}
           <Text
             style={[
               styles.text,
-              { color: v.textColor, fontSize: currentSize.fontSize },
-              icon ? { marginLeft: Spacing.sm } : undefined,
+              (isPrimary || isPill) && styles.textDark,
+              isOlive && styles.textDark,
+              isGhost && styles.textGhost,
             ]}
           >
             {title}
           </Text>
-        </>
+        </View>
       )}
-    </AnimatedPressable>
+    </Pressable>
   );
 };
 
 const styles = StyleSheet.create({
   base: {
-    flexDirection: 'row',
+    borderRadius: Radius.button,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: Radius.button,
-    overflow: 'hidden',
   },
-  primaryText: {
-    color: Colors.text.onAccent,
-    fontFamily: Fonts.bodySemiBold,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+  primary: {
+    backgroundColor: Colors.accent.cream,
   },
-  text: {
-    fontFamily: Fonts.bodySemiBold,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+  pill: {
+    backgroundColor: Colors.accent.cream,
+    borderRadius: Radius.pill,
+  },
+  olive: {
+    backgroundColor: Colors.accent.olive,
+  },
+  secondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: 'rgba(240, 235, 227, 0.15)',
+  },
+  ghost: {
+    backgroundColor: 'transparent',
+  },
+  fullWidth: {
+    width: '100%',
   },
   disabled: {
     opacity: 0.5,
   },
-  fullWidth: {
-    width: '100%',
+  pressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  content: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  icon: {
+    marginRight: Spacing.xs,
+  },
+  text: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+  },
+  textDark: {
+    color: Colors.text.onAccent,
+  },
+  textGhost: {
+    color: Colors.error,
   },
 });

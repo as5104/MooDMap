@@ -14,12 +14,12 @@ import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, SCREEN_PADDING } from '@/constants/layout';
 
 const ACTIVITIES = [
-  { key: 'breathing', icon: 'wind' as const, title: 'Breathing', subtitle: '4-7-8 calming pattern', color: '#19C7B8' },
-  { key: 'grounding', icon: 'anchor' as const, title: 'Grounding', subtitle: '5-4-3-2-1 senses', color: '#7C5CFC' },
-  { key: 'gratitude', icon: 'heart' as const, title: 'Gratitude', subtitle: '3 things you\'re grateful for', color: '#FFD60A' },
-  { key: 'pause', icon: 'pause-circle' as const, title: 'Pause Timer', subtitle: 'Take a mindful break', color: '#FF6B6B' },
-  { key: 'sounds', icon: 'headphones' as const, title: 'Sounds', subtitle: 'Soundscapes to relax', color: '#00D9FF' },
-  { key: 'reflection', icon: 'message-circle' as const, title: 'Reflection', subtitle: 'A question to ponder', color: '#6EE7A8' },
+  { key: 'breathing', icon: 'wind' as const, title: 'Breathing', subtitle: '4-7-8 calming pattern', color: '#A8B572' },
+  { key: 'grounding', icon: 'anchor' as const, title: 'Grounding', subtitle: '5-4-3-2-1 senses', color: '#9B7DB8' },
+  { key: 'gratitude', icon: 'heart' as const, title: 'Gratitude', subtitle: '3 things you\'re grateful for', color: '#D4A843' },
+  { key: 'pause', icon: 'pause-circle' as const, title: 'Pause Timer', subtitle: 'Take a mindful break', color: '#C45C4A' },
+  { key: 'sounds', icon: 'headphones' as const, title: 'Sounds', subtitle: 'Soundscapes to relax', color: '#8B7355' },
+  { key: 'reflection', icon: 'message-circle' as const, title: 'Reflection', subtitle: 'A question to ponder', color: '#7D9B5A' },
 ];
 
 export default function ActivitiesScreen() {
@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(240,235,227,0.4)',
     marginBottom: Spacing.xxl,
   },
   grid: {
@@ -87,11 +87,11 @@ const styles = StyleSheet.create({
   },
   activityCard: {
     width: '48%',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: 'rgba(240, 235, 227, 0.04)',
     borderRadius: 20,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(240, 235, 227, 0.06)',
     minHeight: 150,
   },
   activityIcon: {
@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   activitySubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: 'rgba(255,255,255,0.35)',
+    color: 'rgba(240,235,227,0.35)',
     lineHeight: 16,
   },
 });

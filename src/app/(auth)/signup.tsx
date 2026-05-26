@@ -1,6 +1,6 @@
 /**
- * MoodMap — Signup Screen
- * Glassmorphic registration form
+ * MoodMap — Signup Screen (Freud-Inspired)
+ * Warm earthy registration form
  */
 
 import React, { useState } from 'react';
@@ -53,11 +53,9 @@ export default function SignupScreen() {
       setError(result.error ?? 'Signup failed. Please try again.');
       setLoading(false);
     } else if (result.needsConfirmation) {
-      // Email confirmation is ON — show "check email" screen
       setSuccess(true);
       setLoading(false);
     } else {
-      // No confirmation needed — navigate to root for redirect
       router.replace('/');
     }
   };
@@ -200,12 +198,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(240,235,227,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xxl,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(240,235,227,0.08)',
   },
   header: {
     marginBottom: Spacing.xxl,
@@ -219,11 +217,11 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(240,235,227,0.45)',
   },
   errorBanner: {
     marginBottom: Spacing.lg,
-    borderColor: 'rgba(255, 107, 107, 0.2)',
+    borderColor: 'rgba(196, 92, 74, 0.2)',
   },
   errorRow: {
     flexDirection: 'row',
@@ -247,12 +245,12 @@ const styles = StyleSheet.create({
   footerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(240,235,227,0.4)',
   },
   footerLink: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
-    color: Colors.accent.primary,
+    color: Colors.accent.olive,
   },
   // Success
   successContainer: {
@@ -271,12 +269,12 @@ const styles = StyleSheet.create({
   successText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(240,235,227,0.5)',
     textAlign: 'center',
     lineHeight: 24,
   },
   emailHighlight: {
-    color: Colors.accent.teal,
+    color: Colors.accent.olive,
     fontFamily: Fonts.bodySemiBold,
   },
 });

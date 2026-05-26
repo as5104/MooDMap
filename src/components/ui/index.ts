@@ -9,3 +9,8 @@ export { Card } from './Card';
 export { GlassCard } from './GlassCard';
 export { Chip } from './Chip';
 export { Input } from './Input';
+export { MoodFace } from './MoodFace';
+export type { FaceExpression } from './MoodFace';
+export { FloatingTabBar } from './FloatingTabBar';
+export { MetricCard } from './MetricCard';
+export { WeeklyMoodRow } from './WeeklyMoodRow';

@@ -1,6 +1,6 @@
 /**
- * MoodMap — Login Screen
- * Premium glassmorphic login with rich gradient background
+ * MoodMap — Login Screen (Freud-Inspired)
+ * Warm earthy login with cream button and olive accents
  */
 
 import React, { useState } from 'react';
@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { GradientBackground, Button, Input, GlassCard } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
@@ -59,7 +58,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Logo Section — clean and spacious */}
+          {/* Logo Section */}
           <View style={styles.header}>
             <Text style={styles.logo}>🗺️</Text>
             <Text style={styles.appName}>MoodMap</Text>
@@ -111,7 +110,7 @@ export default function LoginScreen() {
                 <Feather
                   name={showPassword ? 'eye-off' : 'eye'}
                   size={18}
-                  color="rgba(255,255,255,0.3)"
+                  color="rgba(240,235,227,0.3)"
                 />
               </Pressable>
             </View>
@@ -139,7 +138,7 @@ export default function LoginScreen() {
             <View style={styles.dividerLine} />
           </View>
 
-          {/* Google — glass button */}
+          {/* Google */}
           <Button
             title="Continue with Google"
             variant="secondary"
@@ -187,14 +186,14 @@ const styles = StyleSheet.create({
   appName: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.hero,
-    color: Colors.accent.primary,
+    color: Colors.accent.olive,
     marginBottom: Spacing.xs,
     letterSpacing: 1,
   },
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(240,235,227,0.45)',
     letterSpacing: 0.3,
   },
 
@@ -212,7 +211,7 @@ const styles = StyleSheet.create({
   // Error
   errorBanner: {
     marginBottom: Spacing.lg,
-    borderColor: 'rgba(255, 107, 107, 0.2)',
+    borderColor: 'rgba(196, 92, 74, 0.2)',
   },
   errorRow: {
     flexDirection: 'row',
@@ -249,7 +248,7 @@ const styles = StyleSheet.create({
   forgotText: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.bodySmall,
-    color: Colors.accent.teal,
+    color: Colors.accent.olive,
   },
 
   // Divider
@@ -261,12 +260,12 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(240,235,227,0.08)',
   },
   dividerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: 'rgba(255,255,255,0.25)',
+    color: 'rgba(240,235,227,0.25)',
     marginHorizontal: Spacing.lg,
   },
 
@@ -279,11 +278,11 @@ const styles = StyleSheet.create({
   footerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(255,255,255,0.4)',
+    color: 'rgba(240,235,227,0.4)',
   },
   footerLink: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
-    color: Colors.accent.primary,
+    color: Colors.accent.olive,
   },
 });
