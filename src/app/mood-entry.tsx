@@ -17,7 +17,7 @@ export default function MoodEntryScreen() {
   const insets = useSafeAreaInsets();
 
   return (
-    <GradientBackground withGlow>
+    <GradientBackground variant="glow">
       <View style={[styles.container, { paddingTop: insets.top + Spacing.lg }]}>
         {/* Close button */}
         <Pressable style={styles.closeButton} onPress={() => router.back()}>

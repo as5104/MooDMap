@@ -1,6 +1,6 @@
 /**
  * MoodMap — Signup Screen
- * Create account with email/password
+ * Glassmorphic registration form
  */
 
 import React, { useState } from 'react';
@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Button, Input } from '@/components/ui';
+import { GradientBackground, Button, Input, GlassCard, AnimatedPressable } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
@@ -59,7 +59,7 @@ export default function SignupScreen() {
 
   if (success) {
     return (
-      <GradientBackground withGlow>
+      <GradientBackground variant="glow">
         <View style={styles.successContainer}>
           <Text style={styles.successEmoji}>✉️</Text>
           <Text style={styles.successTitle}>Check your email</Text>
@@ -79,7 +79,7 @@ export default function SignupScreen() {
   }
 
   return (
-    <GradientBackground>
+    <GradientBackground variant="auth">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flex}
@@ -90,12 +90,12 @@ export default function SignupScreen() {
           showsVerticalScrollIndicator={false}
         >
           {/* Back button */}
-          <Pressable
+          <AnimatedPressable
             style={styles.backButton}
             onPress={() => router.back()}
           >
-            <Feather name="arrow-left" size={24} color={Colors.text.primary} />
-          </Pressable>
+            <Feather name="arrow-left" size={22} color={Colors.text.primary} />
+          </AnimatedPressable>
 
           {/* Header */}
           <View style={styles.header}>
@@ -105,13 +105,15 @@ export default function SignupScreen() {
             </Text>
           </View>
 
-          {/* Form */}
-          <View style={styles.form}>
+          {/* Glass Form */}
+          <GlassCard intensity="medium" padding="lg">
             {error ? (
-              <View style={styles.errorBanner}>
-                <Feather name="alert-circle" size={16} color={Colors.error} />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
+              <GlassCard intensity="subtle" padding="sm" style={styles.errorBanner}>
+                <View style={styles.errorRow}>
+                  <Feather name="alert-circle" size={16} color={Colors.error} />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              </GlassCard>
             ) : null}
 
             <Input
@@ -139,7 +141,7 @@ export default function SignupScreen() {
             <Input
               label="Password"
               icon="lock"
-              placeholder="Create a password (min 6 chars)"
+              placeholder="Min 6 characters"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -164,9 +166,9 @@ export default function SignupScreen() {
               loading={loading}
               fullWidth
               size="lg"
-              style={styles.signupButton}
+              style={{ marginTop: Spacing.sm }}
             />
-          </View>
+          </GlassCard>
 
           {/* Login Link */}
           <View style={styles.footer}>
@@ -193,15 +195,15 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.background.card,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xxl,
     borderWidth: 1,
-    borderColor: Colors.border.subtle,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   header: {
-    marginBottom: Spacing.xxxl,
+    marginBottom: Spacing.xxl,
   },
   title: {
     fontFamily: Fonts.heading,
@@ -212,20 +214,15 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
-  },
-  form: {
-    width: '100%',
+    color: 'rgba(255,255,255,0.45)',
   },
   errorBanner: {
+    marginBottom: Spacing.lg,
+    borderColor: 'rgba(255, 107, 107, 0.2)',
+  },
+  errorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-    borderRadius: 12,
-    padding: Spacing.md,
-    marginBottom: Spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
   },
   errorText: {
     fontFamily: Fonts.body,
@@ -237,9 +234,6 @@ const styles = StyleSheet.create({
   inputSpacing: {
     marginBottom: Spacing.lg,
   },
-  signupButton: {
-    marginTop: Spacing.lg,
-  },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -248,24 +242,21 @@ const styles = StyleSheet.create({
   footerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
   },
   footerLink: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
     color: Colors.accent.primary,
   },
-  // Success state
+  // Success
   successContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.xxl,
   },
-  successEmoji: {
-    fontSize: 64,
-    marginBottom: Spacing.xxl,
-  },
+  successEmoji: { fontSize: 64, marginBottom: Spacing.xxl },
   successTitle: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h1,
@@ -275,7 +266,7 @@ const styles = StyleSheet.create({
   successText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
     lineHeight: 24,
   },

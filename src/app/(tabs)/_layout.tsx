@@ -1,6 +1,6 @@
 /**
  * MoodMap — Tab Layout
- * Bottom navigation with 5 tabs: Home, Journal, Insights, Activities, Profile
+ * Frosted glass bottom tab bar
  */
 
 import React from 'react';
@@ -17,11 +17,11 @@ type TabIconProps = {
 };
 
 const TabIcon: React.FC<TabIconProps> = ({ name, focused }) => (
-  <View style={[styles.iconContainer, focused && styles.iconFocused]}>
+  <View style={styles.iconContainer}>
     <Feather
       name={name}
       size={22}
-      color={focused ? Colors.accent.primary : Colors.text.tertiary}
+      color={focused ? Colors.accent.primary : 'rgba(255,255,255,0.3)'}
     />
     {focused && <View style={styles.activeDot} />}
   </View>
@@ -34,7 +34,7 @@ export default function TabLayout() {
         headerShown: false,
         tabBarStyle: styles.tabBar,
         tabBarActiveTintColor: Colors.accent.primary,
-        tabBarInactiveTintColor: Colors.text.tertiary,
+        tabBarInactiveTintColor: 'rgba(255,255,255,0.3)',
         tabBarLabelStyle: styles.tabLabel,
         tabBarHideOnKeyboard: true,
       }}
@@ -80,9 +80,9 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: Colors.background.card,
+    backgroundColor: 'rgba(0, 8, 20, 0.85)',
     borderTopWidth: 1,
-    borderTopColor: Colors.border.subtle,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
     height: TAB_BAR_HEIGHT,
     paddingBottom: 8,
     paddingTop: 8,
@@ -99,7 +99,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 32,
   },
-  iconFocused: {},
   activeDot: {
     width: 4,
     height: 4,

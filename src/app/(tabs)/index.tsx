@@ -1,6 +1,6 @@
 /**
  * MoodMap — Home Dashboard
- * The main screen users see after login
+ * Clean glassmorphic layout with gradient background
  */
 
 import React from 'react';
@@ -8,7 +8,7 @@ import { StyleSheet, View, Text, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Card, Button, AnimatedPressable } from '@/components/ui';
+import { GradientBackground, GlassCard, Button, AnimatedPressable } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, SCREEN_PADDING } from '@/constants/layout';
@@ -35,7 +35,7 @@ export default function HomeScreen() {
   const moodDef = todayMood ? getMoodByType(todayMood.moodType) : null;
 
   return (
-    <GradientBackground withGlow>
+    <GradientBackground variant="glow">
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[
@@ -62,10 +62,11 @@ export default function HomeScreen() {
           </AnimatedPressable>
         </View>
 
-        {/* ─── Today's Mood Card ─── */}
+        {/* ─── Today's Mood / Check-in CTA ─── */}
         {todayMood && moodDef ? (
-          <Card
+          <GlassCard
             glowColor={moodDef.color}
+            intensity="strong"
             padding="lg"
             style={styles.moodCard}
           >
@@ -81,14 +82,12 @@ export default function HomeScreen() {
                 </Text>
               </View>
             </View>
-            {todayMood.note ? (
-              <Text style={styles.moodNote}>"{todayMood.note}"</Text>
-            ) : null}
-          </Card>
+          </GlassCard>
         ) : (
-          <Card
+          <GlassCard
             onPress={() => router.push('/mood-entry')}
             glowColor={Colors.accent.teal}
+            intensity="strong"
             padding="lg"
             style={styles.moodCard}
           >
@@ -103,7 +102,7 @@ export default function HomeScreen() {
                 </Text>
               ))}
             </View>
-          </Card>
+          </GlassCard>
         )}
 
         {/* ─── Quick Actions ─── */}
@@ -112,7 +111,7 @@ export default function HomeScreen() {
             style={styles.quickAction}
             onPress={() => router.push('/mood-entry')}
           >
-            <View style={[styles.quickActionIcon, { backgroundColor: Colors.accent.primaryMuted }]}>
+            <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(255, 214, 10, 0.1)' }]}>
               <Feather name="smile" size={20} color={Colors.accent.primary} />
             </View>
             <Text style={styles.quickActionText}>Check-in</Text>
@@ -122,7 +121,7 @@ export default function HomeScreen() {
             style={styles.quickAction}
             onPress={() => router.push('/journal-editor')}
           >
-            <View style={[styles.quickActionIcon, { backgroundColor: Colors.accent.tealMuted }]}>
+            <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(25, 199, 184, 0.1)' }]}>
               <Feather name="edit-3" size={20} color={Colors.accent.teal} />
             </View>
             <Text style={styles.quickActionText}>Journal</Text>
@@ -132,7 +131,7 @@ export default function HomeScreen() {
             style={styles.quickAction}
             onPress={() => router.push('/sound-player')}
           >
-            <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(124, 92, 252, 0.15)' }]}>
+            <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(124, 92, 252, 0.1)' }]}>
               <Feather name="headphones" size={20} color="#7C5CFC" />
             </View>
             <Text style={styles.quickActionText}>Sounds</Text>
@@ -140,7 +139,7 @@ export default function HomeScreen() {
         </View>
 
         {/* ─── Streak Card ─── */}
-        <Card padding="md" style={styles.streakCard}>
+        <GlassCard intensity="subtle" padding="md" style={styles.streakCard}>
           <View style={styles.streakRow}>
             <Text style={styles.streakFire}>🔥</Text>
             <View style={styles.streakInfo}>
@@ -152,10 +151,10 @@ export default function HomeScreen() {
               </Text>
             </View>
           </View>
-        </Card>
+        </GlassCard>
 
         {/* ─── Suggested Action ─── */}
-        <Card padding="md" style={styles.suggestionCard}>
+        <GlassCard intensity="subtle" padding="md" style={styles.suggestionCard}>
           <View style={styles.suggestionRow}>
             <View style={styles.suggestionIconBg}>
               <Feather name="wind" size={20} color={Colors.accent.teal} />
@@ -174,9 +173,8 @@ export default function HomeScreen() {
             onPress={() => router.push('/(tabs)/activities')}
             style={styles.suggestionButton}
           />
-        </Card>
+        </GlassCard>
 
-        {/* ─── Bottom spacing ─── */}
         <View style={{ height: 100 }} />
       </ScrollView>
     </GradientBackground>
@@ -207,17 +205,17 @@ const styles = StyleSheet.create({
   date: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
   },
   profileButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.accent.primaryMuted,
+    backgroundColor: 'rgba(255, 214, 10, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.accent.primary,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 214, 10, 0.3)',
   },
   profileInitial: {
     fontFamily: Fonts.heading,
@@ -230,9 +228,9 @@ const styles = StyleSheet.create({
   moodCardLabel: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     marginBottom: Spacing.md,
   },
   moodCardRow: {
@@ -249,14 +247,7 @@ const styles = StyleSheet.create({
   moodScore: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
-  },
-  moodNote: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
-    fontStyle: 'italic',
-    marginTop: Spacing.md,
+    color: 'rgba(255,255,255,0.4)',
   },
 
   // Check-in CTA
@@ -269,7 +260,7 @@ const styles = StyleSheet.create({
   checkinSubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
     marginBottom: Spacing.lg,
   },
   checkinEmojis: {
@@ -287,11 +278,11 @@ const styles = StyleSheet.create({
   quickAction: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: Colors.background.card,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 20,
     paddingVertical: Spacing.lg,
     borderWidth: 1,
-    borderColor: Colors.border.subtle,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   quickActionIcon: {
     width: 44,
@@ -304,7 +295,7 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.5)',
   },
 
   // Streak
@@ -324,7 +315,7 @@ const styles = StyleSheet.create({
   streakSubtext: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
   },
 
   // Suggestion
@@ -338,7 +329,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: Colors.accent.tealMuted,
+    backgroundColor: 'rgba(25, 199, 184, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: Spacing.md,
@@ -353,7 +344,7 @@ const styles = StyleSheet.create({
   suggestionSubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
   },
   suggestionButton: { alignSelf: 'flex-start' },
 });

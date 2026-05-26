@@ -1,13 +1,14 @@
 /**
- * MoodMap — Profile Tab (Placeholder)
- * Will be fully built in Phase 6
+ * MoodMap — Profile Tab
+ * Glassmorphic profile with XP bar and settings
  */
 
 import React from 'react';
 import { StyleSheet, View, Text, ScrollView, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Card, Button, AnimatedPressable } from '@/components/ui';
+import { LinearGradient } from 'expo-linear-gradient';
+import { GradientBackground, GlassCard, Button, AnimatedPressable } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, SCREEN_PADDING } from '@/constants/layout';
@@ -46,7 +47,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <GradientBackground>
+    <GradientBackground variant="default">
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={[
@@ -57,8 +58,8 @@ export default function ProfileScreen() {
       >
         <Text style={styles.pageTitle}>Profile</Text>
 
-        {/* ─── Profile Card ─── */}
-        <Card padding="lg" style={styles.profileCard}>
+        {/* Profile Card */}
+        <GlassCard intensity="medium" padding="lg" style={styles.profileCard}>
           <View style={styles.avatarCircle}>
             <Text style={styles.avatarText}>
               {displayName.charAt(0).toUpperCase()}
@@ -66,28 +67,31 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.userName}>{displayName}</Text>
           <Text style={styles.userEmail}>{email}</Text>
-        </Card>
+        </GlassCard>
 
-        {/* ─── Level Card ─── */}
-        <Card padding="md" style={styles.levelCard}>
+        {/* Level Card */}
+        <GlassCard intensity="subtle" padding="md" style={styles.levelCard}>
           <View style={styles.levelHeader}>
             <Text style={styles.levelTitle}>Level {currentLevel.level}</Text>
             <Text style={styles.levelName}>{currentLevel.title}</Text>
           </View>
           <View style={styles.xpBar}>
-            <View
+            <LinearGradient
+              colors={['#FFD60A', '#F0C000']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
               style={[
                 styles.xpFill,
-                { width: `${Math.min(xpProgress * 100, 100)}%` },
+                { width: `${Math.min(xpProgress * 100, 100)}%` as any },
               ]}
             />
           </View>
           <Text style={styles.xpText}>
             {totalXP} XP{nextLevel ? ` / ${nextLevel.xpRequired} XP` : ' (Max Level!)'}
           </Text>
-        </Card>
+        </GlassCard>
 
-        {/* ─── Settings ─── */}
+        {/* Settings */}
         <Text style={styles.sectionTitle}>Settings</Text>
 
         {[
@@ -95,18 +99,18 @@ export default function ProfileScreen() {
           { icon: 'moon' as const, label: 'Theme', color: Colors.accent.teal },
           { icon: 'lock' as const, label: 'App Lock', color: '#7C5CFC' },
           { icon: 'download' as const, label: 'Export Data', color: Colors.accent.green },
-          { icon: 'info' as const, label: 'About', color: Colors.text.secondary },
+          { icon: 'info' as const, label: 'About', color: 'rgba(255,255,255,0.4)' },
         ].map((item) => (
           <AnimatedPressable key={item.label} style={styles.settingRow}>
-            <View style={[styles.settingIcon, { backgroundColor: item.color + '20' }]}>
+            <View style={[styles.settingIcon, { backgroundColor: item.color + '15' }]}>
               <Feather name={item.icon} size={18} color={item.color} />
             </View>
             <Text style={styles.settingLabel}>{item.label}</Text>
-            <Feather name="chevron-right" size={18} color={Colors.text.tertiary} />
+            <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.2)" />
           </AnimatedPressable>
         ))}
 
-        {/* ─── Sign Out ─── */}
+        {/* Sign Out */}
         <Button
           title="Sign Out"
           variant="ghost"
@@ -142,11 +146,11 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.accent.primaryMuted,
+    backgroundColor: 'rgba(255, 214, 10, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.accent.primary,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 214, 10, 0.3)',
     marginBottom: Spacing.md,
   },
   avatarText: {
@@ -163,7 +167,7 @@ const styles = StyleSheet.create({
   userEmail: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
   },
 
   // Level
@@ -185,21 +189,20 @@ const styles = StyleSheet.create({
     color: Colors.accent.primary,
   },
   xpBar: {
-    height: 8,
-    backgroundColor: Colors.background.elevated,
-    borderRadius: 4,
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 3,
     overflow: 'hidden',
     marginBottom: Spacing.sm,
   },
   xpFill: {
     height: '100%',
-    backgroundColor: Colors.accent.primary,
-    borderRadius: 4,
+    borderRadius: 3,
   },
   xpText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
   },
 
   // Settings
@@ -212,12 +215,12 @@ const styles = StyleSheet.create({
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background.card,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 16,
     padding: Spacing.lg,
     marginBottom: Spacing.sm,
     borderWidth: 1,
-    borderColor: Colors.border.subtle,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   settingIcon: {
     width: 36,

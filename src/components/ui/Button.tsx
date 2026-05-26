@@ -1,6 +1,6 @@
 /**
  * MoodMap — Button Component
- * Primary and secondary button styles with animations
+ * Premium gradient button with glass secondary variants
  */
 
 import React from 'react';
@@ -37,9 +37,9 @@ export const Button: React.FC<ButtonProps> = ({
   const isDisabled = disabled || loading;
 
   const sizeStyles = {
-    sm: { paddingVertical: Spacing.sm, paddingHorizontal: Spacing.lg, fontSize: FontSizes.bodySmall },
-    md: { paddingVertical: Spacing.md + 2, paddingHorizontal: Spacing.xxl, fontSize: FontSizes.body },
-    lg: { paddingVertical: Spacing.lg, paddingHorizontal: Spacing.xxxl, fontSize: FontSizes.body },
+    sm: { paddingVertical: Spacing.sm + 2, paddingHorizontal: Spacing.lg, fontSize: FontSizes.bodySmall },
+    md: { paddingVertical: Spacing.md + 4, paddingHorizontal: Spacing.xxl, fontSize: FontSizes.body },
+    lg: { paddingVertical: Spacing.lg + 2, paddingHorizontal: Spacing.xxxl, fontSize: FontSizes.body },
   };
 
   const currentSize = sizeStyles[size];
@@ -52,7 +52,7 @@ export const Button: React.FC<ButtonProps> = ({
         style={[fullWidth && styles.fullWidth, style]}
       >
         <LinearGradient
-          colors={isDisabled ? ['#5A5A3A', '#4A4A30'] : ['#FFD60A', '#F4C542']}
+          colors={isDisabled ? ['#3A3A2A', '#2A2A20'] : ['#FFD60A', '#F0C000', '#E0A800']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[
@@ -85,11 +85,12 @@ export const Button: React.FC<ButtonProps> = ({
     );
   }
 
+  // Glass-style secondary variants
   const variantStyles = {
     secondary: {
-      bg: 'transparent',
-      border: Colors.accent.teal,
-      textColor: Colors.accent.teal,
+      bg: 'rgba(255, 255, 255, 0.05)',
+      border: 'rgba(255, 255, 255, 0.12)',
+      textColor: Colors.text.primary,
     },
     ghost: {
       bg: 'transparent',
@@ -97,8 +98,8 @@ export const Button: React.FC<ButtonProps> = ({
       textColor: Colors.text.secondary,
     },
     teal: {
-      bg: Colors.accent.tealMuted,
-      border: Colors.accent.teal,
+      bg: 'rgba(25, 199, 184, 0.08)',
+      border: 'rgba(25, 199, 184, 0.25)',
       textColor: Colors.accent.teal,
     },
   };
@@ -114,7 +115,7 @@ export const Button: React.FC<ButtonProps> = ({
         {
           backgroundColor: v.bg,
           borderColor: v.border,
-          borderWidth: variant === 'ghost' ? 0 : 1.5,
+          borderWidth: variant === 'ghost' ? 0 : 1,
           paddingVertical: currentSize.paddingVertical,
           paddingHorizontal: currentSize.paddingHorizontal,
         },
@@ -155,10 +156,12 @@ const styles = StyleSheet.create({
     color: Colors.text.onAccent,
     fontFamily: Fonts.bodySemiBold,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   text: {
     fontFamily: Fonts.bodySemiBold,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   disabled: {
     opacity: 0.5,

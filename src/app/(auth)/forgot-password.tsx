@@ -1,12 +1,13 @@
 /**
  * MoodMap — Forgot Password Screen
+ * Glassmorphic password reset
  */
 
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, Pressable } from 'react-native';
+import { StyleSheet, View, Text } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Button, Input } from '@/components/ui';
+import { GradientBackground, Button, Input, GlassCard, AnimatedPressable } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
@@ -37,7 +38,7 @@ export default function ForgotPasswordScreen() {
 
   if (sent) {
     return (
-      <GradientBackground withGlow>
+      <GradientBackground variant="glow">
         <View style={styles.successContainer}>
           <Text style={styles.successEmoji}>📧</Text>
           <Text style={styles.successTitle}>Email Sent</Text>
@@ -56,42 +57,46 @@ export default function ForgotPasswordScreen() {
   }
 
   return (
-    <GradientBackground>
+    <GradientBackground variant="auth">
       <View style={styles.container}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Feather name="arrow-left" size={24} color={Colors.text.primary} />
-        </Pressable>
+        <AnimatedPressable style={styles.backButton} onPress={() => router.back()}>
+          <Feather name="arrow-left" size={22} color={Colors.text.primary} />
+        </AnimatedPressable>
 
         <Text style={styles.title}>Reset Password</Text>
         <Text style={styles.subtitle}>
           Enter your email and we'll send you a link to reset your password.
         </Text>
 
-        {error ? (
-          <View style={styles.errorBanner}>
-            <Feather name="alert-circle" size={16} color={Colors.error} />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
+        <GlassCard intensity="medium" padding="lg">
+          {error ? (
+            <GlassCard intensity="subtle" padding="sm" style={styles.errorBanner}>
+              <View style={styles.errorRow}>
+                <Feather name="alert-circle" size={16} color={Colors.error} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            </GlassCard>
+          ) : null}
 
-        <Input
-          label="Email"
-          icon="mail"
-          placeholder="Enter your email"
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          containerStyle={styles.inputSpacing}
-        />
+          <Input
+            label="Email"
+            icon="mail"
+            placeholder="Enter your email"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            containerStyle={styles.inputSpacing}
+          />
 
-        <Button
-          title="Send Reset Link"
-          onPress={handleReset}
-          loading={loading}
-          fullWidth
-          size="lg"
-        />
+          <Button
+            title="Send Reset Link"
+            onPress={handleReset}
+            loading={loading}
+            fullWidth
+            size="lg"
+          />
+        </GlassCard>
       </View>
     </GradientBackground>
   );
@@ -107,12 +112,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.background.card,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xxxl,
     borderWidth: 1,
-    borderColor: Colors.border.subtle,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   title: {
     fontFamily: Fonts.heading,
@@ -123,19 +128,17 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.45)',
     marginBottom: Spacing.xxxl,
     lineHeight: 24,
   },
   errorBanner: {
+    marginBottom: Spacing.lg,
+    borderColor: 'rgba(255, 107, 107, 0.2)',
+  },
+  errorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-    borderRadius: 12,
-    padding: Spacing.md,
-    marginBottom: Spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
   },
   errorText: {
     fontFamily: Fonts.body,
@@ -153,10 +156,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.xxl,
   },
-  successEmoji: {
-    fontSize: 64,
-    marginBottom: Spacing.xxl,
-  },
+  successEmoji: { fontSize: 64, marginBottom: Spacing.xxl },
   successTitle: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h1,
@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
   successText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
   },
 });

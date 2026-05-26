@@ -109,7 +109,7 @@ export default function OnboardingScreen() {
   const isLastSlide = currentIndex === SLIDES.length - 1;
 
   return (
-    <GradientBackground withGlow>
+    <GradientBackground variant="glow">
       <View style={styles.container}>
         {/* Skip button */}
         {!isLastSlide && (

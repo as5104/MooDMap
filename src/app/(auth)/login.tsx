@@ -1,6 +1,6 @@
 /**
  * MoodMap — Login Screen
- * Email/password login with premium dark UI
+ * Premium glassmorphic login with rich gradient background
  */
 
 import React, { useState } from 'react';
@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Button, Input } from '@/components/ui';
+import { LinearGradient } from 'expo-linear-gradient';
+import { GradientBackground, Button, Input, GlassCard } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
@@ -41,12 +42,11 @@ export default function LoginScreen() {
     if (!result.success) {
       setError(result.error ?? 'Login failed. Please try again.');
     }
-    // Auth state change listener in _layout will handle navigation
     setLoading(false);
   };
 
   return (
-    <GradientBackground withGlow>
+    <GradientBackground variant="auth">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flex}
@@ -56,7 +56,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Logo & Welcome */}
+          {/* Logo Section — clean and spacious */}
           <View style={styles.header}>
             <Text style={styles.logo}>🗺️</Text>
             <Text style={styles.appName}>MoodMap</Text>
@@ -65,15 +65,17 @@ export default function LoginScreen() {
             </Text>
           </View>
 
-          {/* Login Form */}
-          <View style={styles.form}>
+          {/* Glass Login Card */}
+          <GlassCard intensity="medium" padding="lg" style={styles.formCard}>
             <Text style={styles.formTitle}>Welcome back</Text>
 
             {error ? (
-              <View style={styles.errorBanner}>
-                <Feather name="alert-circle" size={16} color={Colors.error} />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
+              <GlassCard intensity="subtle" padding="sm" style={styles.errorBanner}>
+                <View style={styles.errorRow}>
+                  <Feather name="alert-circle" size={16} color={Colors.error} />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              </GlassCard>
             ) : null}
 
             <Input
@@ -106,7 +108,7 @@ export default function LoginScreen() {
                 <Feather
                   name={showPassword ? 'eye-off' : 'eye'}
                   size={18}
-                  color={Colors.text.tertiary}
+                  color="rgba(255,255,255,0.3)"
                 />
               </Pressable>
             </View>
@@ -124,29 +126,27 @@ export default function LoginScreen() {
               loading={loading}
               fullWidth
               size="lg"
-              style={styles.loginButton}
             />
+          </GlassCard>
 
-            {/* Divider */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            {/* Google Sign-In (placeholder — requires dev build) */}
-            <Button
-              title="Continue with Google"
-              variant="secondary"
-              onPress={() => {
-                // Google OAuth requires a development build
-                setError('Google sign-in requires a development build. Use email for now.');
-              }}
-              fullWidth
-              size="lg"
-              icon={<Text style={{ fontSize: 18 }}>🇬</Text>}
-            />
+          {/* Divider */}
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
           </View>
+
+          {/* Google — glass button */}
+          <Button
+            title="Continue with Google"
+            variant="secondary"
+            onPress={() => {
+              setError('Google sign-in requires a development build.');
+            }}
+            fullWidth
+            size="lg"
+            icon={<Text style={{ fontSize: 18 }}>G</Text>}
+          />
 
           {/* Sign Up Link */}
           <View style={styles.footer}>
@@ -168,12 +168,14 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: Spacing.xxl,
-    paddingTop: 80,
+    paddingTop: 90,
     paddingBottom: Spacing.section,
   },
+
+  // Header
   header: {
     alignItems: 'center',
-    marginBottom: Spacing.section,
+    marginBottom: Spacing.xxxl + 8,
   },
   logo: {
     fontSize: 56,
@@ -184,14 +186,18 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.hero,
     color: Colors.accent.primary,
     marginBottom: Spacing.xs,
+    letterSpacing: 1,
   },
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.45)',
+    letterSpacing: 0.3,
   },
-  form: {
-    width: '100%',
+
+  // Form Card
+  formCard: {
+    marginBottom: Spacing.xxl,
   },
   formTitle: {
     fontFamily: Fonts.subheading,
@@ -199,15 +205,15 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     marginBottom: Spacing.xxl,
   },
+
+  // Error
   errorBanner: {
+    marginBottom: Spacing.lg,
+    borderColor: 'rgba(255, 107, 107, 0.2)',
+  },
+  errorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-    borderRadius: 12,
-    padding: Spacing.md,
-    marginBottom: Spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
   },
   errorText: {
     fontFamily: Fonts.body,
@@ -216,6 +222,8 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.sm,
     flex: 1,
   },
+
+  // Input
   inputSpacing: {
     marginBottom: Spacing.lg,
   },
@@ -228,6 +236,8 @@ const styles = StyleSheet.create({
     top: 38,
     padding: 8,
   },
+
+  // Forgot
   forgotButton: {
     alignSelf: 'flex-end',
     marginBottom: Spacing.xxl,
@@ -238,9 +248,8 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySmall,
     color: Colors.accent.teal,
   },
-  loginButton: {
-    marginBottom: Spacing.xxl,
-  },
+
+  // Divider
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -249,23 +258,25 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: Colors.border.medium,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   dividerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: Colors.text.tertiary,
+    color: 'rgba(255,255,255,0.25)',
     marginHorizontal: Spacing.lg,
   },
+
+  // Footer
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: Spacing.xxl,
+    marginTop: Spacing.xxxl,
   },
   footerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
   },
   footerLink: {
     fontFamily: Fonts.bodySemiBold,

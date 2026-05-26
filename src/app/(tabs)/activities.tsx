@@ -1,6 +1,6 @@
 /**
- * MoodMap — Activities Tab (Placeholder)
- * Will be fully built in Phase 6
+ * MoodMap — Activities Tab
+ * Glass activity cards with gradient background
  */
 
 import React from 'react';
@@ -8,26 +8,25 @@ import { StyleSheet, View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Card } from '@/components/ui';
+import { GradientBackground, GlassCard, AnimatedPressable } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, SCREEN_PADDING } from '@/constants/layout';
-import { AnimatedPressable } from '@/components/ui';
 
 const ACTIVITIES = [
-  { key: 'breathing', icon: 'wind' as const, title: 'Breathing Exercise', subtitle: '4-7-8 calming pattern', color: '#19C7B8' },
-  { key: 'grounding', icon: 'anchor' as const, title: 'Grounding Exercise', subtitle: '5-4-3-2-1 senses technique', color: '#7C5CFC' },
-  { key: 'gratitude', icon: 'heart' as const, title: 'Gratitude Prompt', subtitle: 'Write 3 things you\'re grateful for', color: '#FFD60A' },
+  { key: 'breathing', icon: 'wind' as const, title: 'Breathing', subtitle: '4-7-8 calming pattern', color: '#19C7B8' },
+  { key: 'grounding', icon: 'anchor' as const, title: 'Grounding', subtitle: '5-4-3-2-1 senses', color: '#7C5CFC' },
+  { key: 'gratitude', icon: 'heart' as const, title: 'Gratitude', subtitle: '3 things you\'re grateful for', color: '#FFD60A' },
   { key: 'pause', icon: 'pause-circle' as const, title: 'Pause Timer', subtitle: 'Take a mindful break', color: '#FF6B6B' },
-  { key: 'sounds', icon: 'headphones' as const, title: 'Ambient Sounds', subtitle: 'Curated soundscapes to relax', color: '#00D9FF' },
-  { key: 'reflection', icon: 'message-circle' as const, title: 'Reflection Prompt', subtitle: 'A question to ponder', color: '#6EE7A8' },
+  { key: 'sounds', icon: 'headphones' as const, title: 'Sounds', subtitle: 'Soundscapes to relax', color: '#00D9FF' },
+  { key: 'reflection', icon: 'message-circle' as const, title: 'Reflection', subtitle: 'A question to ponder', color: '#6EE7A8' },
 ];
 
 export default function ActivitiesScreen() {
   const insets = useSafeAreaInsets();
 
   return (
-    <GradientBackground>
+    <GradientBackground variant="default">
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={[
@@ -50,7 +49,7 @@ export default function ActivitiesScreen() {
                 }
               }}
             >
-              <View style={[styles.activityIcon, { backgroundColor: activity.color + '20' }]}>
+              <View style={[styles.activityIcon, { backgroundColor: activity.color + '15' }]}>
                 <Feather name={activity.icon} size={24} color={activity.color} />
               </View>
               <Text style={styles.activityTitle}>{activity.title}</Text>
@@ -78,7 +77,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.4)',
     marginBottom: Spacing.xxl,
   },
   grid: {
@@ -88,12 +87,12 @@ const styles = StyleSheet.create({
   },
   activityCard: {
     width: '48%',
-    backgroundColor: Colors.background.card,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 20,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: Colors.border.subtle,
-    minHeight: 160,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    minHeight: 150,
   },
   activityIcon: {
     width: 48,
@@ -112,7 +111,7 @@ const styles = StyleSheet.create({
   activitySubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.35)',
     lineHeight: 16,
   },
 });

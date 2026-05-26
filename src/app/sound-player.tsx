@@ -17,7 +17,7 @@ export default function SoundPlayerScreen() {
   const insets = useSafeAreaInsets();
 
   return (
-    <GradientBackground withGlow>
+    <GradientBackground variant="glow">
       <View style={[styles.container, { paddingTop: insets.top + Spacing.lg }]}>
         <Pressable style={styles.closeButton} onPress={() => router.back()}>
           <Feather name="x" size={24} color={Colors.text.primary} />

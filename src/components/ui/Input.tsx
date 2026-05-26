@@ -1,6 +1,6 @@
 /**
  * MoodMap — Input Component
- * Styled text input for dark theme
+ * Glassmorphic text input with subtle glow on focus
  */
 
 import React, { useState } from 'react';
@@ -50,13 +50,13 @@ export const Input: React.FC<InputProps> = ({
           <Feather
             name={icon}
             size={18}
-            color={isFocused ? Colors.accent.teal : Colors.text.tertiary}
+            color={isFocused ? Colors.accent.teal : 'rgba(255,255,255,0.3)'}
             style={styles.icon}
           />
         )}
         <TextInput
           style={[styles.input, icon ? { paddingLeft: 0 } : undefined, style]}
-          placeholderTextColor={Colors.text.tertiary}
+          placeholderTextColor="rgba(255,255,255,0.25)"
           selectionColor={Colors.accent.teal}
           onFocus={(e) => {
             setIsFocused(true);
@@ -81,23 +81,29 @@ const styles = StyleSheet.create({
   label: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
+    color: 'rgba(255,255,255,0.5)',
     marginBottom: Spacing.sm,
+    letterSpacing: 0.3,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background.input,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: Radius.input,
-    borderWidth: 1.5,
-    borderColor: Colors.border.subtle,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: Spacing.lg,
   },
   inputFocused: {
-    borderColor: Colors.accent.teal,
+    borderColor: 'rgba(25, 199, 184, 0.4)',
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    shadowColor: '#19C7B8',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
   },
   inputError: {
-    borderColor: Colors.error,
+    borderColor: 'rgba(255, 107, 107, 0.5)',
   },
   icon: {
     marginRight: Spacing.md,
