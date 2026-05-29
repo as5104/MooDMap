@@ -61,6 +61,9 @@ interface AppState {
   // ─── Data Refresh Flag ───
   dataVersion: number;
   refreshData: () => void;
+
+  // ─── Sign-Out Reset ───
+  resetForSignOut: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -105,4 +108,19 @@ export const useAppStore = create<AppState>((set) => ({
   // Data refresh — increment to trigger re-fetches
   dataVersion: 0,
   refreshData: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
+
+  // Reset all user-specific state on sign-out
+  resetForSignOut: () =>
+    set({
+      session: null,
+      user: null,
+      todayMood: null,
+      weeklyMoods: [],
+      moodScore: 0,
+      moodStreak: 0,
+      journalStreak: 0,
+      totalXP: 0,
+      hasCompletedOnboarding: false,
+      dataVersion: 0,
+    }),
 }));

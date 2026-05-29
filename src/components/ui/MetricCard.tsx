@@ -1,5 +1,5 @@
 /**
- * MoodMap — MetricCard Component
+ * MoodMap — MetricCard Component (Premium)
  * Colored rounded card for dashboard metrics (score, mood, tracker)
  */
 
@@ -22,10 +22,10 @@ interface MetricCardProps {
 }
 
 const VARIANT_COLORS: Record<MetricVariant, { bg: string; text: string }> = {
-  green: { bg: '#5A7D5A', text: '#E8F0E8' },
-  orange: { bg: '#D4845A', text: '#FFF0E8' },
-  brown: { bg: '#6B5E50', text: '#F0EBE3' },
-  olive: { bg: '#7D9B5A', text: '#F0F5E8' },
+  green: { bg: '#2D7D46', text: '#E8FFE8' },
+  orange: { bg: '#E87040', text: '#FFF5F0' },
+  brown: { bg: '#2A2A35', text: '#FFFFFF' },
+  olive: { bg: '#3D8B5A', text: '#F0FFF5' },
 };
 
 export const MetricCard: React.FC<MetricCardProps> = ({

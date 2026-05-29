@@ -1,6 +1,5 @@
 /**
  * MoodMap — Onboarding Flow
- * 3 slides: Welcome → Features → Setup → Home
  */
 
 import React, { useState, useRef } from 'react';

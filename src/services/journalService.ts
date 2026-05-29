@@ -5,7 +5,7 @@
 
 import { queryAll, queryFirst, execute } from '@/db/client';
 
-// ─── Types ───
+// Types
 
 export interface JournalEntryInput {
   title?: string;
@@ -33,7 +33,7 @@ export interface JournalDotData {
   sentiment: 'positive' | 'neutral' | 'negative' | 'empty';
 }
 
-// ─── Helpers ───
+// Helpers
 
 function generateId(): string {
   return `journal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -49,7 +49,7 @@ function getDateNDaysAgo(n: number): string {
   return d.toISOString().split('T')[0];
 }
 
-// ─── Service Functions ───
+// Service Functions
 
 /**
  * Save a new journal entry

@@ -1,6 +1,5 @@
 /**
- * MoodMap — Home Dashboard (Real Data)
- * Greeting, metric cards, weekly mood row, recommendations — all from DB
+ * MoodMap — Home Dashboard 
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -285,13 +284,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(168, 181, 114, 0.12)',
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     borderRadius: Radius.pill,
   },
   badgeMood: {
-    backgroundColor: 'rgba(212, 168, 67, 0.12)',
+    backgroundColor: 'rgba(255, 190, 106, 0.12)',
   },
   badgeText: {
     fontFamily: Fonts.bodySemiBold,
@@ -325,7 +324,7 @@ const styles = StyleSheet.create({
   // CTA
   ctaCard: {
     marginBottom: Spacing.xxl,
-    borderColor: 'rgba(168, 181, 114, 0.2)',
+    borderColor: 'rgba(190, 255, 108, 0.2)',
   },
   ctaRow: {
     flexDirection: 'row',
@@ -347,7 +346,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(168, 181, 114, 0.15)',
+    backgroundColor: 'rgba(190, 255, 108, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: Spacing.lg,

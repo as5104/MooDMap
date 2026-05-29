@@ -1,6 +1,6 @@
 /**
  * MoodMap — SQLite Database Client
- * Uses expo-sqlite directly (no Drizzle) for reliable Android support
+ * Uses expo-sqlite directly for reliable Android support
  */
 
 import { Platform } from 'react-native';

@@ -1,6 +1,5 @@
 /**
- * MoodMap — Insights Screen (Real Data)
- * Mood stats, weekly history, bar chart — all from DB
+ * MoodMap — Insights Screen 
  */
 
 import React, { useState, useCallback } from 'react';
@@ -280,7 +279,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(240, 235, 227, 0.05)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -294,7 +293,7 @@ const styles = StyleSheet.create({
   periodRow: {
     flexDirection: 'row',
     marginBottom: Spacing.xxl,
-    backgroundColor: 'rgba(240, 235, 227, 0.04)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: Radius.pill,
     padding: 3,
   },

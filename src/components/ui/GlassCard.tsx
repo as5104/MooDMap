@@ -1,11 +1,13 @@
 /**
- * MoodMap — GlassCard (Freud-Inspired)
- * Warm translucent surface with earthy tint + colored metric variant
+ * MoodMap — GlassCard
  */
 
 import React, { type ReactNode } from 'react';
-import { StyleSheet, View, type ViewStyle, Pressable } from 'react-native';
+import { StyleSheet, View, type ViewStyle, Pressable, Platform } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { Radius, Spacing } from '@/constants/layout';
+import { Colors } from '@/constants/colors';
+import { useBlurTarget } from './GradientBackground';
 
 type Intensity = 'subtle' | 'medium' | 'strong';
 type MetricVariant = 'green' | 'orange' | 'brown' | 'olive';
@@ -17,27 +19,44 @@ interface GlassCardProps {
   style?: ViewStyle;
   glowColor?: string;
   onPress?: () => void;
-  /** Colored metric card variant */
   metric?: MetricVariant;
 }
 
-const INTENSITY_BG: Record<Intensity, string> = {
-  subtle: 'rgba(240, 235, 227, 0.03)',
-  medium: 'rgba(240, 235, 227, 0.05)',
-  strong: 'rgba(240, 235, 227, 0.07)',
+const IOS_BLUR: Record<Intensity, number> = {
+  subtle: 25,
+  medium: 40,
+  strong: 60,
 };
 
-const INTENSITY_BORDER: Record<Intensity, string> = {
-  subtle: 'rgba(240, 235, 227, 0.04)',
-  medium: 'rgba(240, 235, 227, 0.08)',
-  strong: 'rgba(240, 235, 227, 0.10)',
+const ANDROID_BLUR: Record<Intensity, number> = {
+  subtle: 8,
+  medium: 12,
+  strong: 18,
+};
+
+const FROSTED_TINT: Record<Intensity, string> = {
+  subtle: 'rgba(18, 18, 24, 0.55)',
+  medium: 'rgba(18, 18, 24, 0.65)',
+  strong: 'rgba(18, 18, 24, 0.75)',
+};
+
+const ANDROID_FALLBACK: Record<Intensity, string> = {
+  subtle: 'rgba(22, 22, 28, 0.72)',
+  medium: 'rgba(22, 22, 28, 0.80)',
+  strong: 'rgba(22, 22, 28, 0.88)',
+};
+
+const BORDER: Record<Intensity, string> = {
+  subtle: 'rgba(255, 255, 255, 0.08)',
+  medium: 'rgba(255, 255, 255, 0.10)',
+  strong: 'rgba(255, 255, 255, 0.14)',
 };
 
 const METRIC_COLORS: Record<MetricVariant, string> = {
-  green: '#5A7D5A',
-  orange: '#D4845A',
-  brown: '#6B5E50',
-  olive: '#7D9B5A',
+  green: Colors.metric.green,
+  orange: Colors.metric.orange,
+  brown: Colors.metric.brown,
+  olive: Colors.metric.olive,
 };
 
 const PADDING_MAP = {
@@ -56,38 +75,99 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   onPress,
   metric,
 }) => {
-  const cardStyle: ViewStyle[] = [
+  const blurCtx = useBlurTarget();
+  const isMetric = !!metric;
+
+  // Metric card: solid color, no blur
+  if (isMetric) {
+    const metricStyle: ViewStyle[] = [
+      styles.card,
+      {
+        backgroundColor: METRIC_COLORS[metric],
+        borderColor: 'transparent',
+        padding: PADDING_MAP[padding],
+      },
+      style ?? {},
+    ];
+    if (onPress) {
+      return (
+        <Pressable onPress={onPress} style={({ pressed }) => [...metricStyle, pressed && styles.pressed]}>
+          {children}
+        </Pressable>
+      );
+    }
+    return <View style={metricStyle}>{children}</View>;
+  }
+
+  // Frosted glass card
+  const outerStyle: ViewStyle[] = [
     styles.card,
-    {
-      backgroundColor: metric ? METRIC_COLORS[metric] : INTENSITY_BG[intensity],
-      borderColor: metric ? 'transparent' : INTENSITY_BORDER[intensity],
-      padding: PADDING_MAP[padding],
-    },
-    glowColor ? {
-      shadowColor: glowColor,
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.15,
-      shadowRadius: 16,
-      elevation: 4,
-    } : {},
+    { borderColor: BORDER[intensity] },
+    glowColor
+      ? {
+          borderColor: `${glowColor}40`,
+          shadowColor: glowColor,
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.2,
+          shadowRadius: 16,
+          elevation: 4,
+        }
+      : {},
     style ?? {},
   ];
 
+  const canUseAndroidBlur = Platform.OS === 'android' && blurCtx?.ready;
+
+  const renderBlurLayer = () => {
+    if (Platform.OS === 'ios') {
+      return (
+        <BlurView
+          intensity={IOS_BLUR[intensity]}
+          tint="dark"
+          style={StyleSheet.absoluteFill}
+        />
+      );
+    }
+
+    if (canUseAndroidBlur) {
+      return (
+        <BlurView
+          intensity={ANDROID_BLUR[intensity]}
+          tint="dark"
+          blurMethod="dimezisBlurView"
+          blurReductionFactor={8}
+          blurTarget={blurCtx!.ref}
+          style={StyleSheet.absoluteFill}
+        />
+      );
+    }
+
+    // Fallback: solid frosted bg
+    return (
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: ANDROID_FALLBACK[intensity] }]} />
+    );
+  };
+
+  const cardContent = (
+    <>
+      {/* Layer 1: Blur */}
+      {renderBlurLayer()}
+      {/* Layer 2: Dark frosted tint */}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: FROSTED_TINT[intensity] }]} />
+      {/* Layer 3: Content */}
+      <View style={{ padding: PADDING_MAP[padding] }}>{children}</View>
+    </>
+  );
+
   if (onPress) {
     return (
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [
-          ...cardStyle,
-          pressed && styles.pressed,
-        ]}
-      >
-        {children}
+      <Pressable onPress={onPress} style={({ pressed }) => [...outerStyle, pressed && styles.pressed]}>
+        {cardContent}
       </Pressable>
     );
   }
 
-  return <View style={cardStyle}>{children}</View>;
+  return <View style={outerStyle}>{cardContent}</View>;
 };
 
 const styles = StyleSheet.create({

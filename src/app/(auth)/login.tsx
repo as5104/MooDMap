@@ -1,6 +1,5 @@
 /**
- * MoodMap — Login Screen (Freud-Inspired)
- * Warm earthy login with cream button and olive accents
+ * MoodMap — Login Screen 
  */
 
 import React, { useState } from 'react';
@@ -110,7 +109,7 @@ export default function LoginScreen() {
                 <Feather
                   name={showPassword ? 'eye-off' : 'eye'}
                   size={18}
-                  color="rgba(240,235,227,0.3)"
+                  color="rgba(255,255,255,0.3)"
                 />
               </Pressable>
             </View>
@@ -193,7 +192,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(240,235,227,0.45)',
+    color: 'rgba(255,255,255,0.45)',
     letterSpacing: 0.3,
   },
 
@@ -211,7 +210,7 @@ const styles = StyleSheet.create({
   // Error
   errorBanner: {
     marginBottom: Spacing.lg,
-    borderColor: 'rgba(196, 92, 74, 0.2)',
+    borderColor: 'rgba(255, 107, 107, 0.2)',
   },
   errorRow: {
     flexDirection: 'row',
@@ -260,12 +259,12 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(240,235,227,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   dividerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
-    color: 'rgba(240,235,227,0.25)',
+    color: 'rgba(255,255,255,0.25)',
     marginHorizontal: Spacing.lg,
   },
 
@@ -278,7 +277,7 @@ const styles = StyleSheet.create({
   footerText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(240,235,227,0.4)',
+    color: 'rgba(255,255,255,0.4)',
   },
   footerLink: {
     fontFamily: Fonts.bodySemiBold,

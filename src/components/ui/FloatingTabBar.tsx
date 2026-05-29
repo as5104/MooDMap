@@ -1,12 +1,12 @@
 /**
- * MoodMap — Floating Tab Bar with Center FAB
- * Pill-shaped bar with glowing green "+" button, matching Freud reference
+ * MoodMap — Floating Tab Bar
  */
 
 import React from 'react';
-import { StyleSheet, View, Pressable } from 'react-native';
+import { StyleSheet, View, Pressable, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { Colors } from '@/constants/colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_MARGIN, TAB_BAR_RADIUS, FAB_SIZE, Spacing } from '@/constants/layout';
 
@@ -30,15 +30,14 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
   onFabPress,
 }) => {
   const insets = useSafeAreaInsets();
+
   const routes = state.routes.filter(
     (r: any) => TAB_ICONS[r.name] !== undefined
   );
 
-  // Split routes into left (first 2) and right (last 2) for FAB in center
   const leftRoutes = routes.slice(0, 2);
   const rightRoutes = routes.slice(2);
 
-  // Compute the real active index within filtered routes
   const activeRoute = state.routes[state.index];
   const activeFilteredIndex = routes.findIndex(
     (r: any) => r.key === activeRoute.key
@@ -70,20 +69,34 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
         <Feather
           name={iconName}
           size={22}
-          color={isFocused ? Colors.accent.olive : 'rgba(240, 235, 227, 0.3)'}
+          color={isFocused ? Colors.accent.primary : 'rgba(255, 255, 255, 0.30)'}
         />
         {isFocused && <View style={styles.activeDot} />}
       </Pressable>
     );
   };
 
+  const renderBarBackground = () => {
+    if (Platform.OS === 'ios') {
+      return (
+        <>
+          <BlurView
+            intensity={60}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={styles.barTint} />
+        </>
+      );
+    }
+
+    return <View style={styles.barSolid} />;
+  };
+
   return (
     <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-      <View style={styles.bar}>
-        {/* Left tabs */}
-        {leftRoutes.map((route: any, i: number) => renderTab(route, i))}
-
-        {/* Center FAB */}
+      {/* FAB rendered OUTSIDE the bar so it's not clipped */}
+      <View style={styles.fabWrapper}>
         <Pressable
           style={({ pressed }) => [
             styles.fab,
@@ -93,9 +106,17 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
         >
           <Feather name="plus" size={26} color={Colors.text.onAccent} />
         </Pressable>
+      </View>
 
-        {/* Right tabs */}
-        {rightRoutes.map((route: any, i: number) => renderTab(route, i + leftRoutes.length))}
+      {/* Frosted glass bar */}
+      <View style={styles.bar}>
+        {renderBarBackground()}
+
+        <View style={styles.tabContent}>
+          {leftRoutes.map((route: any, i: number) => renderTab(route, i))}
+          <View style={styles.fabSpacer} />
+          {rightRoutes.map((route: any, i: number) => renderTab(route, i + leftRoutes.length))}
+        </View>
       </View>
     </View>
   );
@@ -111,22 +132,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: TAB_BAR_MARGIN,
   },
   bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    backgroundColor: Colors.background.card,
     borderRadius: TAB_BAR_RADIUS,
     height: TAB_BAR_HEIGHT,
     width: '100%',
-    paddingHorizontal: Spacing.lg,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(240, 235, 227, 0.06)',
-    // Shadow
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
     elevation: 8,
+  },
+  barTint: {
+    ...(StyleSheet.absoluteFill as object),
+    backgroundColor: 'rgba(20, 20, 25, 0.45)',
+  },
+  barSolid: {
+    ...(StyleSheet.absoluteFill as object),
+    backgroundColor: 'rgba(18, 18, 22, 0.92)',
+  },
+  tabContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingHorizontal: Spacing.lg,
   },
   tab: {
     flex: 1,
@@ -138,23 +169,30 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: Colors.accent.olive,
+    backgroundColor: Colors.accent.primary,
     marginTop: 4,
+  },
+  fabSpacer: {
+    width: FAB_SIZE,
+  },
+  fabWrapper: {
+    position: 'absolute',
+    top: -(FAB_SIZE / 2) + (TAB_BAR_HEIGHT / 2) - 4,
+    alignSelf: 'center',
+    zIndex: 10,
   },
   fab: {
     width: FAB_SIZE,
     height: FAB_SIZE,
     borderRadius: FAB_SIZE / 2,
-    backgroundColor: Colors.accent.olive,
+    backgroundColor: Colors.accent.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -28,
-    // Glow
-    shadowColor: Colors.accent.olive,
+    shadowColor: Colors.accent.primary,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
   },
   fabPressed: {
     transform: [{ scale: 0.92 }],

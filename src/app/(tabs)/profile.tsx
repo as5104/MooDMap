@@ -1,6 +1,5 @@
 /**
- * MoodMap — Profile Screen (Real Data)
- * Avatar, real stats, XP, settings
+ * MoodMap — Profile Screen 
  */
 
 import React, { useState, useCallback } from 'react';
@@ -12,7 +11,7 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { GradientBackground, GlassCard, Button } from '@/components/ui';
@@ -76,7 +75,14 @@ export default function ProfileScreen() {
         text: 'Sign Out',
         style: 'destructive',
         onPress: async () => {
-          await signOut();
+          try {
+            await signOut();
+            // The auth state listener in _layout.tsx will handle navigation,
+            // but we also navigate explicitly for immediate feedback
+            router.replace('/(auth)/login');
+          } catch (e) {
+            console.error('[Profile] Sign out error:', e);
+          }
         },
       },
     ]);
@@ -125,22 +131,24 @@ export default function ProfileScreen() {
         </GlassCard>
 
         {/* Stats Row */}
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{journalCount}</Text>
-            <Text style={styles.statLabel}>Journals</Text>
+        <GlassCard intensity="medium" padding="lg" style={styles.statsRow}>
+          <View style={styles.statsInner}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{journalCount}</Text>
+              <Text style={styles.statLabel}>Journals</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{streak}</Text>
+              <Text style={styles.statLabel}>Streak</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{score || '—'}</Text>
+              <Text style={styles.statLabel}>Score</Text>
+            </View>
           </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{streak}</Text>
-            <Text style={styles.statLabel}>Streak</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{score || '—'}</Text>
-            <Text style={styles.statLabel}>Score</Text>
-          </View>
-        </View>
+        </GlassCard>
 
         {/* XP Progress */}
         <GlassCard intensity="medium" padding="lg" style={styles.xpCard}>
@@ -231,7 +239,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(168, 181, 114, 0.12)',
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
     paddingHorizontal: Spacing.md,
     paddingVertical: 3,
     borderRadius: Radius.pill,
@@ -244,13 +252,10 @@ const styles = StyleSheet.create({
   },
 
   statsRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(240, 235, 227, 0.04)',
-    borderRadius: Radius.card,
-    padding: Spacing.xl,
     marginBottom: Spacing.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(240, 235, 227, 0.06)',
+  },
+  statsInner: {
+    flexDirection: 'row',
   },
   statItem: {
     flex: 1,
@@ -269,7 +274,7 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    backgroundColor: 'rgba(240, 235, 227, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
 
   xpCard: {
@@ -294,7 +299,7 @@ const styles = StyleSheet.create({
   xpBarBg: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(240, 235, 227, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     marginBottom: Spacing.sm,
   },
   xpBarFill: {
@@ -320,7 +325,7 @@ const styles = StyleSheet.create({
   },
   menuDivider: {
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(240, 235, 227, 0.06)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   menuLabel: {
     fontFamily: Fonts.bodyMedium,

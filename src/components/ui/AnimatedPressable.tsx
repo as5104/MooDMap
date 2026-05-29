@@ -1,6 +1,5 @@
 /**
  * MoodMap — AnimatedPressable Component
- * Touch-responsive pressable with scale animation and haptic feedback
  */
 
 import React, { useCallback } from 'react';

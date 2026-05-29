@@ -1,6 +1,5 @@
 /**
- * MoodMap — Journal Screen (Real Data)
- * Journal counter, colored dot grid, recent entries — all from DB
+ * MoodMap — Journal Screen 
  */
 
 import React, { useState, useCallback } from 'react';
@@ -31,7 +30,7 @@ const DOT_COLORS: Record<string, string> = {
   positive: Colors.accent.olive,
   neutral: Colors.accent.brown,
   negative: Colors.accent.terracotta,
-  empty: 'rgba(240, 235, 227, 0.08)',
+  empty: 'rgba(255, 255, 255, 0.08)',
 };
 
 export default function JournalScreen() {
@@ -209,7 +208,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(240, 235, 227, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },

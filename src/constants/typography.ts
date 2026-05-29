@@ -1,6 +1,6 @@
 /**
  * MoodMap Typography System — Poppins + Sora
- * Sora for headings (geometric, modern) + Poppins for body (clean, rounded)
+ * Sora for headings + Poppins for body
  */
 
 export const Fonts = {

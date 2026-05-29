@@ -1,6 +1,5 @@
 /**
  * MoodMap — Card Component
- * Dark premium card with optional border glow and press animation
  */
 
 import React from 'react';

@@ -1,11 +1,12 @@
 /**
  * MoodMap — Root Layout
- * Loads Poppins + Sora fonts, initializes DB, listens to auth state
+ * Loads Poppins + Sora fonts, initializes DB, listens to auth state,
+ * and reactively redirects based on authentication status.
  */
 
 import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import {
   useFonts,
   Poppins_400Regular,
@@ -26,11 +27,44 @@ import { initializeDatabase } from '@/db/client';
 // Prevent splash from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
+/**
+ * Reactively guards routes based on auth state.
+ * When the user signs out (session becomes null), they are immediately
+ * redirected to the login screen. When they sign in, they go to the
+ * index which handles onboarding/home routing.
+ */
+function useProtectedRoute() {
+  const session = useAppStore((s) => s.session);
+  const isAuthLoading = useAppStore((s) => s.isAuthLoading);
+  const isAppReady = useAppStore((s) => s.isAppReady);
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    // Don't redirect while still loading
+    if (isAuthLoading || !isAppReady) return;
+
+    // Determine which route group the user is currently in
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (!session && !inAuthGroup) {
+      // User is NOT authenticated but is outside the auth screens
+      // → Force them to the login screen
+      router.replace('/(auth)/login');
+    } else if (session && inAuthGroup) {
+      // User IS authenticated but still on an auth screen (e.g. just logged in)
+      // → Send them to the index which handles onboarding/home routing
+      router.replace('/');
+    }
+  }, [session, isAuthLoading, isAppReady, segments]);
+}
+
 export default function RootLayout() {
   const setSession = useAppStore((s) => s.setSession);
   const setUser = useAppStore((s) => s.setUser);
   const setAuthLoading = useAppStore((s) => s.setAuthLoading);
   const setAppReady = useAppStore((s) => s.setAppReady);
+  const resetForSignOut = useAppStore((s) => s.resetForSignOut);
 
   const [fontsLoaded] = useFonts({
     Poppins_400Regular,
@@ -64,16 +98,24 @@ export default function RootLayout() {
 
     init();
 
-    // Listen for auth state changes
+    // Listen for auth state changes (sign-in, sign-out, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+      (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          // Clear all user data from the store
+          resetForSignOut();
+        } else {
+          setSession(session);
+          setUser(session?.user ?? null);
+        }
       }
     );
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Activate the auth guard
+  useProtectedRoute();
 
   // Hide splash once fonts are loaded and app is ready
   useEffect(() => {

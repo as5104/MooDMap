@@ -1,6 +1,5 @@
 /**
  * MoodMap — Mood Entry (Multi-Step Check-in)
- * Step 1: Select Mood → Step 2: Energy & Stress → Step 3: Tags → Step 4: Note → Step 5: Save
  */
 
 import React, { useState, useRef, useCallback } from 'react';
@@ -343,7 +342,7 @@ export default function MoodEntryScreen() {
           multiline
           numberOfLines={6}
           placeholder="Write a few words about how you're feeling..."
-          placeholderTextColor="rgba(240, 235, 227, 0.25)"
+          placeholderTextColor="rgba(255, 255, 255, 0.25)"
           value={note}
           onChangeText={setNote}
           selectionColor={Colors.accent.olive}
@@ -366,7 +365,7 @@ export default function MoodEntryScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backBtn} onPress={goBack}>
-          <Feather name="arrow-left" size={22} color="#F0EBE3" />
+          <Feather name="arrow-left" size={22} color="#FFFFFF" />
         </Pressable>
 
         {/* Step indicator */}
@@ -451,7 +450,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(240, 235, 227, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   topo1: { width: 500, height: 500, top: '15%', left: -100 },
   topo2: { width: 400, height: 400, top: '20%', left: -40 },
@@ -470,7 +469,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(240, 235, 227, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -489,19 +488,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(240, 235, 227, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   stepDotActive: {
     width: 24,
-    backgroundColor: '#F0EBE3',
+    backgroundColor: '#FFFFFF',
   },
   stepDotDone: {
-    backgroundColor: 'rgba(240, 235, 227, 0.5)',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
   },
   stepCount: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.caption,
-    color: 'rgba(240, 235, 227, 0.5)',
+    color: 'rgba(255, 255, 255, 0.5)',
   },
 
   // Content
@@ -515,14 +514,14 @@ const styles = StyleSheet.create({
   wave: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.body,
-    color: 'rgba(240, 235, 227, 0.8)',
+    color: 'rgba(255, 255, 255, 0.8)',
     alignSelf: 'flex-start',
     marginBottom: Spacing.sm,
   },
   title: {
     fontFamily: Fonts.heading,
     fontSize: 28,
-    color: '#F0EBE3',
+    color: '#FFFFFF',
     alignSelf: 'flex-start',
     marginBottom: Spacing.xxxl,
     lineHeight: 36,
@@ -534,7 +533,7 @@ const styles = StyleSheet.create({
   moodLabel: {
     fontFamily: Fonts.subheading,
     fontSize: FontSizes.h3,
-    color: '#F0EBE3',
+    color: '#FFFFFF',
     marginBottom: Spacing.lg,
   },
   moodGrid: {
@@ -554,16 +553,16 @@ const styles = StyleSheet.create({
   },
   moodOptionActive: {
     opacity: 1,
-    backgroundColor: 'rgba(240, 235, 227, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   moodOptionLabel: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.tiny,
-    color: 'rgba(240, 235, 227, 0.5)',
+    color: 'rgba(255, 255, 255, 0.5)',
     marginTop: Spacing.xs,
   },
   moodOptionLabelActive: {
-    color: '#F0EBE3',
+    color: '#FFFFFF',
     fontFamily: Fonts.bodySemiBold,
   },
 
@@ -571,14 +570,14 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h1,
-    color: '#F0EBE3',
+    color: '#FFFFFF',
     alignSelf: 'flex-start',
     marginBottom: Spacing.sm,
   },
   stepSubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(240, 235, 227, 0.6)',
+    color: 'rgba(255, 255, 255, 0.6)',
     alignSelf: 'flex-start',
     marginBottom: Spacing.xxxl,
   },
@@ -589,7 +588,7 @@ const styles = StyleSheet.create({
   sliderLabel: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
-    color: '#F0EBE3',
+    color: '#FFFFFF',
     marginBottom: Spacing.lg,
   },
   sliderRow: {
@@ -601,40 +600,40 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(240, 235, 227, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
   },
   sliderDotActive: {
-    backgroundColor: 'rgba(168, 181, 114, 0.2)',
-    borderColor: 'rgba(168, 181, 114, 0.3)',
+    backgroundColor: 'rgba(190, 255, 108, 0.2)',
+    borderColor: 'rgba(190, 255, 108, 0.3)',
   },
   sliderDotCurrent: {
-    backgroundColor: 'rgba(168, 181, 114, 0.35)',
+    backgroundColor: 'rgba(190, 255, 108, 0.35)',
     borderColor: Colors.accent.olive,
   },
   sliderDotStress: {
-    backgroundColor: 'rgba(212, 132, 90, 0.2)',
-    borderColor: 'rgba(212, 132, 90, 0.3)',
+    backgroundColor: 'rgba(255, 122, 110, 0.2)',
+    borderColor: 'rgba(255, 122, 110, 0.3)',
   },
   sliderDotCurrentStress: {
-    backgroundColor: 'rgba(212, 132, 90, 0.35)',
+    backgroundColor: 'rgba(255, 122, 110, 0.35)',
     borderColor: Colors.accent.terracotta,
   },
   sliderDotText: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
-    color: 'rgba(240, 235, 227, 0.3)',
+    color: 'rgba(255, 255, 255, 0.3)',
   },
   sliderDotTextActive: {
-    color: '#F0EBE3',
+    color: '#FFFFFF',
   },
   sliderValue: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.bodySmall,
-    color: 'rgba(240, 235, 227, 0.5)',
+    color: 'rgba(255, 255, 255, 0.5)',
     textAlign: 'center',
   },
 
@@ -649,23 +648,23 @@ const styles = StyleSheet.create({
   // Step 4: Note
   noteContainer: {
     width: '100%',
-    backgroundColor: 'rgba(240, 235, 227, 0.06)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: Radius.card,
     borderWidth: 1,
-    borderColor: 'rgba(240, 235, 227, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     padding: Spacing.lg,
   },
   noteInput: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: '#F0EBE3',
+    color: '#FFFFFF',
     minHeight: 150,
     lineHeight: 24,
   },
   noteCount: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: 'rgba(240, 235, 227, 0.25)',
+    color: 'rgba(255, 255, 255, 0.25)',
     textAlign: 'right',
     marginTop: Spacing.sm,
   },
@@ -695,14 +694,14 @@ const styles = StyleSheet.create({
   successTitle: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h1,
-    color: '#F0EBE3',
+    color: '#FFFFFF',
     marginTop: Spacing.xxl,
     marginBottom: Spacing.sm,
   },
   successSubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: 'rgba(240, 235, 227, 0.7)',
+    color: 'rgba(255, 255, 255, 0.7)',
     marginBottom: Spacing.lg,
   },
   successXP: {

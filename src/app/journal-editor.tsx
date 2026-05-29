@@ -1,6 +1,5 @@
 /**
  * MoodMap — Journal Editor Screen (Placeholder)
- * Will be fully built in Phase 4
  */
 
 import React from 'react';

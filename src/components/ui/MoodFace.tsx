@@ -1,6 +1,6 @@
 /**
  * MoodMap — MoodFace Component
- * SVG-based expressive face in a colored circle, matching Freud reference
+ * SVG-based expressive face
  */
 
 import React from 'react';

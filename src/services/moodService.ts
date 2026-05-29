@@ -7,7 +7,7 @@ import { queryAll, queryFirst, execute } from '@/db/client';
 import { type MoodType, MOOD_MAP } from '@/constants/moods';
 import type { FaceExpression } from '@/components/ui/MoodFace';
 
-// ─── Types ───
+// Types
 
 export interface MoodEntryInput {
   moodType: MoodType;
@@ -50,7 +50,7 @@ export interface MoodStatsData {
   total: number;
 }
 
-// ─── Helpers ───
+// Helpers
 
 function generateId(): string {
   return `mood_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -80,7 +80,7 @@ function getDayLabel(dateStr: string): string {
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
 }
 
-// ─── Service Functions ───
+// Service Functions
 
 /**
  * Save a mood entry. If one already exists for today, update it.

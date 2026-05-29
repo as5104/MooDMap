@@ -1,7 +1,5 @@
 /**
- * MoodMap — Button (Freud-Inspired)
- * Primary: cream/white with dark text. Secondary: transparent outline.
- * Pill variant for mood CTA.
+ * MoodMap — Button (Premium)
  */
 
 import React, { type ReactNode } from 'react';
@@ -104,19 +102,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primary: {
-    backgroundColor: Colors.accent.cream,
+    backgroundColor: '#FFFFFF',
   },
   pill: {
-    backgroundColor: Colors.accent.cream,
+    backgroundColor: '#FFFFFF',
     borderRadius: Radius.pill,
   },
   olive: {
-    backgroundColor: Colors.accent.olive,
+    backgroundColor: Colors.accent.primary,
   },
   secondary: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
-    borderColor: 'rgba(240, 235, 227, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
   },
   ghost: {
     backgroundColor: 'transparent',

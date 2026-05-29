@@ -1,6 +1,5 @@
 /**
  * MoodMap — Tab Layout with Floating Tab Bar
- * Custom pill-shaped bottom bar with center FAB for mood entry
  */
 
 import React from 'react';

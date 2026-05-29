@@ -5,7 +5,7 @@
 
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
-// ─── Mood Entries ───
+// Mood Entries
 export const moodEntries = sqliteTable('mood_entries', {
   id: text('id').primaryKey(),
   createdAt: text('created_at').notNull(),
@@ -21,7 +21,7 @@ export const moodEntries = sqliteTable('mood_entries', {
   userId: text('user_id'), // Supabase user ID
 });
 
-// ─── Journal Entries ───
+// Journal Entries
 export const journalEntries = sqliteTable('journal_entries', {
   id: text('id').primaryKey(),
   createdAt: text('created_at').notNull(),
@@ -35,7 +35,7 @@ export const journalEntries = sqliteTable('journal_entries', {
   userId: text('user_id'),
 });
 
-// ─── User Streaks ───
+// User Streaks
 export const streaks = sqliteTable('streaks', {
   id: text('id').primaryKey(),
   type: text('type').notNull(), // 'mood' | 'journal'
@@ -46,7 +46,7 @@ export const streaks = sqliteTable('streaks', {
   userId: text('user_id'),
 });
 
-// ─── Badges / Achievements ───
+// Badges
 export const badges = sqliteTable('badges', {
   id: text('id').primaryKey(),
   badgeKey: text('badge_key').notNull(),
@@ -56,7 +56,7 @@ export const badges = sqliteTable('badges', {
   userId: text('user_id'),
 });
 
-// ─── User Settings ───
+// User Settings
 export const userSettings = sqliteTable('user_settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),

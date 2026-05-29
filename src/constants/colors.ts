@@ -1,123 +1,142 @@
 /**
- * MoodMap Color System — Freud-Inspired Earthy Warm Palette
- * Warm charcoal, olive green, terracotta, golden brown
+ * MoodMap Color System — Premium Dark Mode
+ * Deep blacks, vivid lime accent, frosted glass, cool neutrals
  */
 
 export const Colors = {
-  // === Base Backgrounds (warm charcoal) ===
+  // Base Backgrounds (true dark)
   background: {
-    primary: '#1A1612',
-    secondary: '#211D17',
-    card: '#2A2520',
-    cardHover: '#322D27',
-    elevated: '#342F28',
-    input: '#252017',
-    light: '#F5F0E8',
+    primary: '#0A0A0C',
+    secondary: '#0F0F12',
+    card: '#1A1A1F',
+    cardHover: '#222228',
+    elevated: '#22222A',
+    input: '#14141A',
+    light: '#F5F5F7',
   },
 
-  // === Gradient Stops ===
+  // Gradient Stops
   gradient: {
-    top: '#1A1612',
-    middle: '#211D17',
-    bottom: '#191510',
-    glow: 'rgba(168, 181, 114, 0.12)',
-    glowStrong: 'rgba(168, 181, 114, 0.22)',
+    top: '#0A0A0C',
+    middle: '#0F0F12',
+    bottom: '#0A0A0C',
+    glow: 'rgba(190, 255, 108, 0.08)',
+    glowStrong: 'rgba(190, 255, 108, 0.16)',
   },
 
-  // === Accent Colors ===
+  // Frosted Glass
+  glass: {
+    bg: 'rgba(255, 255, 255, 0.06)',
+    bgStrong: 'rgba(255, 255, 255, 0.10)',
+    bgSubtle: 'rgba(255, 255, 255, 0.03)',
+    border: 'rgba(255, 255, 255, 0.12)',
+    borderSubtle: 'rgba(255, 255, 255, 0.08)',
+  },
+
+  // Accent Colors
   accent: {
-    olive: '#A8B572',
-    oliveDark: '#8FA05E',
-    oliveMuted: 'rgba(168, 181, 114, 0.15)',
-    brown: '#8B7355',
-    brownMuted: 'rgba(139, 115, 85, 0.15)',
-    terracotta: '#D4845A',
-    terracottaMuted: 'rgba(212, 132, 90, 0.15)',
-    golden: '#D4A843',
-    goldenMuted: 'rgba(212, 168, 67, 0.15)',
-    cream: '#F0EBE3',
-    creamMuted: 'rgba(240, 235, 227, 0.08)',
+    primary: '#BEFF6C',
+    primaryDark: '#9EDD4C',
+    primaryMuted: 'rgba(190, 255, 108, 0.15)',
+    lavender: '#B8A9FF',
+    lavenderMuted: 'rgba(184, 169, 255, 0.15)',
+    coral: '#FF7A6E',
+    coralMuted: 'rgba(255, 122, 110, 0.15)',
+    amber: '#FFBE6A',
+    amberMuted: 'rgba(255, 190, 106, 0.15)',
+    cream: '#FFFFFF',
+    creamMuted: 'rgba(255, 255, 255, 0.08)',
+    // Legacy aliases (kept for backward compat during migration)
+    olive: '#BEFF6C',
+    oliveDark: '#9EDD4C',
+    oliveMuted: 'rgba(190, 255, 108, 0.15)',
+    brown: '#B8A9FF',
+    brownMuted: 'rgba(184, 169, 255, 0.15)',
+    terracotta: '#FF7A6E',
+    terracottaMuted: 'rgba(255, 122, 110, 0.15)',
+    golden: '#FFBE6A',
+    goldenMuted: 'rgba(255, 190, 106, 0.15)',
   },
 
-  // === Text ===
+  // Text
   text: {
-    primary: '#F0EBE3',
-    secondary: '#9A8E7F',
-    tertiary: '#6B5E50',
-    onDark: '#F0EBE3',
-    onLight: '#1A1612',
-    onAccent: '#1A1612',
+    primary: '#FFFFFF',
+    secondary: '#8E8E93',
+    tertiary: '#48484E',
+    onDark: '#FFFFFF',
+    onLight: '#0A0A0C',
+    onAccent: '#0A0A0C',
   },
 
-  // === Mood Colors ===
+  // Mood Colors (vibrant, saturated)
   mood: {
-    happy: '#D4A843',
-    calm: '#A8B572',
-    focused: '#7D9B5A',
-    peaceful: '#8BA88A',
-    sad: '#C67B4E',
-    tired: '#6B5E50',
-    anxious: '#9B7DB8',
-    angry: '#C45C4A',
-    stressed: '#B86B6B',
-    motivated: '#D4A843',
+    happy: '#FFD166',
+    calm: '#6BCB77',
+    focused: '#4ECDC4',
+    peaceful: '#95E1D3',
+    sad: '#74B9FF',
+    tired: '#A8A8B3',
+    anxious: '#C59CFF',
+    angry: '#FF6B6B',
+    stressed: '#FF8E8E',
+    motivated: '#FFBE6A',
   } as Record<string, string>,
 
-  // === Mood Full-Screen Backgrounds ===
+  // Mood Full-Screen Backgrounds (slightly deeper)
   moodBg: {
-    happy: '#D4A843',
-    calm: '#7D9B5A',
-    focused: '#5A7D5A',
-    peaceful: '#8BA88A',
-    sad: '#D4845A',
-    tired: '#6B5E50',
-    anxious: '#8B6B9B',
-    angry: '#C45C4A',
-    stressed: '#B86B6B',
-    motivated: '#A8B572',
+    happy: '#E6B84D',
+    calm: '#4DAF58',
+    focused: '#38B2A8',
+    peaceful: '#6EC4B5',
+    sad: '#5A9FE6',
+    tired: '#6E6E78',
+    anxious: '#A57DE6',
+    angry: '#E65555',
+    stressed: '#E67575',
+    motivated: '#E6A850',
   } as Record<string, string>,
 
-  // === Mood Face Circle Colors (lighter tint of mood) ===
+  // Mood Face Circle Colors (lighter tint)
   moodFace: {
-    happy: '#EDD9A8',
-    calm: '#C5D4A0',
-    focused: '#A0C4A0',
-    peaceful: '#B0CCB0',
-    sad: '#E8B9A0',
-    tired: '#A89880',
-    anxious: '#C4A8D4',
-    angry: '#E0A090',
-    stressed: '#D4A0A0',
-    motivated: '#D4D8A0',
+    happy: '#FFF0C0',
+    calm: '#B5E8BB',
+    focused: '#A0E8E0',
+    peaceful: '#C5F0E8',
+    sad: '#B0D8FF',
+    tired: '#CDCDD4',
+    anxious: '#DCC5FF',
+    angry: '#FFB0B0',
+    stressed: '#FFC5C5',
+    motivated: '#FFE0A8',
   } as Record<string, string>,
 
-  // === Semantic ===
-  success: '#A8B572',
-  warning: '#D4A843',
-  error: '#C45C4A',
-  info: '#8B7355',
+  // Semantic
+  success: '#6BCB77',
+  warning: '#FFBE6A',
+  error: '#FF6B6B',
+  info: '#74B9FF',
 
-  // === Metric Card Colors ===
+  // Metric Card Colors (deep, saturated)
   metric: {
-    green: '#5A7D5A',
-    orange: '#D4845A',
-    brown: '#6B5E50',
-    olive: '#7D9B5A',
+    green: '#2D7D46',
+    orange: '#E87040',
+    brown: '#2A2A35',
+    olive: '#3D8B5A',
   },
 
-  // === Borders & Shadows ===
+  // Borders & Shadows
   border: {
-    subtle: 'rgba(240, 235, 227, 0.06)',
-    medium: 'rgba(240, 235, 227, 0.12)',
-    accent: 'rgba(168, 181, 114, 0.3)',
-    accentStrong: 'rgba(168, 181, 114, 0.5)',
+    subtle: 'rgba(255, 255, 255, 0.08)',
+    medium: 'rgba(255, 255, 255, 0.14)',
+    accent: 'rgba(190, 255, 108, 0.3)',
+    accentStrong: 'rgba(190, 255, 108, 0.5)',
   },
 
-  // === Overlays ===
+  // Overlays
   overlay: {
-    light: 'rgba(26, 22, 18, 0.5)',
-    medium: 'rgba(26, 22, 18, 0.7)',
-    heavy: 'rgba(26, 22, 18, 0.9)',
+    light: 'rgba(10, 10, 12, 0.5)',
+    medium: 'rgba(10, 10, 12, 0.7)',
+    heavy: 'rgba(10, 10, 12, 0.9)',
   },
 } as const;
 

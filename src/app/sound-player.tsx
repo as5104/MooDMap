@@ -1,6 +1,5 @@
 /**
  * MoodMap — Sound Player Screen (Placeholder)
- * Will be fully built in Phase 6
  */
 
 import React from 'react';
@@ -52,7 +51,7 @@ const styles = StyleSheet.create({
   },
   iconCircle: {
     width: 100, height: 100, borderRadius: 50,
-    backgroundColor: 'rgba(168, 181, 114, 0.1)',
+    backgroundColor: 'rgba(190, 255, 108, 0.1)',
     alignItems: 'center', justifyContent: 'center',
     marginBottom: Spacing.xxl,
   },
