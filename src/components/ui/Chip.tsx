@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { StyleSheet, Text, type ViewStyle } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { AnimatedPressable } from './AnimatedPressable';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
@@ -12,7 +13,7 @@ import { Radius, Spacing } from '@/constants/layout';
 
 interface ChipProps {
   label: string;
-  emoji?: string;
+  icon?: keyof typeof Feather.glyphMap;
   selected?: boolean;
   onPress?: () => void;
   color?: string;
@@ -22,7 +23,7 @@ interface ChipProps {
 
 export const Chip: React.FC<ChipProps> = ({
   label,
-  emoji,
+  icon,
   selected = false,
   onPress,
   color = Colors.accent.primary,
@@ -45,10 +46,13 @@ export const Chip: React.FC<ChipProps> = ({
         style,
       ]}
     >
-      {emoji && (
-        <Text style={[styles.emoji, isSmall && styles.emojiSmall]}>
-          {emoji}
-        </Text>
+      {icon && (
+        <Feather
+          name={icon}
+          size={isSmall ? 14 : 16}
+          color={selected ? color : Colors.text.secondary}
+          style={[styles.icon, isSmall && styles.iconSmall]}
+        />
       )}
       <Text
         style={[
@@ -78,12 +82,10 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xs + 2,
     paddingHorizontal: Spacing.md,
   },
-  emoji: {
-    fontSize: 16,
+  icon: {
     marginRight: Spacing.sm,
   },
-  emojiSmall: {
-    fontSize: 14,
+  iconSmall: {
     marginRight: Spacing.xs,
   },
   label: {

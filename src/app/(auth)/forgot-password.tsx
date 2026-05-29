@@ -39,7 +39,7 @@ export default function ForgotPasswordScreen() {
     return (
       <GradientBackground variant="glow">
         <View style={styles.successContainer}>
-          <Text style={styles.successEmoji}>📧</Text>
+          <View style={styles.successIconWrap}><Feather name="mail" size={36} color={Colors.accent.olive} /></View>
           <Text style={styles.successTitle}>Email Sent</Text>
           <Text style={styles.successText}>
             Check your inbox for a password reset link.
@@ -155,7 +155,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.xxl,
   },
-  successEmoji: { fontSize: 64, marginBottom: Spacing.xxl },
+  successIconWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
+    marginBottom: Spacing.xxl,
+  },
   successTitle: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h1,
@@ -169,3 +177,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+

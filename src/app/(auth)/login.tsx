@@ -59,7 +59,7 @@ export default function LoginScreen() {
         >
           {/* Logo Section */}
           <View style={styles.header}>
-            <Text style={styles.logo}>🗺️</Text>
+            <View style={styles.logo}><Feather name="map" size={34} color={Colors.accent.olive} /></View>
             <Text style={styles.appName}>MoodMap</Text>
             <Text style={styles.subtitle}>
               Your personal mood companion
@@ -179,7 +179,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xxxl + 8,
   },
   logo: {
-    fontSize: 56,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: Spacing.md,
   },
   appName: {
@@ -285,3 +290,4 @@ const styles = StyleSheet.create({
     color: Colors.accent.olive,
   },
 });
+

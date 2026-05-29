@@ -1,6 +1,6 @@
 /**
- * MoodMap — Mood Definitions (Premium Palette)
- * Each mood has a type, emoji, label, color, bgColor, faceColor, gradient, and suggestion
+ * MoodMap - Mood Definitions (Premium Palette)
+ * Each mood has a type, icon, label, color, bgColor, faceColor, gradient, and suggestion
  */
 
 export type MoodType =
@@ -16,22 +16,21 @@ export type SuggestionType =
 
 export interface MoodDefinition {
   type: MoodType;
-  emoji: string;
+  icon: string;
   label: string;
   color: string;
-  bgColor: string;       // full-screen background
-  faceColor: string;     // lighter face circle
+  bgColor: string;
+  faceColor: string;
   gradient: [string, string];
   suggestion: SuggestionType;
   score: number;
-  /** Face expression type for SVG rendering */
   expression: 'happy' | 'calm' | 'neutral' | 'sad' | 'angry' | 'anxious';
 }
 
 export const MOODS: MoodDefinition[] = [
   {
     type: 'happy',
-    emoji: '😊',
+    icon: 'smile',
     label: 'Happy',
     color: '#FFD166',
     bgColor: '#E6B84D',
@@ -43,7 +42,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'calm',
-    emoji: '😌',
+    icon: 'sun',
     label: 'Calm',
     color: '#6BCB77',
     bgColor: '#4DAF58',
@@ -55,7 +54,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'focused',
-    emoji: '🎯',
+    icon: 'target',
     label: 'Focused',
     color: '#4ECDC4',
     bgColor: '#38B2A8',
@@ -67,7 +66,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'peaceful',
-    emoji: '🧘',
+    icon: 'moon',
     label: 'Peaceful',
     color: '#95E1D3',
     bgColor: '#6EC4B5',
@@ -79,7 +78,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'motivated',
-    emoji: '🔥',
+    icon: 'zap',
     label: 'Motivated',
     color: '#FFBE6A',
     bgColor: '#E6A850',
@@ -91,7 +90,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'sad',
-    emoji: '😢',
+    icon: 'cloud-rain',
     label: 'Sad',
     color: '#74B9FF',
     bgColor: '#5A9FE6',
@@ -103,7 +102,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'tired',
-    emoji: '😴',
+    icon: 'battery',
     label: 'Tired',
     color: '#A8A8B3',
     bgColor: '#6E6E78',
@@ -115,7 +114,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'anxious',
-    emoji: '😰',
+    icon: 'alert-circle',
     label: 'Anxious',
     color: '#C59CFF',
     bgColor: '#A57DE6',
@@ -127,7 +126,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'angry',
-    emoji: '😤',
+    icon: 'alert-triangle',
     label: 'Angry',
     color: '#FF6B6B',
     bgColor: '#E65555',
@@ -139,7 +138,7 @@ export const MOODS: MoodDefinition[] = [
   },
   {
     type: 'stressed',
-    emoji: '😣',
+    icon: 'activity',
     label: 'Stressed',
     color: '#FF8E8E',
     bgColor: '#E67575',

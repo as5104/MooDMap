@@ -174,7 +174,15 @@ export default function HomeScreen() {
             variant="orange"
             icon="activity"
             label="Mood"
-            value={currentMood ? currentMood.emoji : '—'}
+            value={
+              currentMood ? (
+                <Feather
+                  name={currentMood.icon as any}
+                  size={34}
+                  color={Colors.text.onAccent}
+                />
+              ) : '—'
+            }
             subtitle={currentMood ? currentMood.label : 'Not logged'}
           />
         </View>

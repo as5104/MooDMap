@@ -1,11 +1,12 @@
 /**
- * MoodMap — Entry Point
+ * MoodMap - Entry Point
  * Routes user to auth, onboarding, or home based on state
  */
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { Redirect } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 import { useAppStore } from '@/stores/appStore';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
@@ -16,27 +17,25 @@ export default function Index() {
   const isAppReady = useAppStore((s) => s.isAppReady);
   const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding);
 
-  // Show loading while initializing
   if (isAuthLoading || !isAppReady) {
     return (
       <View style={styles.container}>
-        <Text style={styles.logo}>🗺️</Text>
+        <View style={styles.logoWrap}>
+          <Feather name="map" size={34} color={Colors.accent.olive} />
+        </View>
         <Text style={styles.title}>MoodMap</Text>
       </View>
     );
   }
 
-  // Not authenticated → go to login
   if (!session) {
     return <Redirect href="/(auth)/login" />;
   }
 
-  // Authenticated but hasn't completed onboarding
   if (!hasCompletedOnboarding) {
     return <Redirect href="/(onboarding)" />;
   }
 
-  // Fully ready → go to home
   return <Redirect href="/(tabs)" />;
 }
 
@@ -47,8 +46,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logo: {
-    fontSize: 64,
+  logoWrap: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
     marginBottom: 16,
   },
   title: {

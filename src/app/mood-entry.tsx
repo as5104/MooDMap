@@ -30,11 +30,11 @@ import { saveMoodEntry, getWeeklyMoods, getMoodScore, getMoodStreak } from '@/se
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOTAL_STEPS = 4;
 
-// ─── Energy & Stress Labels ───
+// Energy & Stress Labels
 const ENERGY_LABELS = ['Very Low', 'Low', 'Normal', 'High', 'Very High'];
-const ENERGY_EMOJIS = ['😴', '🔋', '⚡', '💪', '🚀'];
+const ENERGY_ICONS: Array<keyof typeof Feather.glyphMap> = ['moon', 'battery-charging', 'zap', 'activity', 'trending-up'];
 const STRESS_LABELS = ['Calm', 'Mild', 'Moderate', 'High', 'Extreme'];
-const STRESS_EMOJIS = ['😌', '🙂', '😐', '😰', '😤'];
+const STRESS_ICONS: Array<keyof typeof Feather.glyphMap> = ['smile', 'meh', 'minus', 'alert-circle', 'alert-triangle'];
 
 export default function MoodEntryScreen() {
   const insets = useSafeAreaInsets();
@@ -49,7 +49,7 @@ export default function MoodEntryScreen() {
   const displayName = user?.user_metadata?.display_name ?? 'User';
   const firstName = displayName.split(' ')[0];
 
-  // ─── State ───
+  // State
   const [step, setStep] = useState(0);
   const [selectedMoodIndex, setSelectedMoodIndex] = useState(0);
   const [energyLevel, setEnergyLevel] = useState(3);
@@ -64,7 +64,7 @@ export default function MoodEntryScreen() {
 
   const selectedMood = MOODS[selectedMoodIndex];
 
-  // ─── Animations ───
+  // Animations
   const selectMood = (index: number) => {
     setSelectedMoodIndex(index);
     // Quick fade out → change color → fade back in
@@ -90,7 +90,7 @@ export default function MoodEntryScreen() {
     extrapolate: 'clamp',
   });
 
-  // ─── Navigation ───
+  // Navigation
   const goNext = () => {
     if (step < TOTAL_STEPS - 1) {
       setStep(step + 1);
@@ -107,14 +107,14 @@ export default function MoodEntryScreen() {
     }
   };
 
-  // ─── Tag Toggle ───
+  // Tag Toggle
   const toggleTag = (key: string) => {
     setSelectedTags((prev) =>
       prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key]
     );
   };
 
-  // ─── Save ───
+  // Save
   const handleSave = useCallback(() => {
     setSaving(true);
     try {
@@ -163,7 +163,7 @@ export default function MoodEntryScreen() {
     }
   }, [selectedMood, energyLevel, stressLevel, selectedTags, note, user]);
 
-  // ─── Success Screen ───
+  // Success Screen
   if (saved) {
     return (
       <Animated.View style={[styles.container, { backgroundColor, paddingTop: insets.top }]}>
@@ -178,13 +178,16 @@ export default function MoodEntryScreen() {
           <Text style={styles.successSubtitle}>
             You're feeling {selectedMood.label.toLowerCase()} today
           </Text>
-          <Text style={styles.successXP}>+25 XP ✨</Text>
+          <View style={styles.successXPRow}>
+            <Feather name="star" size={16} color={Colors.accent.olive} />
+            <Text style={styles.successXP}>+25 XP</Text>
+          </View>
         </View>
       </Animated.View>
     );
   }
 
-  // ─── Render Steps ───
+  // Render Steps
   const renderStep = () => {
     switch (step) {
       case 0:
@@ -200,10 +203,13 @@ export default function MoodEntryScreen() {
     }
   };
 
-  // ─── Step 1: Select Mood ───
+  // Step 1: Select Mood
   const renderMoodStep = () => (
     <>
-      <Text style={styles.wave}>👋 Hey {firstName}!</Text>
+      <View style={styles.waveRow}>
+        <Feather name="smile" size={16} color="rgba(255, 255, 255, 0.8)" style={styles.waveIcon} />
+        <Text style={styles.wave}>Hey {firstName}!</Text>
+      </View>
       <Text style={styles.title}>How are you feeling{'\n'}this day?</Text>
 
       <View style={styles.faceContainer}>
@@ -245,7 +251,7 @@ export default function MoodEntryScreen() {
     </>
   );
 
-  // ─── Step 2: Energy & Stress ───
+  // Step 2: Energy & Stress
   const renderEnergyStressStep = () => (
     <>
       <Text style={styles.stepTitle}>Energy & Stress</Text>
@@ -253,9 +259,10 @@ export default function MoodEntryScreen() {
 
       {/* Energy */}
       <View style={styles.sliderSection}>
-        <Text style={styles.sliderLabel}>
-          Energy Level {ENERGY_EMOJIS[energyLevel - 1]}
-        </Text>
+        <View style={styles.sliderLabelRow}>
+          <Text style={styles.sliderLabel}>Energy Level</Text>
+          <Feather name={ENERGY_ICONS[energyLevel - 1]} size={16} color="#FFFFFF" style={styles.sliderLabelIcon} />
+        </View>
         <View style={styles.sliderRow}>
           {[1, 2, 3, 4, 5].map((level) => (
             <Pressable
@@ -281,9 +288,10 @@ export default function MoodEntryScreen() {
 
       {/* Stress */}
       <View style={styles.sliderSection}>
-        <Text style={styles.sliderLabel}>
-          Stress Level {STRESS_EMOJIS[stressLevel - 1]}
-        </Text>
+        <View style={styles.sliderLabelRow}>
+          <Text style={styles.sliderLabel}>Stress Level</Text>
+          <Feather name={STRESS_ICONS[stressLevel - 1]} size={16} color="#FFFFFF" style={styles.sliderLabelIcon} />
+        </View>
         <View style={styles.sliderRow}>
           {[1, 2, 3, 4, 5].map((level) => (
             <Pressable
@@ -309,7 +317,7 @@ export default function MoodEntryScreen() {
     </>
   );
 
-  // ─── Step 3: Tags ───
+  // Step 3: Tags
   const renderTagsStep = () => (
     <>
       <Text style={styles.stepTitle}>What's happening?</Text>
@@ -320,7 +328,7 @@ export default function MoodEntryScreen() {
           <Chip
             key={tag.key}
             label={tag.label}
-            emoji={tag.emoji}
+            icon={tag.icon}
             selected={selectedTags.includes(tag.key)}
             onPress={() => toggleTag(tag.key)}
             color={Colors.accent.olive}
@@ -330,7 +338,7 @@ export default function MoodEntryScreen() {
     </>
   );
 
-  // ─── Step 4: Note ───
+  // Step 4: Note
   const renderNoteStep = () => (
     <>
       <Text style={styles.stepTitle}>Quick Note</Text>
@@ -417,7 +425,7 @@ export default function MoodEntryScreen() {
           </View>
         ) : step === 3 ? (
           <Button
-            title={saving ? 'Saving...' : 'Save Mood  ✓'}
+            title={saving ? 'Saving...' : 'Save Mood'}
             variant="pill"
             size="lg"
             fullWidth
@@ -511,12 +519,20 @@ const styles = StyleSheet.create({
   },
 
   // Step 1: Mood
+  waveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginBottom: Spacing.sm,
+  },
+  waveIcon: {
+    marginRight: Spacing.xs,
+  },
   wave: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.body,
     color: 'rgba(255, 255, 255, 0.8)',
     alignSelf: 'flex-start',
-    marginBottom: Spacing.sm,
   },
   title: {
     fontFamily: Fonts.heading,
@@ -585,11 +601,18 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: Spacing.xxxl,
   },
+  sliderLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  sliderLabelIcon: {
+    marginLeft: Spacing.sm,
+  },
   sliderLabel: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
     color: '#FFFFFF',
-    marginBottom: Spacing.lg,
   },
   sliderRow: {
     flexDirection: 'row',
@@ -703,6 +726,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.body,
     color: 'rgba(255, 255, 255, 0.7)',
     marginBottom: Spacing.lg,
+  },
+  successXPRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
   },
   successXP: {
     fontFamily: Fonts.bodySemiBold,

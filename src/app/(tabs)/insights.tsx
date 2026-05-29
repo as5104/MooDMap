@@ -223,9 +223,18 @@ export default function InsightsScreen() {
                       <Text style={styles.historyDate}>{dateLabel.toUpperCase()}</Text>
                     </View>
                     <View style={styles.historyMid}>
-                      <Text style={styles.historyLabel}>
-                        {mood?.emoji ?? '😐'} {mood?.label ?? entry.mood_type}
-                      </Text>
+                      <View style={styles.historyLabel}>
+                        {mood && (
+                          <Feather
+                            name={mood.icon as any}
+                            size={16}
+                            color={Colors.text.primary}
+                          />
+                        )}
+                        <Text style={styles.historyLabelText}>
+                          {mood?.label ?? entry.mood_type}
+                        </Text>
+                      </View>
                       <Text style={styles.historyDesc}>
                         {entry.note ? entry.note.slice(0, 50) : `Score: ${entry.mood_score}/10`}
                       </Text>
@@ -444,6 +453,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   historyLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  historyLabelText: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
     color: Colors.text.primary,

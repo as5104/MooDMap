@@ -1,6 +1,5 @@
 /**
- * MoodMap — MetricCard Component (Premium)
- * Colored rounded card for dashboard metrics (score, mood, tracker)
+ * MoodMap — MetricCard Component
  */
 
 import React, { type ReactNode } from 'react';
@@ -15,7 +14,7 @@ interface MetricCardProps {
   variant: MetricVariant;
   icon: keyof typeof Feather.glyphMap;
   label: string;
-  value: string;
+  value: ReactNode;
   subtitle?: string;
   children?: ReactNode;
   style?: ViewStyle;
@@ -38,6 +37,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   style,
 }) => {
   const colors = VARIANT_COLORS[variant];
+  const isTextValue = typeof value === 'string' || typeof value === 'number';
 
   return (
     <View style={[styles.card, { backgroundColor: colors.bg }, style]}>
@@ -45,7 +45,11 @@ export const MetricCard: React.FC<MetricCardProps> = ({
         <Feather name={icon} size={16} color={colors.text} />
         <Text style={[styles.label, { color: colors.text }]}>{label}</Text>
       </View>
-      <Text style={[styles.value, { color: colors.text }]}>{value}</Text>
+      {isTextValue ? (
+        <Text style={[styles.value, { color: colors.text }]}>{value}</Text>
+      ) : (
+        <View style={styles.valueNode}>{value}</View>
+      )}
       {subtitle && (
         <Text style={[styles.subtitle, { color: `${colors.text}AA` }]}>{subtitle}</Text>
       )}
@@ -76,6 +80,11 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.heading,
     fontSize: 36,
     marginBottom: Spacing.xs,
+  },
+  valueNode: {
+    minHeight: 44,
+    marginBottom: Spacing.xs,
+    justifyContent: 'center',
   },
   subtitle: {
     fontFamily: Fonts.body,

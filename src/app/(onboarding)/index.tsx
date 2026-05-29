@@ -1,5 +1,5 @@
 /**
- * MoodMap — Onboarding Flow
+ * MoodMap - Onboarding Flow
  */
 
 import React, { useState, useRef } from 'react';
@@ -23,35 +23,35 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface OnboardingSlide {
   id: string;
-  emoji: string;
+  icon: keyof typeof Feather.glyphMap;
   title: string;
   subtitle: string;
-  features?: { icon: string; label: string }[];
+  features?: { icon: keyof typeof Feather.glyphMap; label: string }[];
 }
 
 const SLIDES: OnboardingSlide[] = [
   {
     id: '1',
-    emoji: '🗺️',
+    icon: 'map',
     title: 'Welcome to\nMoodMap',
     subtitle: 'Your personal mood companion.\nTrack how you feel, discover patterns,\nand grow every day.',
   },
   {
     id: '2',
-    emoji: '✨',
-    title: 'Track · Reflect · Grow',
+    icon: 'star',
+    title: 'Track � Reflect � Grow',
     subtitle: 'Everything you need to understand\nyour emotional world.',
     features: [
-      { icon: '😊', label: 'Daily mood check-in' },
-      { icon: '📖', label: 'Guided journaling' },
-      { icon: '📊', label: 'Insights & patterns' },
-      { icon: '🎵', label: 'Calming activities' },
-      { icon: '🏆', label: 'Streaks & achievements' },
+      { icon: 'smile', label: 'Daily mood check-in' },
+      { icon: 'book-open', label: 'Guided journaling' },
+      { icon: 'bar-chart-2', label: 'Insights & patterns' },
+      { icon: 'music', label: 'Calming activities' },
+      { icon: 'award', label: 'Streaks & achievements' },
     ],
   },
   {
     id: '3',
-    emoji: '🚀',
+    icon: 'zap',
     title: 'Let\'s Get Started',
     subtitle: 'You\'re all set! Start logging your\nfirst mood and begin your journey.',
   },
@@ -88,7 +88,9 @@ export default function OnboardingScreen() {
 
   const renderSlide = ({ item }: { item: OnboardingSlide }) => (
     <View style={styles.slide}>
-      <Text style={styles.slideEmoji}>{item.emoji}</Text>
+      <View style={styles.slideIconWrap}>
+        <Feather name={item.icon} size={40} color={Colors.accent.olive} />
+      </View>
       <Text style={styles.slideTitle}>{item.title}</Text>
       <Text style={styles.slideSubtitle}>{item.subtitle}</Text>
 
@@ -96,7 +98,7 @@ export default function OnboardingScreen() {
         <View style={styles.featureList}>
           {item.features.map((f, i) => (
             <View key={i} style={styles.featureRow}>
-              <Text style={styles.featureIcon}>{f.icon}</Text>
+              <Feather name={f.icon} size={20} color={Colors.accent.olive} style={styles.featureIcon} />
               <Text style={styles.featureLabel}>{f.label}</Text>
             </View>
           ))}
@@ -110,14 +112,12 @@ export default function OnboardingScreen() {
   return (
     <GradientBackground variant="glow">
       <View style={styles.container}>
-        {/* Skip button */}
         {!isLastSlide && (
           <AnimatedPressable style={styles.skipButton} onPress={handleSkip}>
             <Text style={styles.skipText}>Skip</Text>
           </AnimatedPressable>
         )}
 
-        {/* Slides */}
         <FlatList
           ref={flatListRef}
           data={SLIDES}
@@ -131,7 +131,6 @@ export default function OnboardingScreen() {
           bounces={false}
         />
 
-        {/* Dots & Action */}
         <View style={styles.footer}>
           <View style={styles.dots}>
             {SLIDES.map((_, i) => (
@@ -186,7 +185,6 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
   },
 
-  // Slides
   slide: {
     width: SCREEN_WIDTH,
     flex: 1,
@@ -195,8 +193,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     paddingBottom: 120,
   },
-  slideEmoji: {
-    fontSize: 72,
+  slideIconWrap: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
     marginBottom: Spacing.xxl,
   },
   slideTitle: {
@@ -229,7 +232,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.border.subtle,
   },
   featureIcon: {
-    fontSize: 24,
     marginRight: Spacing.lg,
   },
   featureLabel: {
@@ -238,7 +240,6 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
   },
 
-  // Footer
   footer: {
     paddingHorizontal: 24,
     paddingBottom: 40,

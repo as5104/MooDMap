@@ -22,6 +22,7 @@ import { useAppStore } from '@/stores/appStore';
 import { signOut } from '@/lib/auth';
 import { getMoodScore, getMoodStreak, getMoodCount } from '@/services/moodService';
 import { getJournalCount } from '@/services/journalService';
+import { exportUserData, importUserData } from '@/services/dataTransferService';
 
 // XP thresholds per level
 const XP_PER_LEVEL = 500;
@@ -40,6 +41,8 @@ export default function ProfileScreen() {
   const [streak, setStreak] = useState(0);
   const [score, setScore] = useState(0);
 
+  const refreshData = useAppStore((s) => s.refreshData);
+
   const loadData = useCallback(() => {
     if (!isAppReady) return;
     try {
@@ -57,6 +60,20 @@ export default function ProfileScreen() {
       console.error('[Profile] Load error:', e);
     }
   }, [user?.id, dataVersion, isAppReady]);
+
+  const handleExport = async () => {
+    if (!user?.id) return;
+    await exportUserData(user.id);
+  };
+
+  const handleImport = async () => {
+    if (!user?.id) return;
+    const success = await importUserData(user.id);
+    if (success) {
+      refreshData(); // Trigger UI refresh across all screens
+      loadData();     // Refresh profile stats
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -89,11 +106,12 @@ export default function ProfileScreen() {
   };
 
   const menuItems = [
-    { icon: 'bell' as const, label: 'Notifications', value: 'On' },
-    { icon: 'shield' as const, label: 'Privacy', value: '' },
-    { icon: 'download' as const, label: 'Export Data', value: '' },
-    { icon: 'moon' as const, label: 'Theme', value: 'Dark' },
-    { icon: 'info' as const, label: 'About', value: 'v1.0' },
+    { icon: 'bell' as const, label: 'Notifications', value: 'On', onPress: undefined as (() => void) | undefined },
+    { icon: 'shield' as const, label: 'Privacy', value: '', onPress: undefined as (() => void) | undefined },
+    { icon: 'download' as const, label: 'Export Data', value: '', onPress: handleExport },
+    { icon: 'upload' as const, label: 'Import Data', value: '', onPress: handleImport },
+    { icon: 'moon' as const, label: 'Theme', value: 'Dark', onPress: undefined as (() => void) | undefined },
+    { icon: 'info' as const, label: 'About', value: 'v1.0', onPress: undefined as (() => void) | undefined },
   ];
 
   return (
@@ -167,7 +185,11 @@ export default function ProfileScreen() {
         {/* Menu */}
         <GlassCard intensity="subtle" padding="none" style={styles.menuCard}>
           {menuItems.map((item, i) => (
-            <Pressable key={item.label} style={[styles.menuItem, i < menuItems.length - 1 && styles.menuDivider]}>
+            <Pressable
+              key={item.label}
+              style={[styles.menuItem, i < menuItems.length - 1 && styles.menuDivider]}
+              onPress={item.onPress}
+            >
               <Feather name={item.icon} size={20} color={Colors.accent.olive} />
               <Text style={styles.menuLabel}>{item.label}</Text>
               <Text style={styles.menuValue}>{item.value}</Text>
