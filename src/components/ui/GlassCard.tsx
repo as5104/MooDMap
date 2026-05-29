@@ -23,27 +23,27 @@ interface GlassCardProps {
 }
 
 const IOS_BLUR: Record<Intensity, number> = {
-  subtle: 25,
-  medium: 40,
-  strong: 60,
+  subtle: 60,
+  medium: 78,
+  strong: 95,
 };
 
 const ANDROID_BLUR: Record<Intensity, number> = {
-  subtle: 8,
-  medium: 12,
-  strong: 18,
+  subtle: 20,
+  medium: 30,
+  strong: 42,
 };
 
 const FROSTED_TINT: Record<Intensity, string> = {
-  subtle: 'rgba(18, 18, 24, 0.55)',
-  medium: 'rgba(18, 18, 24, 0.65)',
-  strong: 'rgba(18, 18, 24, 0.75)',
+  subtle: 'rgba(14, 16, 22, 0.44)',
+  medium: 'rgba(14, 16, 22, 0.52)',
+  strong: 'rgba(14, 16, 22, 0.62)',
 };
 
 const ANDROID_FALLBACK: Record<Intensity, string> = {
-  subtle: 'rgba(22, 22, 28, 0.72)',
-  medium: 'rgba(22, 22, 28, 0.80)',
-  strong: 'rgba(22, 22, 28, 0.88)',
+  subtle: 'rgba(18, 20, 28, 0.78)',
+  medium: 'rgba(18, 20, 28, 0.84)',
+  strong: 'rgba(18, 20, 28, 0.90)',
 };
 
 const BORDER: Record<Intensity, string> = {
@@ -123,7 +123,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
       return (
         <BlurView
           intensity={IOS_BLUR[intensity]}
-          tint="dark"
+          tint="systemMaterialDark"
           style={StyleSheet.absoluteFill}
         />
       );
@@ -135,7 +135,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
           intensity={ANDROID_BLUR[intensity]}
           tint="dark"
           blurMethod="dimezisBlurView"
-          blurReductionFactor={8}
+          blurReductionFactor={2}
           blurTarget={blurCtx!.ref}
           style={StyleSheet.absoluteFill}
         />

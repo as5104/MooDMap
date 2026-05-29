@@ -218,37 +218,39 @@ export default function InsightsScreen() {
 
               return (
                 <GlassCard key={entry.id} intensity="medium" padding="md" style={styles.historyEntry}>
-                  <View style={styles.historyLeft}>
-                    <Text style={styles.historyDate}>{dateLabel.toUpperCase()}</Text>
-                  </View>
-                  <View style={styles.historyMid}>
-                    <Text style={styles.historyLabel}>
-                      {mood?.emoji ?? '😐'} {mood?.label ?? entry.mood_type}
-                    </Text>
-                    <Text style={styles.historyDesc}>
-                      {entry.note ? entry.note.slice(0, 50) : `Score: ${entry.mood_score}/10`}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.scoreBadge,
-                      {
-                        borderColor:
-                          entry.mood_score >= 7 ? Colors.accent.olive : Colors.accent.terracotta,
-                      },
-                    ]}
-                  >
-                    <Text
+                  <View style={styles.historyEntryRow}>
+                    <View style={styles.historyLeft}>
+                      <Text style={styles.historyDate}>{dateLabel.toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.historyMid}>
+                      <Text style={styles.historyLabel}>
+                        {mood?.emoji ?? '😐'} {mood?.label ?? entry.mood_type}
+                      </Text>
+                      <Text style={styles.historyDesc}>
+                        {entry.note ? entry.note.slice(0, 50) : `Score: ${entry.mood_score}/10`}
+                      </Text>
+                    </View>
+                    <View
                       style={[
-                        styles.scoreBadgeText,
+                        styles.scoreBadge,
                         {
-                          color:
+                          borderColor:
                             entry.mood_score >= 7 ? Colors.accent.olive : Colors.accent.terracotta,
                         },
                       ]}
                     >
-                      {Math.round((entry.mood_score / 10) * 100)}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.scoreBadgeText,
+                          {
+                            color:
+                              entry.mood_score >= 7 ? Colors.accent.olive : Colors.accent.terracotta,
+                          },
+                        ]}
+                      >
+                        {Math.round((entry.mood_score / 10) * 100)}
+                      </Text>
+                    </View>
                   </View>
                 </GlassCard>
               );
@@ -424,9 +426,11 @@ const styles = StyleSheet.create({
   },
 
   historyEntry: {
+    marginBottom: Spacing.md,
+  },
+  historyEntryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.md,
   },
   historyLeft: {
     marginRight: Spacing.lg,

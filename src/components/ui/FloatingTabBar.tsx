@@ -9,6 +9,7 @@ import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Colors } from '@/constants/colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_MARGIN, TAB_BAR_RADIUS, FAB_SIZE, Spacing } from '@/constants/layout';
+import { useBlurTarget } from './GradientBackground';
 
 const TAB_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
   index: 'home',
@@ -30,6 +31,8 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
   onFabPress,
 }) => {
   const insets = useSafeAreaInsets();
+  const blurCtx = useBlurTarget();
+  const canUseAndroidTargetBlur = Platform.OS === 'android' && !!blurCtx?.ref && blurCtx.ready;
 
   const routes = state.routes.filter(
     (r: any) => TAB_ICONS[r.name] !== undefined
@@ -68,7 +71,7 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
       >
         <Feather
           name={iconName}
-          size={22}
+          size={26}
           color={isFocused ? Colors.accent.primary : 'rgba(255, 255, 255, 0.30)'}
         />
         {isFocused && <View style={styles.activeDot} />}
@@ -80,9 +83,53 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
     if (Platform.OS === 'ios') {
       return (
         <>
+          {/* Layered blur for a denser frosted glass effect */}
           <BlurView
-            intensity={60}
+            intensity={100}
+            tint="systemChromeMaterialDark"
+            style={StyleSheet.absoluteFill}
+          />
+          <BlurView
+            intensity={100}
+            tint="systemChromeMaterialDark"
+            style={StyleSheet.absoluteFill}
+          />
+          <BlurView
+            intensity={100}
+            tint="systemChromeMaterialDark"
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={styles.barTint} />
+        </>
+      );
+    }
+
+    if (canUseAndroidTargetBlur) {
+      return (
+        <>
+          {/* Layered Android blur for stronger distortion */}
+          <BlurView
+            intensity={100}
             tint="dark"
+            blurMethod="dimezisBlurView"
+            blurReductionFactor={1}
+            blurTarget={blurCtx!.ref}
+            style={StyleSheet.absoluteFill}
+          />
+          <BlurView
+            intensity={100}
+            tint="dark"
+            blurMethod="dimezisBlurView"
+            blurReductionFactor={1}
+            blurTarget={blurCtx!.ref}
+            style={StyleSheet.absoluteFill}
+          />
+          <BlurView
+            intensity={100}
+            tint="dark"
+            blurMethod="dimezisBlurView"
+            blurReductionFactor={1}
+            blurTarget={blurCtx!.ref}
             style={StyleSheet.absoluteFill}
           />
           <View style={styles.barTint} />
@@ -104,7 +151,7 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
           ]}
           onPress={onFabPress}
         >
-          <Feather name="plus" size={26} color={Colors.text.onAccent} />
+          <Feather name="plus" size={30} color={Colors.text.onAccent} />
         </Pressable>
       </View>
 
@@ -146,11 +193,11 @@ const styles = StyleSheet.create({
   },
   barTint: {
     ...(StyleSheet.absoluteFill as object),
-    backgroundColor: 'rgba(20, 20, 25, 0.45)',
+    backgroundColor: 'rgba(8, 10, 16, 0.84)',
   },
   barSolid: {
     ...(StyleSheet.absoluteFill as object),
-    backgroundColor: 'rgba(18, 18, 22, 0.92)',
+    backgroundColor: 'rgba(8, 10, 16, 1)',
   },
   tabContent: {
     flex: 1,
@@ -177,7 +224,8 @@ const styles = StyleSheet.create({
   },
   fabWrapper: {
     position: 'absolute',
-    top: -(FAB_SIZE / 2) + (TAB_BAR_HEIGHT / 2) - 4,
+    // Place the FAB with ~30% outside and ~70% inside the tab bar.
+    top: -(FAB_SIZE * 0.3),
     alignSelf: 'center',
     zIndex: 10,
   },

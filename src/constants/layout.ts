@@ -18,14 +18,14 @@ export const Spacing = {
 export const Radius = {
   xs: 4,
   sm: 8,
-  md: 12,
-  lg: 16,
-  xl: 20,
-  xxl: 24,
-  card: 20,
+  md: 14,
+  lg: 18,
+  xl: 22,
+  xxl: 26,
+  card: 24,
   button: 16,
   chip: 20,
-  input: 14,
+  input: 16,
   pill: 9999,
   full: 9999,
 } as const;
@@ -65,10 +65,10 @@ export const Shadows = {
 export const SCREEN_PADDING = Spacing.xl;
 
 /** Floating tab bar */
-export const TAB_BAR_HEIGHT = 64;
+export const TAB_BAR_HEIGHT = 78;
 export const TAB_BAR_MARGIN = 16;
-export const TAB_BAR_RADIUS = 28;
-export const FAB_SIZE = 56;
+export const TAB_BAR_RADIUS = 40;
+export const FAB_SIZE = 64;
 
 /** Animation durations in ms */
 export const Durations = {
