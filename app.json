@@ -54,7 +54,9 @@
           "photosPermission": "MoodMap needs access to your photos to attach images to journal entries."
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
