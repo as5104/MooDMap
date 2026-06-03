@@ -111,12 +111,22 @@ export const initializeDatabase = async (): Promise<void> => {
         value TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS journal_drafts (
+        id TEXT PRIMARY KEY NOT NULL,
+        title TEXT,
+        content TEXT NOT NULL DEFAULT '',
+        prompt_used TEXT,
+        updated_at TEXT NOT NULL,
+        user_id TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_mood_date ON mood_entries(date);
       CREATE INDEX IF NOT EXISTS idx_mood_user ON mood_entries(user_id);
       CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
       CREATE INDEX IF NOT EXISTS idx_journal_user ON journal_entries(user_id);
       CREATE INDEX IF NOT EXISTS idx_streaks_user ON streaks(user_id);
       CREATE INDEX IF NOT EXISTS idx_badges_user ON badges(user_id);
+      CREATE INDEX IF NOT EXISTS idx_drafts_user ON journal_drafts(user_id);
     `);
 
     console.log('[DB] Database initialized successfully');

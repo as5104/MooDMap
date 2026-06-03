@@ -28,6 +28,7 @@ import {
   getMoodStreak,
   type DayMoodData,
 } from '@/services/moodService';
+import { getLatestJournal, type JournalEntryRow } from '@/services/journalService';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -42,6 +43,7 @@ export default function HomeScreen() {
   const [moodScore, setMoodScore] = useState(0);
   const [weeklyMoods, setWeeklyMoods] = useState<DayMoodData[]>([]);
   const [streak, setStreak] = useState(0);
+  const [latestJournal, setLatestJournal] = useState<JournalEntryRow | null>(null);
   const [loading, setLoading] = useState(true);
 
   const today = new Date();
@@ -61,6 +63,7 @@ export default function HomeScreen() {
       const weekly = getWeeklyMoods(userId);
       const score = getMoodScore(userId);
       const streakData = getMoodStreak(userId);
+      const journal = getLatestJournal(userId);
 
       if (todayEntry) {
         setTodayMood({
@@ -78,6 +81,7 @@ export default function HomeScreen() {
       setWeeklyMoods(weekly);
       setMoodScore(score);
       setStreak(streakData.current);
+      setLatestJournal(journal);
     } catch (e) {
       console.error('[Home] Load error:', e);
     } finally {
@@ -250,6 +254,64 @@ export default function HomeScreen() {
             </GlassCard>
           </>
         )}
+
+        {/* Recent Journal */}
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Recent Journal</Text>
+          <Pressable onPress={() => router.push('/(tabs)/journal')}>
+            <Feather name="more-horizontal" size={20} color={Colors.text.secondary} />
+          </Pressable>
+        </View>
+        {latestJournal ? (
+          <GlassCard
+            intensity="medium"
+            padding="lg"
+            onPress={() => router.push('/(tabs)/journal')}
+          >
+            <View style={styles.journalRow}>
+              <View style={styles.journalIconBg}>
+                <Feather name="edit-3" size={20} color={Colors.accent.primary} />
+              </View>
+              <View style={styles.journalContent}>
+                <Text style={styles.journalTitle}>
+                  {latestJournal.title || 'Untitled'}
+                </Text>
+                <Text style={styles.journalPreview} numberOfLines={1}>
+                  {latestJournal.content.slice(0, 80)}
+                </Text>
+                <View style={styles.journalMeta}>
+                  <Text style={styles.journalDate}>
+                    {new Date(latestJournal.created_at).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </Text>
+                  <Text style={styles.journalWords}>
+                    {latestJournal.content.trim().split(/\s+/).length} words
+                  </Text>
+                </View>
+              </View>
+              <Feather name="chevron-right" size={18} color={Colors.text.tertiary} />
+            </View>
+          </GlassCard>
+        ) : (
+          <GlassCard
+            intensity="subtle"
+            padding="lg"
+            onPress={() => router.push('/journal-editor')}
+          >
+            <View style={styles.journalEmpty}>
+              <Feather name="edit-3" size={24} color={Colors.accent.primary} />
+              <View style={styles.journalEmptyText}>
+                <Text style={styles.journalEmptyTitle}>Start journaling</Text>
+                <Text style={styles.journalEmptySubtitle}>
+                  Write about your day to track your growth
+                </Text>
+              </View>
+              <Feather name="plus" size={18} color={Colors.text.tertiary} />
+            </View>
+          </GlassCard>
+        )}
       </ScrollView>
     </GradientBackground>
   );
@@ -411,6 +473,66 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   recSubtitle: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+  },
+
+  // Recent Journal
+  journalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  journalIconBg: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: Colors.accent.primaryMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  journalContent: { flex: 1 },
+  journalTitle: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+    marginBottom: 2,
+  },
+  journalPreview: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+    marginBottom: 4,
+  },
+  journalMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  journalDate: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.tertiary,
+  },
+  journalWords: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.tertiary,
+  },
+  journalEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  journalEmptyText: { flex: 1 },
+  journalEmptyTitle: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+    marginBottom: 2,
+  },
+  journalEmptySubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
     color: Colors.text.secondary,

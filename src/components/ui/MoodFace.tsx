@@ -13,11 +13,11 @@ interface MoodFaceProps {
   expression: FaceExpression;
   bgColor: string;
   faceColor: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   style?: ViewStyle;
 }
 
-const SIZES = { sm: 36, md: 64, lg: 120, xl: 180 };
+const SIZES = { xs: 20, sm: 36, md: 64, lg: 120, xl: 180 };
 
 /**
  * Draw face features relative to center. SVG viewBox is 0 0 100 100.
@@ -108,7 +108,7 @@ export const MoodFace: React.FC<MoodFaceProps> = ({
 }) => {
   const px = SIZES[size];
   const strokeColor = darkenColor(faceColor);
-  const strokeWidth = size === 'sm' ? 4 : size === 'md' ? 3.5 : 3;
+  const strokeWidth = size === 'xs' ? 5 : size === 'sm' ? 4 : size === 'md' ? 3.5 : 3;
 
   return (
     <View style={[{ width: px, height: px }, style]}>

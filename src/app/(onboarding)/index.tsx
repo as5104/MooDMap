@@ -13,18 +13,22 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GradientBackground, Button, AnimatedPressable } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
 import { useAppStore } from '@/stores/appStore';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const IS_COMPACT_HEIGHT = SCREEN_HEIGHT < 700;
+const SLIDE_ICON_SIZE = IS_COMPACT_HEIGHT ? 68 : 82;
 
 interface OnboardingSlide {
   id: string;
   icon: keyof typeof Feather.glyphMap;
   title: string;
+  titleFlow?: string[];
   subtitle: string;
   features?: { icon: keyof typeof Feather.glyphMap; label: string }[];
 }
@@ -39,7 +43,8 @@ const SLIDES: OnboardingSlide[] = [
   {
     id: '2',
     icon: 'star',
-    title: 'Track � Reflect � Grow',
+    title: 'Track Reflect Grow',
+    titleFlow: ['Track', 'Reflect', 'Grow'],
     subtitle: 'Everything you need to understand\nyour emotional world.',
     features: [
       { icon: 'smile', label: 'Daily mood check-in' },
@@ -58,6 +63,7 @@ const SLIDES: OnboardingSlide[] = [
 ];
 
 export default function OnboardingScreen() {
+  const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
@@ -86,12 +92,36 @@ export default function OnboardingScreen() {
     router.replace('/(tabs)');
   };
 
+  const renderSlideTitle = (item: OnboardingSlide) => {
+    if (!item.titleFlow) {
+      return <Text style={styles.slideTitle}>{item.title}</Text>;
+    }
+
+    return (
+      <View style={styles.titleFlow} accessibilityLabel={item.titleFlow.join(' to ')}>
+        {item.titleFlow.map((label, index) => (
+          <React.Fragment key={label}>
+            <Text style={styles.titleFlowText}>{label}</Text>
+            {index < item.titleFlow!.length - 1 && (
+              <Feather
+                name="arrow-right"
+                size={20}
+                color={Colors.accent.olive}
+                style={styles.titleFlowIcon}
+              />
+            )}
+          </React.Fragment>
+        ))}
+      </View>
+    );
+  };
+
   const renderSlide = ({ item }: { item: OnboardingSlide }) => (
     <View style={styles.slide}>
       <View style={styles.slideIconWrap}>
-        <Feather name={item.icon} size={40} color={Colors.accent.olive} />
+        <Feather name={item.icon} size={IS_COMPACT_HEIGHT ? 32 : 36} color={Colors.accent.olive} />
       </View>
-      <Text style={styles.slideTitle}>{item.title}</Text>
+      {renderSlideTitle(item)}
       <Text style={styles.slideSubtitle}>{item.subtitle}</Text>
 
       {item.features && (
@@ -113,7 +143,7 @@ export default function OnboardingScreen() {
     <GradientBackground variant="glow">
       <View style={styles.container}>
         {!isLastSlide && (
-          <AnimatedPressable style={styles.skipButton} onPress={handleSkip}>
+          <AnimatedPressable style={[styles.skipButton, { top: insets.top + Spacing.lg }]} onPress={handleSkip}>
             <Text style={styles.skipText}>Skip</Text>
           </AnimatedPressable>
         )}
@@ -129,9 +159,10 @@ export default function OnboardingScreen() {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={{ viewAreaCoveragePercentThreshold: 50 }}
           bounces={false}
+          style={styles.slider}
         />
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, Spacing.xl) }]}>
           <View style={styles.dots}>
             {SLIDES.map((_, i) => (
               <View
@@ -170,11 +201,9 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 60,
   },
   skipButton: {
     position: 'absolute',
-    top: 60,
     right: 24,
     zIndex: 10,
     padding: 8,
@@ -185,69 +214,91 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
   },
 
+  slider: {
+    flex: 1,
+  },
   slide: {
     width: SCREEN_WIDTH,
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
-    paddingBottom: 120,
+    paddingHorizontal: IS_COMPACT_HEIGHT ? Spacing.xxl : 40,
+    paddingTop: IS_COMPACT_HEIGHT ? Spacing.xl : Spacing.xxxl,
+    paddingBottom: IS_COMPACT_HEIGHT ? Spacing.xl : Spacing.xxxl,
   },
   slideIconWrap: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    width: SLIDE_ICON_SIZE,
+    height: SLIDE_ICON_SIZE,
+    borderRadius: SLIDE_ICON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(190, 255, 108, 0.12)',
-    marginBottom: Spacing.xxl,
+    marginBottom: IS_COMPACT_HEIGHT ? Spacing.md : Spacing.xl,
   },
   slideTitle: {
     fontFamily: Fonts.heading,
-    fontSize: FontSizes.h1,
+    fontSize: IS_COMPACT_HEIGHT ? FontSizes.h2 : FontSizes.h1,
     color: Colors.text.primary,
     textAlign: 'center',
-    marginBottom: Spacing.lg,
-    lineHeight: 36,
+    marginBottom: IS_COMPACT_HEIGHT ? Spacing.md : Spacing.lg,
+    lineHeight: IS_COMPACT_HEIGHT ? 31 : 36,
+  },
+  titleFlow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: IS_COMPACT_HEIGHT ? Spacing.md : Spacing.lg,
+  },
+  titleFlowText: {
+    fontFamily: Fonts.heading,
+    fontSize: IS_COMPACT_HEIGHT ? FontSizes.h2 : FontSizes.h1,
+    lineHeight: IS_COMPACT_HEIGHT ? 31 : 36,
+    color: Colors.text.primary,
+    textAlign: 'center',
+  },
+  titleFlowIcon: {
+    marginHorizontal: IS_COMPACT_HEIGHT ? Spacing.xs : Spacing.sm,
   },
   slideSubtitle: {
     fontFamily: Fonts.body,
-    fontSize: FontSizes.body,
+    fontSize: IS_COMPACT_HEIGHT ? FontSizes.caption : FontSizes.body,
     color: Colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 26,
+    lineHeight: IS_COMPACT_HEIGHT ? 20 : 26,
   },
   featureList: {
-    marginTop: Spacing.xxxl,
+    marginTop: IS_COMPACT_HEIGHT ? Spacing.lg : Spacing.xxl,
     width: '100%',
   },
   featureRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.lg,
+    marginBottom: IS_COMPACT_HEIGHT ? Spacing.sm : Spacing.md,
     backgroundColor: Colors.background.card,
     borderRadius: 16,
-    padding: Spacing.lg,
+    paddingVertical: IS_COMPACT_HEIGHT ? Spacing.sm : Spacing.md,
+    paddingHorizontal: IS_COMPACT_HEIGHT ? Spacing.md : Spacing.lg,
     borderWidth: 1,
     borderColor: Colors.border.subtle,
   },
   featureIcon: {
-    marginRight: Spacing.lg,
+    marginRight: Spacing.md,
   },
   featureLabel: {
     fontFamily: Fonts.bodyMedium,
-    fontSize: FontSizes.body,
+    fontSize: IS_COMPACT_HEIGHT ? FontSizes.caption : FontSizes.body,
     color: Colors.text.primary,
   },
 
   footer: {
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    paddingTop: Spacing.md,
   },
   dots: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginBottom: Spacing.xxl,
+    marginBottom: IS_COMPACT_HEIGHT ? Spacing.lg : Spacing.xxl,
     gap: Spacing.sm,
   },
   dot: {

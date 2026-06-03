@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import type { Session, User } from '@supabase/supabase-js';
 import type { MoodType } from '@/constants/moods';
 import type { DayMoodData, MoodEntryRow } from '@/services/moodService';
+import type { JournalEntryRow } from '@/services/journalService';
 
 interface TodayMood {
   id: string;
@@ -20,7 +21,7 @@ interface TodayMood {
 }
 
 interface AppState {
-  // ─── Auth ───
+  // Auth
   session: Session | null;
   user: User | null;
   isAuthLoading: boolean;
@@ -28,41 +29,47 @@ interface AppState {
   setUser: (user: User | null) => void;
   setAuthLoading: (loading: boolean) => void;
 
-  // ─── Onboarding ───
+  // Onboarding
   hasCompletedOnboarding: boolean;
   setOnboardingComplete: (complete: boolean) => void;
 
-  // ─── Today's Mood ───
+  // Today's Mood
   todayMood: TodayMood | null;
   setTodayMood: (mood: TodayMood | null) => void;
 
-  // ─── Weekly Moods (cached) ───
+  // Weekly Moods (cached)
   weeklyMoods: DayMoodData[];
   setWeeklyMoods: (moods: DayMoodData[]) => void;
 
-  // ─── Mood Score (cached) ───
+  // Mood Score (cached)
   moodScore: number;
   setMoodScore: (score: number) => void;
 
-  // ─── Streaks ───
+  // Streaks
   moodStreak: number;
   journalStreak: number;
   setMoodStreak: (streak: number) => void;
   setJournalStreak: (streak: number) => void;
 
-  // ─── XP & Level ───
+  // Journal Cache
+  journalCount: number;
+  setJournalCount: (count: number) => void;
+  latestJournal: { title: string | null; content: string; date: string } | null;
+  setLatestJournal: (journal: { title: string | null; content: string; date: string } | null) => void;
+
+  // XP & Level
   totalXP: number;
   addXP: (amount: number) => void;
 
-  // ─── App State ───
+  // App State
   isAppReady: boolean;
   setAppReady: (ready: boolean) => void;
 
-  // ─── Data Refresh Flag ───
+  // Data Refresh Flag
   dataVersion: number;
   refreshData: () => void;
 
-  // ─── Sign-Out Reset ───
+  // Sign-Out Reset
   resetForSignOut: () => void;
 }
 
@@ -97,6 +104,12 @@ export const useAppStore = create<AppState>((set) => ({
   setMoodStreak: (moodStreak) => set({ moodStreak }),
   setJournalStreak: (journalStreak) => set({ journalStreak }),
 
+  // Journal Cache
+  journalCount: 0,
+  setJournalCount: (journalCount) => set({ journalCount }),
+  latestJournal: null,
+  setLatestJournal: (latestJournal) => set({ latestJournal }),
+
   // XP
   totalXP: 0,
   addXP: (amount) => set((state) => ({ totalXP: state.totalXP + amount })),
@@ -119,6 +132,8 @@ export const useAppStore = create<AppState>((set) => ({
       moodScore: 0,
       moodStreak: 0,
       journalStreak: 0,
+      journalCount: 0,
+      latestJournal: null,
       totalXP: 0,
       hasCompletedOnboarding: false,
       dataVersion: 0,
