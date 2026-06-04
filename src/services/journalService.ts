@@ -4,6 +4,7 @@
  */
 
 import { queryAll, queryFirst, execute } from '@/db/client';
+import { analyzeJournalSentiment } from '@/utils/sentimentAnalyzer';
 
 // Types
 
@@ -151,32 +152,47 @@ export function getJournalDotGrid(userId?: string, days: number = 48): JournalDo
   const today = getTodayDate();
 
   const entries = userId
-    ? queryAll<{ date: string; content: string }>(
-        'SELECT date, content FROM journal_entries WHERE date >= ? AND date <= ? AND user_id = ? ORDER BY date',
+    ? queryAll<{ date: string; content: string; title: string | null; mood_entry_id: string | null }>(
+        'SELECT date, content, title, mood_entry_id FROM journal_entries WHERE date >= ? AND date <= ? AND user_id = ? ORDER BY date',
         [startDate, today, userId]
       )
-    : queryAll<{ date: string; content: string }>(
-        'SELECT date, content FROM journal_entries WHERE date >= ? AND date <= ? ORDER BY date',
+    : queryAll<{ date: string; content: string; title: string | null; mood_entry_id: string | null }>(
+        'SELECT date, content, title, mood_entry_id FROM journal_entries WHERE date >= ? AND date <= ? ORDER BY date',
         [startDate, today]
       );
 
-  const entryMap = new Map<string, string>();
+  const entryMap = new Map<string, { content: string; title: string | null; mood_entry_id: string | null }>();
   for (const e of entries) {
-    entryMap.set(e.date, e.content);
+    entryMap.set(e.date, { content: e.content, title: e.title, mood_entry_id: e.mood_entry_id });
+  }
+
+  // Look up linked mood types for sentiment context
+  const moodTypeMap = new Map<string, string>();
+  const moodEntryIds = entries.filter((e) => e.mood_entry_id).map((e) => e.mood_entry_id!);
+  if (moodEntryIds.length > 0) {
+    const placeholders = moodEntryIds.map(() => '?').join(',');
+    const moods = queryAll<{ id: string; mood_type: string }>(
+      `SELECT id, mood_type FROM mood_entries WHERE id IN (${placeholders})`,
+      moodEntryIds
+    );
+    for (const m of moods) {
+      moodTypeMap.set(m.id, m.mood_type);
+    }
   }
 
   const result: JournalDotData[] = [];
   for (let i = days - 1; i >= 0; i--) {
     const dateStr = getDateNDaysAgo(i);
-    const content = entryMap.get(dateStr);
+    const entry = entryMap.get(dateStr);
 
-    if (!content) {
+    if (!entry) {
       result.push({ date: dateStr, sentiment: 'empty' });
     } else {
-      const len = content.length;
-      if (len > 200) result.push({ date: dateStr, sentiment: 'positive' });
-      else if (len > 50) result.push({ date: dateStr, sentiment: 'neutral' });
-      else result.push({ date: dateStr, sentiment: 'negative' });
+      const linkedMoodType = entry.mood_entry_id
+        ? moodTypeMap.get(entry.mood_entry_id) ?? null
+        : null;
+      const sentiment = analyzeJournalSentiment(entry.content, entry.title, linkedMoodType);
+      result.push({ date: dateStr, sentiment });
     }
   }
 

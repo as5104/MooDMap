@@ -21,8 +21,9 @@ import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { MOOD_MAP, type MoodType } from '@/constants/moods';
-import { JOURNAL_PROMPTS } from '@/constants/prompts';
+import { getPromptsForMood, type JournalPrompt } from '@/constants/prompts';
 import { useAppStore } from '@/stores/appStore';
+import { analyzeJournalSentiment } from '@/utils/sentimentAnalyzer';
 import {
   getJournalCount,
   getRecentJournals,
@@ -45,12 +46,6 @@ const DOT_COLORS: Record<string, string> = {
 
 const MAX_RECENT = 5;
 
-// Pick 4 random prompts for the carousel
-function getRandomPrompts(count: number = 4) {
-  const shuffled = [...JOURNAL_PROMPTS].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
-}
-
 export default function JournalScreen() {
   const insets = useSafeAreaInsets();
   const user = useAppStore((s) => s.user);
@@ -64,7 +59,7 @@ export default function JournalScreen() {
   const [draft, setDraft] = useState<JournalDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [randomPrompts] = useState(() => getRandomPrompts());
+  const [moodPrompts, setMoodPrompts] = useState<JournalPrompt[]>([]);
   const [linkedMoods, setLinkedMoods] = useState<Record<string, { moodType: MoodType }>>({});
 
   const loadData = useCallback(() => {
@@ -96,6 +91,11 @@ export default function JournalScreen() {
         }
       }
       setLinkedMoods(moodMap);
+
+      // Get mood-based prompts
+      const todayMoodData = getTodayMood(userId);
+      const todayMoodType = todayMoodData?.mood_type as MoodType | undefined;
+      setMoodPrompts(getPromptsForMood(todayMoodType, 4));
     } catch (e) {
       console.error('[Journal] Load error:', e);
     } finally {
@@ -231,13 +231,15 @@ export default function JournalScreen() {
         </GlassCard>
 
         {/* Prompt Carousel */}
-        <Text style={styles.sectionTitle}>Writing Prompts</Text>
+        <Text style={styles.sectionTitle}>
+          {moodPrompts.length > 0 ? 'Prompts for You' : 'Writing Prompts'}
+        </Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.promptCarousel}
         >
-          {randomPrompts.map((prompt) => (
+          {moodPrompts.map((prompt) => (
             <Pressable
               key={prompt.id}
               style={styles.promptCard}
@@ -334,10 +336,13 @@ export default function JournalScreen() {
             const dateObj = new Date(entry.created_at);
             const dateLabel = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             const preview = entry.content.slice(0, 60);
-            const len = entry.content.length;
-            const sentiment = len > 200 ? 'positive' : len > 50 ? 'neutral' : 'negative';
             const linkedMood = linkedMoods[entry.id];
             const moodDef = linkedMood ? MOOD_MAP[linkedMood.moodType] : null;
+            const sentiment = analyzeJournalSentiment(
+              entry.content,
+              entry.title,
+              linkedMood?.moodType ?? null,
+            );
 
             return (
               <Pressable
