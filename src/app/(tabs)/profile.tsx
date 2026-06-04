@@ -1,5 +1,5 @@
 /**
- * MoodMap — Profile Screen 
+ * MoodMap — Profile Screen
  */
 
 import React, { useState, useCallback } from 'react';

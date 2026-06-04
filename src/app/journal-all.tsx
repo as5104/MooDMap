@@ -19,7 +19,7 @@ import { Feather } from '@expo/vector-icons';
 import { GradientBackground, GlassCard } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
-import { Spacing, Radius } from '@/constants/layout';
+import { Spacing, Radius, Shadows } from '@/constants/layout';
 import { useAppStore } from '@/stores/appStore';
 import {
   getRecentJournals,
@@ -31,8 +31,7 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_GAP = Spacing.sm;
 const GRID_PADDING = Spacing.xl;
 const GRID_ITEM_WIDTH = (SCREEN_WIDTH - GRID_PADDING * 2 - GRID_GAP) / 2;
-
-type ViewMode = 'list' | 'grid';
+const NEW_JOURNAL_BUTTON_SIZE = 58;
 
 export default function AllJournalsScreen() {
   const insets = useSafeAreaInsets();
@@ -40,10 +39,11 @@ export default function AllJournalsScreen() {
   const refreshData = useAppStore((s) => s.refreshData);
   const dataVersion = useAppStore((s) => s.dataVersion);
   const isAppReady = useAppStore((s) => s.isAppReady);
+  const viewMode = useAppStore((s) => s.journalViewMode);
+  const setViewMode = useAppStore((s) => s.setJournalViewMode);
 
   const [entries, setEntries] = useState<JournalEntryRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   const loadData = useCallback(() => {
     if (!isAppReady) return;
@@ -85,7 +85,7 @@ export default function AllJournalsScreen() {
   };
 
   const toggleView = () => {
-    setViewMode((prev) => (prev === 'list' ? 'grid' : 'list'));
+    setViewMode(viewMode === 'list' ? 'grid' : 'list');
   };
 
   // Group entries by month
@@ -253,7 +253,7 @@ export default function AllJournalsScreen() {
                 {group.data.map(renderListEntry)}
               </View>
             )}
-            ListFooterComponent={<View style={{ height: insets.bottom + Spacing.xxxl }} />}
+            ListFooterComponent={<View style={{ height: insets.bottom + NEW_JOURNAL_BUTTON_SIZE + Spacing.xxxl }} />}
           />
         ) : (
           /* Grid View */
@@ -278,9 +278,24 @@ export default function AllJournalsScreen() {
               />
             }
             renderItem={({ item }) => renderGridEntry(item)}
-            ListFooterComponent={<View style={{ height: insets.bottom + Spacing.xxxl }} />}
+            ListFooterComponent={<View style={{ height: insets.bottom + NEW_JOURNAL_BUTTON_SIZE + Spacing.xxxl }} />}
           />
         )}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Write new journal"
+          hitSlop={8}
+          style={[
+            styles.newJournalButton,
+            {
+              right: Spacing.xl,
+              bottom: insets.bottom + Spacing.xl,
+            },
+          ]}
+          onPress={() => router.push('/journal-editor')}
+        >
+          <Feather name="plus" size={30} color={Colors.text.onAccent} />
+        </Pressable>
       </View>
     </GradientBackground>
   );
@@ -458,5 +473,20 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySmall,
     color: Colors.text.secondary,
     textAlign: 'center',
+  },
+
+  // Floating action
+  newJournalButton: {
+    position: 'absolute',
+    zIndex: 10,
+    width: NEW_JOURNAL_BUTTON_SIZE,
+    height: NEW_JOURNAL_BUTTON_SIZE,
+    borderRadius: NEW_JOURNAL_BUTTON_SIZE / 2,
+    backgroundColor: Colors.accent.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border.accentStrong,
+    ...Shadows.glow(Colors.accent.primary),
   },
 });

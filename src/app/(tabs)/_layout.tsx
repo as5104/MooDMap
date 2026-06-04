@@ -5,16 +5,19 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { router } from 'expo-router';
-import { Colors } from '@/constants/colors';
 import { FloatingTabBar } from '@/components/ui';
 
 export default function TabLayout() {
+  const handleFabPress = (activeRouteName?: string) => {
+    router.push(activeRouteName === 'journal' ? '/journal-editor' : '/mood-entry');
+  };
+
   return (
     <Tabs
       tabBar={(props) => (
         <FloatingTabBar
           {...props}
-          onFabPress={() => router.push('/mood-entry')}
+          onFabPress={() => handleFabPress(props.state.routes[props.state.index]?.name)}
         />
       )}
       screenOptions={{

@@ -9,6 +9,8 @@ import type { MoodType } from '@/constants/moods';
 import type { DayMoodData, MoodEntryRow } from '@/services/moodService';
 import type { JournalEntryRow } from '@/services/journalService';
 
+export type JournalViewMode = 'list' | 'grid';
+
 interface TodayMood {
   id: string;
   moodType: MoodType;
@@ -56,6 +58,8 @@ interface AppState {
   setJournalCount: (count: number) => void;
   latestJournal: { title: string | null; content: string; date: string } | null;
   setLatestJournal: (journal: { title: string | null; content: string; date: string } | null) => void;
+  journalViewMode: JournalViewMode;
+  setJournalViewMode: (mode: JournalViewMode) => void;
 
   // XP & Level
   totalXP: number;
@@ -109,6 +113,8 @@ export const useAppStore = create<AppState>((set) => ({
   setJournalCount: (journalCount) => set({ journalCount }),
   latestJournal: null,
   setLatestJournal: (latestJournal) => set({ latestJournal }),
+  journalViewMode: 'list',
+  setJournalViewMode: (journalViewMode) => set({ journalViewMode }),
 
   // XP
   totalXP: 0,
