@@ -64,6 +64,7 @@ interface AppState {
   // XP & Level
   totalXP: number;
   addXP: (amount: number) => void;
+  setTotalXP: (xp: number) => void;
 
   // App State
   isAppReady: boolean;
@@ -119,6 +120,7 @@ export const useAppStore = create<AppState>((set) => ({
   // XP
   totalXP: 0,
   addXP: (amount) => set((state) => ({ totalXP: state.totalXP + amount })),
+  setTotalXP: (totalXP) => set({ totalXP }),
 
   // App State
   isAppReady: false,

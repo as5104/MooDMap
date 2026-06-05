@@ -20,7 +20,7 @@ import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { useAppStore } from '@/stores/appStore';
 import { signOut } from '@/lib/auth';
-import { getMoodScore, getMoodStreak, getMoodCount } from '@/services/moodService';
+import { getMoodScoreForPeriod, getMoodStreak, getMoodCount } from '@/services/moodService';
 import { getJournalCount } from '@/services/journalService';
 import { exportUserData, importUserData } from '@/services/dataTransferService';
 
@@ -50,12 +50,16 @@ export default function ProfileScreen() {
       const jCount = getJournalCount(userId);
       const mCount = getMoodCount(userId);
       const streakData = getMoodStreak(userId);
-      const scoreVal = getMoodScore(userId);
+      const scoreVal = getMoodScoreForPeriod(userId, 7);
 
       setJournalCount(jCount);
       setMoodCount(mCount);
       setStreak(streakData.current);
       setScore(scoreVal);
+
+      // Dynamically calculate and update total XP in store
+      const computedXP = (mCount * 25) + (jCount * 15);
+      useAppStore.getState().setTotalXP(computedXP);
     } catch (e) {
       console.error('[Profile] Load error:', e);
     }

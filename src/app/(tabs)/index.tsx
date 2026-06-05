@@ -29,6 +29,7 @@ import {
   getMoodStreak,
   getMoodSummary,
   getTopMoods,
+  getMoodCount,
   type DayMoodData,
   type MoodSummaryData,
   type TopMoodItem,
@@ -82,6 +83,7 @@ export default function HomeScreen() {
       const streakData = getMoodStreak(userId);
       const journal = getLatestJournal(userId);
       const jCount = getJournalCount(userId);
+      const mCount = getMoodCount(userId);
       const summaryData = getMoodSummary(userId, 7);
       const topMoodsData = getTopMoods(userId, 7, 3);
 
@@ -107,6 +109,10 @@ export default function HomeScreen() {
       setJournalCount(jCount);
       setSummary(summaryData);
       setTopMoods(topMoodsData);
+
+      // Dynamically calculate and update total XP in store
+      const computedXP = (mCount * 25) + (jCount * 15);
+      useAppStore.getState().setTotalXP(computedXP);
     } catch (e) {
       console.error('[Home] Load error:', e);
     }
