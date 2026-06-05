@@ -412,3 +412,317 @@ export function getMoodStreak(userId?: string): { current: number; longest: numb
     total: result.total_entries,
   };
 }
+
+// Analytics Functions
+
+export interface TopMoodItem {
+  moodType: MoodType;
+  count: number;
+  percentage: number;
+}
+
+export interface TagFrequencyItem {
+  tag: string;
+  count: number;
+  avgScore: number;
+}
+
+export interface MoodCalendarItem {
+  date: string;
+  moodType: MoodType;
+  moodScore: number;
+}
+
+export interface MoodSummaryData {
+  dominantMood: MoodType | null;
+  dominantMoodCount: number;
+  bestDay: { date: string; score: number } | null;
+  worstDay: { date: string; score: number } | null;
+  trendDirection: 'improving' | 'declining' | 'stable';
+  avgScore: number;
+  totalEntries: number;
+  topTrigger: string | null;
+}
+
+export interface EnergyStressData {
+  avgEnergy: number;
+  avgStress: number;
+  energyCount: number;
+  stressCount: number;
+}
+
+/**
+ * Period-aware mood score (0-100)
+ */
+export function getMoodScoreForPeriod(userId?: string, days: number = 7): number {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const result = userId
+    ? queryFirst<{ avg_score: number; cnt: number }>(
+        'SELECT AVG(mood_score) as avg_score, COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ?',
+        [startDate, today, userId]
+      )
+    : queryFirst<{ avg_score: number; cnt: number }>(
+        'SELECT AVG(mood_score) as avg_score, COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ?',
+        [startDate, today]
+      );
+
+  if (!result || result.cnt === 0 || result.avg_score === null) return 0;
+  return Math.round((result.avg_score / 10) * 100);
+}
+
+/**
+ * Get top mood types by frequency within a period
+ */
+export function getTopMoods(userId?: string, days: number = 30, limit: number = 5): TopMoodItem[] {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  // Query the total count of all entries in the period to base percentages on the true total
+  const totalResult = userId
+    ? queryFirst<{ total: number }>(
+        'SELECT COUNT(*) as total FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ?',
+        [startDate, today, userId]
+      )
+    : queryFirst<{ total: number }>(
+        'SELECT COUNT(*) as total FROM mood_entries WHERE date >= ? AND date <= ?',
+        [startDate, today]
+      );
+
+  const totalCount = totalResult?.total ?? 0;
+  if (totalCount === 0) return [];
+
+  const rows = userId
+    ? queryAll<{ mood_type: string; cnt: number }>(
+        'SELECT mood_type, COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ? GROUP BY mood_type ORDER BY cnt DESC LIMIT ?',
+        [startDate, today, userId, limit]
+      )
+    : queryAll<{ mood_type: string; cnt: number }>(
+        'SELECT mood_type, COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ? GROUP BY mood_type ORDER BY cnt DESC LIMIT ?',
+        [startDate, today, limit]
+      );
+
+  return rows.map((r) => ({
+    moodType: r.mood_type as MoodType,
+    count: r.cnt,
+    percentage: Math.round((r.cnt / totalCount) * 100),
+  }));
+}
+
+/**
+ * Get tag frequency + average mood score per tag
+ */
+export function getTagFrequency(userId?: string, days: number = 30, limit: number = 8): TagFrequencyItem[] {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const rows = userId
+    ? queryAll<{ tags: string; mood_score: number }>(
+        "SELECT tags, mood_score FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ? AND tags IS NOT NULL AND tags != '[]'",
+        [startDate, today, userId]
+      )
+    : queryAll<{ tags: string; mood_score: number }>(
+        "SELECT tags, mood_score FROM mood_entries WHERE date >= ? AND date <= ? AND tags IS NOT NULL AND tags != '[]'",
+        [startDate, today]
+      );
+
+  const tagMap = new Map<string, { count: number; totalScore: number }>();
+
+  for (const row of rows) {
+    try {
+      const tags: string[] = JSON.parse(row.tags);
+      for (const tag of tags) {
+        const existing = tagMap.get(tag) ?? { count: 0, totalScore: 0 };
+        existing.count += 1;
+        existing.totalScore += row.mood_score;
+        tagMap.set(tag, existing);
+      }
+    } catch {
+      // Skip malformed JSON
+    }
+  }
+
+  const result: TagFrequencyItem[] = [];
+  for (const [tag, data] of tagMap.entries()) {
+    result.push({
+      tag,
+      count: data.count,
+      avgScore: Math.round((data.totalScore / data.count) * 10) / 10,
+    });
+  }
+
+  result.sort((a, b) => b.count - a.count);
+  return result.slice(0, limit);
+}
+
+/**
+ * Get mood data for calendar grid (one month)
+ */
+export function getMoodCalendarData(userId?: string, year?: number, month?: number): MoodCalendarItem[] {
+  const now = new Date();
+  const y = year ?? now.getFullYear();
+  const m = month ?? now.getMonth(); // 0-indexed
+
+  const startDate = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  const endDate = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+  const rows = userId
+    ? queryAll<{ date: string; mood_type: string; mood_score: number }>(
+        'SELECT date, mood_type, mood_score FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ? ORDER BY date',
+        [startDate, endDate, userId]
+      )
+    : queryAll<{ date: string; mood_type: string; mood_score: number }>(
+        'SELECT date, mood_type, mood_score FROM mood_entries WHERE date >= ? AND date <= ? ORDER BY date',
+        [startDate, endDate]
+      );
+
+  return rows.map((r) => ({
+    date: r.date,
+    moodType: r.mood_type as MoodType,
+    moodScore: r.mood_score,
+  }));
+}
+
+/**
+ * Generate rule-based mood summary for a period
+ */
+export function getMoodSummary(userId?: string, days: number = 7): MoodSummaryData {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const entries = userId
+    ? queryAll<MoodEntryRow>(
+        'SELECT * FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ? ORDER BY date',
+        [startDate, today, userId]
+      )
+    : queryAll<MoodEntryRow>(
+        'SELECT * FROM mood_entries WHERE date >= ? AND date <= ? ORDER BY date',
+        [startDate, today]
+      );
+
+  const empty: MoodSummaryData = {
+    dominantMood: null,
+    dominantMoodCount: 0,
+    bestDay: null,
+    worstDay: null,
+    trendDirection: 'stable',
+    avgScore: 0,
+    totalEntries: 0,
+    topTrigger: null,
+  };
+
+  if (entries.length === 0) return empty;
+
+  // Dominant mood
+  const moodCounts = new Map<string, number>();
+  let bestDay: { date: string; score: number } | null = null;
+  let worstDay: { date: string; score: number } | null = null;
+  let totalScore = 0;
+  const tagCounts = new Map<string, number>();
+
+  for (const e of entries) {
+    // Count moods
+    moodCounts.set(e.mood_type, (moodCounts.get(e.mood_type) ?? 0) + 1);
+
+    // Track best/worst
+    if (!bestDay || e.mood_score > bestDay.score) {
+      bestDay = { date: e.date, score: e.mood_score };
+    }
+    if (!worstDay || e.mood_score < worstDay.score) {
+      worstDay = { date: e.date, score: e.mood_score };
+    }
+
+    totalScore += e.mood_score;
+
+    // Count tags
+    if (e.tags) {
+      try {
+        const tags: string[] = JSON.parse(e.tags);
+        for (const t of tags) {
+          tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Find dominant mood
+  let dominantMood: MoodType | null = null;
+  let dominantMoodCount = 0;
+  for (const [mood, count] of moodCounts.entries()) {
+    if (count > dominantMoodCount) {
+      dominantMood = mood as MoodType;
+      dominantMoodCount = count;
+    }
+  }
+
+  // Find top trigger
+  let topTrigger: string | null = null;
+  let topTriggerCount = 0;
+  for (const [tag, count] of tagCounts.entries()) {
+    if (count > topTriggerCount) {
+      topTrigger = tag;
+      topTriggerCount = count;
+    }
+  }
+
+  // Determine trend (compare first half vs second half)
+  let trendDirection: 'improving' | 'declining' | 'stable' = 'stable';
+  if (entries.length >= 4) {
+    const mid = Math.floor(entries.length / 2);
+    const firstHalf = entries.slice(0, mid);
+    const secondHalf = entries.slice(mid);
+    const firstAvg = firstHalf.reduce((s, e) => s + e.mood_score, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((s, e) => s + e.mood_score, 0) / secondHalf.length;
+    const diff = secondAvg - firstAvg;
+    if (diff > 0.5) trendDirection = 'improving';
+    else if (diff < -0.5) trendDirection = 'declining';
+  }
+
+  return {
+    dominantMood,
+    dominantMoodCount,
+    bestDay,
+    worstDay,
+    trendDirection,
+    avgScore: Math.round((totalScore / entries.length) * 10) / 10,
+    totalEntries: entries.length,
+    topTrigger,
+  };
+}
+
+/**
+ * Get average energy and stress levels for a period
+ */
+export function getAvgEnergyStress(userId?: string, days: number = 7): EnergyStressData {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const result = userId
+    ? queryFirst<{ avg_energy: number | null; avg_stress: number | null; energy_cnt: number; stress_cnt: number }>(
+        `SELECT
+          AVG(CASE WHEN energy_level IS NOT NULL THEN energy_level END) as avg_energy,
+          AVG(CASE WHEN stress_level IS NOT NULL THEN stress_level END) as avg_stress,
+          SUM(CASE WHEN energy_level IS NOT NULL THEN 1 ELSE 0 END) as energy_cnt,
+          SUM(CASE WHEN stress_level IS NOT NULL THEN 1 ELSE 0 END) as stress_cnt
+        FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ?`,
+        [startDate, today, userId]
+      )
+    : queryFirst<{ avg_energy: number | null; avg_stress: number | null; energy_cnt: number; stress_cnt: number }>(
+        `SELECT
+          AVG(CASE WHEN energy_level IS NOT NULL THEN energy_level END) as avg_energy,
+          AVG(CASE WHEN stress_level IS NOT NULL THEN stress_level END) as avg_stress,
+          SUM(CASE WHEN energy_level IS NOT NULL THEN 1 ELSE 0 END) as energy_cnt,
+          SUM(CASE WHEN stress_level IS NOT NULL THEN 1 ELSE 0 END) as stress_cnt
+        FROM mood_entries WHERE date >= ? AND date <= ?`,
+        [startDate, today]
+      );
+
+  return {
+    avgEnergy: result?.avg_energy ? Math.round(result.avg_energy * 10) / 10 : 0,
+    avgStress: result?.avg_stress ? Math.round(result.avg_stress * 10) / 10 : 0,
+    energyCount: result?.energy_cnt ?? 0,
+    stressCount: result?.stress_cnt ?? 0,
+  };
+}

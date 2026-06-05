@@ -3,7 +3,7 @@
  */
 
 import React, { type ReactNode } from 'react';
-import { StyleSheet, View, type ViewStyle, Pressable, Platform } from 'react-native';
+import { StyleSheet, View, type ViewStyle, type StyleProp, Pressable, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Radius, Spacing } from '@/constants/layout';
 import { Colors } from '@/constants/colors';
@@ -16,7 +16,7 @@ interface GlassCardProps {
   children: ReactNode;
   intensity?: Intensity;
   padding?: 'none' | 'sm' | 'md' | 'lg';
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   glowColor?: string;
   onPress?: () => void;
   metric?: MetricVariant;
@@ -80,18 +80,30 @@ export const GlassCard: React.FC<GlassCardProps> = ({
 
   // Metric card: solid color, no blur
   if (isMetric) {
-    const metricStyle: ViewStyle[] = [
+    const metricStyle: StyleProp<ViewStyle> = [
       styles.card,
       {
         backgroundColor: METRIC_COLORS[metric],
         borderColor: 'transparent',
         padding: PADDING_MAP[padding],
       },
-      style ?? {},
+      style,
     ];
     if (onPress) {
       return (
-        <Pressable onPress={onPress} style={({ pressed }) => [...metricStyle, pressed && styles.pressed]}>
+        <Pressable
+          onPress={onPress}
+          style={({ pressed }) => [
+            styles.card,
+            {
+              backgroundColor: METRIC_COLORS[metric],
+              borderColor: 'transparent',
+              padding: PADDING_MAP[padding],
+            },
+            style,
+            pressed && styles.pressed,
+          ]}
+        >
           {children}
         </Pressable>
       );
@@ -100,7 +112,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   }
 
   // Frosted glass card
-  const outerStyle: ViewStyle[] = [
+  const outerStyle: StyleProp<ViewStyle> = [
     styles.card,
     { borderColor: BORDER[intensity] },
     glowColor
@@ -113,7 +125,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
           elevation: 4,
         }
       : {},
-    style ?? {},
+    style,
   ];
 
   const canUseAndroidBlur = Platform.OS === 'android' && blurCtx?.ready;
@@ -161,7 +173,25 @@ export const GlassCard: React.FC<GlassCardProps> = ({
 
   if (onPress) {
     return (
-      <Pressable onPress={onPress} style={({ pressed }) => [...outerStyle, pressed && styles.pressed]}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.card,
+          { borderColor: BORDER[intensity] },
+          glowColor
+            ? {
+                borderColor: `${glowColor}40`,
+                shadowColor: glowColor,
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.2,
+                shadowRadius: 16,
+                elevation: 4,
+              }
+            : {},
+          style,
+          pressed && styles.pressed,
+        ]}
+      >
         {cardContent}
       </Pressable>
     );
