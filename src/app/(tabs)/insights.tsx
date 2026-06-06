@@ -684,7 +684,7 @@ const calS = StyleSheet.create({
   cell: { width: `${100 / 7}%`, alignItems: 'center', paddingVertical: 3 },
   weekText: { fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.tiny, color: Colors.text.tertiary, textTransform: 'uppercase' },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
-  dayCircle: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  dayCircle: { width: 34, height: 34, borderRadius: 8, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   todayRing: { borderWidth: 1.5, borderColor: Colors.accent.primary + '50' },
   moodDot: { position: 'absolute', top: 3, right: 5, width: 5, height: 5, borderRadius: 2.5 },
   dayText: { fontFamily: Fonts.body, fontSize: FontSizes.caption, color: Colors.text.secondary },

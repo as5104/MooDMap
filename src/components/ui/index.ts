@@ -14,3 +14,6 @@ export type { FaceExpression } from './MoodFace';
 export { FloatingTabBar } from './FloatingTabBar';
 export { MetricCard } from './MetricCard';
 export { WeeklyMoodRow } from './WeeklyMoodRow';
+export { CustomAlert } from './CustomAlert';
+export { customAlert } from '@/stores/alertStore';
+

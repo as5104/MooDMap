@@ -2,39 +2,39 @@
  * MoodMap — Home Dashboard
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-} from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GradientBackground, GlassCard, MetricCard, WeeklyMoodRow } from '@/components/ui';
+import { GlassCard, GradientBackground, MetricCard, WeeklyMoodRow } from '@/components/ui';
 import { MoodFace } from '@/components/ui/MoodFace';
 import { Colors } from '@/constants/colors';
-import { Fonts, FontSizes } from '@/constants/typography';
-import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
+import { Radius, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { MOOD_MAP, type MoodType } from '@/constants/moods';
-import { TAG_MAP } from '@/constants/tags';
 import { getSuggestion } from '@/constants/suggestions';
-import { useAppStore } from '@/stores/appStore';
+import { TAG_MAP } from '@/constants/tags';
+import { Fonts, FontSizes } from '@/constants/typography';
+import { getJournalCount, getLatestJournal, type JournalEntryRow } from '@/services/journalService';
 import {
-  getTodayMood,
-  getWeeklyMoods,
+  getMoodCount,
   getMoodScoreForPeriod,
   getMoodStreak,
   getMoodSummary,
+  getTodayMood,
   getTopMoods,
-  getMoodCount,
+  getWeeklyMoods,
   type DayMoodData,
   type MoodSummaryData,
   type TopMoodItem,
 } from '@/services/moodService';
-import { getLatestJournal, getJournalCount, type JournalEntryRow } from '@/services/journalService';
+import { useAppStore } from '@/stores/appStore';
+import { Feather } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Greeting based on time of day
 function getGreeting(): string {
@@ -227,7 +227,7 @@ export default function HomeScreen() {
               currentMood ? (
                 <Feather
                   name={currentMood.icon as any}
-                  size={34}
+                  size={42}
                   color={Colors.text.onAccent}
                 />
               ) : '—'
@@ -389,7 +389,7 @@ export default function HomeScreen() {
         <View style={styles.sectionRow}>
           <View style={styles.sectionTitleRow}>
             <Feather name="bar-chart-2" size={15} color={Colors.accent.primary} />
-            <Text style={styles.sectionTitle}>Mood History</Text>
+            <Text style={styles.sectionTitleInline}>Mood History</Text>
           </View>
           <Pressable onPress={() => router.push('/(tabs)/insights')} hitSlop={8}>
             <Text style={styles.seeAll}>See all</Text>
@@ -455,7 +455,7 @@ export default function HomeScreen() {
         <View style={styles.sectionRow}>
           <View style={styles.sectionTitleRow}>
             <Feather name="book-open" size={15} color={Colors.accent.lavender} />
-            <Text style={styles.sectionTitle}>Recent Journal</Text>
+            <Text style={styles.sectionTitleInline}>Recent Journal</Text>
           </View>
           <Pressable onPress={() => router.push('/(tabs)/journal')} hitSlop={8}>
             <Text style={styles.seeAll}>See all</Text>
@@ -634,6 +634,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.h3,
     color: Colors.text.primary,
     marginBottom: Spacing.lg,
+  },
+  sectionTitleInline: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.primary,
   },
   metricsRow: {
     flexDirection: 'row',

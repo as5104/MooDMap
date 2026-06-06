@@ -9,12 +9,12 @@ import {
   Text,
   ScrollView,
   Pressable,
-  Alert,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, GlassCard, Button } from '@/components/ui';
+import { GradientBackground, GlassCard, Button, customAlert } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
@@ -90,7 +90,7 @@ export default function ProfileScreen() {
   const xpProgress = xpInLevel / XP_PER_LEVEL;
 
   const handleLogout = async () => {
-    Alert.alert('Sign Out', 'Are you sure?', [
+    customAlert('Sign Out', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out',
@@ -99,7 +99,7 @@ export default function ProfileScreen() {
           try {
             await signOut();
             // The auth state listener in _layout.tsx will handle navigation,
-            // but we also navigate explicitly for immediate feedback
+            // also navigate explicitly for immediate feedback
             router.replace('/(auth)/login');
           } catch (e) {
             console.error('[Profile] Sign out error:', e);
@@ -152,39 +152,88 @@ export default function ProfileScreen() {
           </View>
         </GlassCard>
 
-        {/* Stats Row */}
-        <GlassCard intensity="medium" padding="lg" style={styles.statsRow}>
-          <View style={styles.statsInner}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{journalCount}</Text>
-              <Text style={styles.statLabel}>Journals</Text>
+        {/* Dashboard Section: Circle Progress & Stats Side-by-Side */}
+        <View style={styles.dashboardRow}>
+          {/* Left Card: Ring for Mood Level / XP Progress */}
+          <GlassCard intensity="medium" padding="md" style={styles.leftDashboardCard}>
+            <View style={styles.circleContainer}>
+              <Svg width={110} height={110} viewBox="0 0 100 100">
+                {/* Thin dark track circle */}
+                <Circle
+                  cx="50"
+                  cy="50"
+                  r="44"
+                  stroke="rgba(255, 255, 255, 0.05)"
+                  strokeWidth="6.5"
+                  fill="none"
+                />
+                {/* Glowing border underlay */}
+                <Circle
+                  cx="50"
+                  cy="50"
+                  r="44"
+                  stroke={Colors.accent.primary}
+                  strokeWidth="11"
+                  strokeDasharray={`${2 * Math.PI * 44}`}
+                  strokeDashoffset={`${2 * Math.PI * 44 * (1 - Math.max(xpProgress, 0.02))}`}
+                  strokeLinecap="round"
+                  fill="none"
+                  opacity="0.12"
+                  transform="rotate(-90 50 50)"
+                />
+                {/* Main progress arc */}
+                <Circle
+                  cx="50"
+                  cy="50"
+                  r="44"
+                  stroke={Colors.accent.primary}
+                  strokeWidth="6.5"
+                  strokeDasharray={`${2 * Math.PI * 44}`}
+                  strokeDashoffset={`${2 * Math.PI * 44 * (1 - Math.max(xpProgress, 0.02))}`}
+                  strokeLinecap="round"
+                  fill="none"
+                  transform="rotate(-90 50 50)"
+                />
+              </Svg>
+              {/* Inner Text content overlay */}
+              <View style={styles.circleTextOverlay}>
+                <Text style={styles.circleLevelLabel}>Lvl</Text>
+                <Text style={styles.circleLevelValue}>{currentLevel}</Text>
+                <Text style={styles.circleXPText}>
+                  {xpInLevel}/{XP_PER_LEVEL}
+                </Text>
+              </View>
             </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{streak}</Text>
-              <Text style={styles.statLabel}>Streak</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{score || '—'}</Text>
-              <Text style={styles.statLabel}>Score</Text>
-            </View>
-          </View>
-        </GlassCard>
+            <Text style={styles.circleCardFooter} numberOfLines={1}>
+              {moodCount} total entries
+            </Text>
+          </GlassCard>
 
-        {/* XP Progress */}
-        <GlassCard intensity="medium" padding="lg" style={styles.xpCard}>
-          <View style={styles.xpRow}>
-            <Text style={styles.xpTitle}>Mood Level</Text>
-            <Text style={styles.xpLevel}>Lvl {currentLevel}</Text>
-          </View>
-          <View style={styles.xpBarBg}>
-            <View style={[styles.xpBarFill, { width: `${Math.max(xpProgress * 100, 2)}%` }]} />
-          </View>
-          <Text style={styles.xpText}>
-            {xpInLevel} / {XP_PER_LEVEL} XP to next level • {moodCount} total entries
-          </Text>
-        </GlassCard>
+          {/* Right Card: Score, Journals & Streak */}
+          <GlassCard intensity="medium" padding="md" style={styles.rightDashboardCard}>
+            {/* Top half: Mood Score */}
+            <View style={styles.scoreContainer}>
+              <Text style={styles.scoreValue}>{score || '—'}</Text>
+              <Text style={styles.scoreLabel}>Mood Score</Text>
+            </View>
+
+            {/* Separator */}
+            <View style={styles.cardDivider} />
+
+            {/* Bottom half: Journal & Streak side-by-side */}
+            <View style={styles.bottomStatsRow}>
+              <View style={styles.bottomStatItem}>
+                <Text style={styles.bottomStatValue}>{journalCount}</Text>
+                <Text style={styles.bottomStatLabel}>Journals</Text>
+              </View>
+              <View style={styles.bottomStatDivider} />
+              <View style={styles.bottomStatItem}>
+                <Text style={styles.bottomStatValue}>{streak}</Text>
+                <Text style={styles.bottomStatLabel}>Streak</Text>
+              </View>
+            </View>
+          </GlassCard>
+        </View>
 
         {/* Menu */}
         <GlassCard intensity="subtle" padding="none" style={styles.menuCard}>
@@ -277,66 +326,110 @@ const styles = StyleSheet.create({
     color: Colors.accent.olive,
   },
 
-  statsRow: {
-    marginBottom: Spacing.xl,
-  },
-  statsInner: {
+  dashboardRow: {
     flexDirection: 'row',
+    gap: Spacing.md,
+    marginBottom: Spacing.xl,
+    alignItems: 'stretch',
   },
-  statItem: {
+  leftDashboardCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rightDashboardCard: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  circleContainer: {
+    position: 'relative',
+    width: 110,
+    height: 110,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circleTextOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circleLevelLabel: {
+    fontFamily: Fonts.body,
+    fontSize: 10,
+    color: Colors.text.secondary,
+    textTransform: 'uppercase',
+    lineHeight: 12,
+  },
+  circleLevelValue: {
+    fontFamily: Fonts.heading,
+    fontSize: 28,
+    color: Colors.text.primary,
+    lineHeight: 32,
+  },
+  circleXPText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: 9,
+    color: Colors.accent.olive,
+    lineHeight: 12,
+  },
+  circleCardFooter: {
+    fontFamily: Fonts.body,
+    fontSize: 10,
+    color: Colors.text.secondary,
+    marginTop: Spacing.md,
+    textAlign: 'center',
+  },
+  scoreContainer: {
+    alignItems: 'center',
+    paddingTop: Spacing.xs,
+  },
+  scoreValue: {
+    fontFamily: Fonts.heading,
+    fontSize: 32,
+    color: Colors.text.primary,
+    lineHeight: 36,
+  },
+  scoreLabel: {
+    fontFamily: Fonts.body,
+    fontSize: 10,
+    color: Colors.text.secondary,
+    marginTop: 2,
+    textTransform: 'uppercase',
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: Spacing.sm,
+  },
+  bottomStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: Spacing.xs,
+  },
+  bottomStatItem: {
     flex: 1,
     alignItems: 'center',
   },
-  statValue: {
+  bottomStatValue: {
     fontFamily: Fonts.heading,
-    fontSize: FontSizes.h1,
+    fontSize: 22,
     color: Colors.text.primary,
-    marginBottom: 2,
+    lineHeight: 26,
   },
-  statLabel: {
+  bottomStatLabel: {
     fontFamily: Fonts.body,
-    fontSize: FontSizes.caption,
+    fontSize: 12,
     color: Colors.text.secondary,
+    marginTop: 2,
   },
-  statDivider: {
+  bottomStatDivider: {
     width: 1,
+    height: 24,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-
-  xpCard: {
-    marginBottom: Spacing.xl,
-  },
-  xpRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  xpTitle: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: FontSizes.body,
-    color: Colors.text.primary,
-  },
-  xpLevel: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: FontSizes.bodySmall,
-    color: Colors.accent.olive,
-  },
-  xpBarBg: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    marginBottom: Spacing.sm,
-  },
-  xpBarFill: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.accent.olive,
-  },
-  xpText: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
   },
 
   menuCard: {

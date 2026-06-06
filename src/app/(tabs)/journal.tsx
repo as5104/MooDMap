@@ -2,40 +2,39 @@
  * MoodMap — Journal Screen
  */
 
-import React, { useState, useCallback } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  Alert,
-  RefreshControl,
-} from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
-import { GradientBackground, GlassCard } from '@/components/ui';
+import { GlassCard, GradientBackground, customAlert } from '@/components/ui';
 import { MoodFace } from '@/components/ui/MoodFace';
 import { Colors } from '@/constants/colors';
-import { Fonts, FontSizes } from '@/constants/typography';
-import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
+import { Radius, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { MOOD_MAP, type MoodType } from '@/constants/moods';
 import { getPromptsForMood, type JournalPrompt } from '@/constants/prompts';
-import { useAppStore } from '@/stores/appStore';
-import { analyzeJournalSentiment } from '@/utils/sentimentAnalyzer';
+import { Fonts, FontSizes } from '@/constants/typography';
 import {
-  getJournalCount,
-  getRecentJournals,
-  getJournalDotGrid,
-  deleteJournalEntry,
-  loadDraft,
   deleteDraft,
-  type JournalEntryRow,
+  deleteJournalEntry,
+  getJournalCount,
+  getJournalDotGrid,
+  getRecentJournals,
+  loadDraft,
   type JournalDotData,
   type JournalDraft,
+  type JournalEntryRow,
 } from '@/services/journalService';
 import { getTodayMood } from '@/services/moodService';
+import { useAppStore } from '@/stores/appStore';
+import { analyzeJournalSentiment } from '@/utils/sentimentAnalyzer';
+import { Feather } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DOT_COLORS: Record<string, string> = {
   positive: Colors.accent.primary,
@@ -116,7 +115,7 @@ export default function JournalScreen() {
   };
 
   const handleDeleteEntry = (entryId: string, entryTitle: string | null) => {
-    Alert.alert(
+    customAlert(
       'Delete Entry',
       `Delete "${entryTitle || 'this entry'}"? This cannot be undone.`,
       [
@@ -137,7 +136,7 @@ export default function JournalScreen() {
   };
 
   const handleDeleteDraft = () => {
-    Alert.alert(
+    customAlert(
       'Discard Draft',
       'Are you sure you want to discard this draft?',
       [
@@ -231,9 +230,14 @@ export default function JournalScreen() {
         </GlassCard>
 
         {/* Prompt Carousel */}
-        <Text style={styles.sectionTitle}>
-          {moodPrompts.length > 0 ? 'Prompts for You' : 'Writing Prompts'}
-        </Text>
+        <View style={styles.sectionRow}>
+          <View style={styles.sectionTitleRow}>
+            <Feather name="help-circle" size={15} color={Colors.accent.primary} />
+            <Text style={styles.sectionTitleInline}>
+              {moodPrompts.length > 0 ? 'Prompts for You' : 'Writing Prompts'}
+            </Text>
+          </View>
+        </View>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -266,7 +270,12 @@ export default function JournalScreen() {
         {/* Draft Section */}
         {draft && (
           <>
-            <Text style={styles.sectionTitle}>Draft</Text>
+            <View style={styles.sectionRow}>
+              <View style={styles.sectionTitleRow}>
+                <Feather name="file-text" size={15} color={Colors.accent.amber} />
+                <Text style={styles.sectionTitleInline}>Draft</Text>
+              </View>
+            </View>
             <Pressable
               onPress={() => router.push('/journal-editor')}
               onLongPress={handleDeleteDraft}
@@ -307,7 +316,10 @@ export default function JournalScreen() {
         )}
 
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Recent Entries</Text>
+          <View style={styles.sectionTitleRow}>
+            <Feather name="clock" size={15} color={Colors.accent.lavender} />
+            <Text style={styles.sectionTitleInline}>Recent Entries</Text>
+          </View>
           <Pressable
             style={styles.seeAllBtn}
             onPress={() => router.push('/journal-all')}
@@ -542,6 +554,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.lg,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  sectionTitleInline: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.primary,
   },
 
   // See All

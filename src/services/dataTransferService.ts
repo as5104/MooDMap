@@ -2,10 +2,11 @@
  * MoodMap — Data Transfer Service
  */
 
-import { Alert, Share } from 'react-native';
+import { Share } from 'react-native';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { queryAll, execute } from '@/db/client';
+import { customAlert } from '@/components/ui';
 
 const EXPORT_VERSION = 1;
 
@@ -80,14 +81,14 @@ export async function exportUserData(userId: string): Promise<boolean> {
       await Share.share({ message: json, title: fileName });
     }
 
-    Alert.alert(
+    customAlert(
       'Export Complete',
       `Exported ${totalItems} items (${moodEntries.length} moods, ${journalEntries.length} journals).`,
     );
     return true;
   } catch (error: any) {
     console.error('[Export] Failed:', error);
-    Alert.alert('Export Failed', error.message || 'Could not export data.');
+    customAlert('Export Failed', error.message || 'Could not export data.');
     return false;
   }
 }
@@ -119,7 +120,7 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
       const f = new File(pickedFile.uri);
       content = await f.text();
     } else {
-      Alert.alert('Error', 'Could not read the selected file.');
+      customAlert('Error', 'Could not read the selected file.');
       return false;
     }
 
@@ -127,17 +128,17 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
     try {
       parsed = JSON.parse(content);
     } catch {
-      Alert.alert('Invalid File', 'This file is not a valid MooDMap backup.');
+      customAlert('Invalid File', 'This file is not a valid MooDMap backup.');
       return false;
     }
 
     if (parsed.app !== 'MooDMap' || !parsed.data) {
-      Alert.alert('Invalid Backup', 'This file is not a valid MooDMap backup.');
+      customAlert('Invalid Backup', 'This file is not a valid MooDMap backup.');
       return false;
     }
 
     if (parsed.version > EXPORT_VERSION) {
-      Alert.alert(
+      customAlert(
         'Newer Version',
         'This backup was created with a newer version of MooDMap. Please update the app first.',
       );
@@ -147,7 +148,7 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
     const { mood_entries = [], journal_entries = [], streaks = [], badges = [] } = parsed.data;
 
     return new Promise((resolve) => {
-      Alert.alert(
+      customAlert(
         'Import Data',
         `This backup contains ${mood_entries.length} moods, ${journal_entries.length} journals, and ${streaks.length + badges.length} other items.\n\nExisting data will be preserved. Only new entries will be added.\n\nContinue?`,
         [
@@ -245,11 +246,11 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
                   }
                 }
 
-                Alert.alert('Import Complete', `Successfully imported ${imported} items.`);
+                customAlert('Import Complete', `Successfully imported ${imported} items.`);
                 resolve(true);
               } catch (err: any) {
                 console.error('[Import] Failed:', err);
-                Alert.alert('Import Failed', err.message || 'Could not import data.');
+                customAlert('Import Failed', err.message || 'Could not import data.');
                 resolve(false);
               }
             },
@@ -259,7 +260,7 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
     });
   } catch (error: any) {
     console.error('[Import] Failed:', error);
-    Alert.alert('Import Failed', error.message || 'Could not import data.');
+    customAlert('Import Failed', error.message || 'Could not import data.');
     return false;
   }
 }

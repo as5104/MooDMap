@@ -160,6 +160,15 @@ export const GlassCard: React.FC<GlassCardProps> = ({
     );
   };
 
+  const flatStyle = StyleSheet.flatten(style) || {};
+  const contentStyle: ViewStyle = {
+    padding: PADDING_MAP[padding],
+    flex: flatStyle.flex !== undefined ? 1 : undefined,
+    justifyContent: flatStyle.justifyContent,
+    alignItems: flatStyle.alignItems,
+    flexDirection: flatStyle.flexDirection,
+  };
+
   const cardContent = (
     <>
       {/* Layer 1: Blur */}
@@ -167,7 +176,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
       {/* Layer 2: Dark frosted tint */}
       <View style={[StyleSheet.absoluteFill, { backgroundColor: FROSTED_TINT[intensity] }]} />
       {/* Layer 3: Content */}
-      <View style={{ padding: PADDING_MAP[padding] }}>{children}</View>
+      <View style={contentStyle}>{children}</View>
     </>
   );
 

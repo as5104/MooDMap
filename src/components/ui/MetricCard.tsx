@@ -78,11 +78,11 @@ const styles = StyleSheet.create({
   },
   value: {
     fontFamily: Fonts.heading,
-    fontSize: 36,
+    fontSize: 48,
     marginBottom: Spacing.xs,
   },
   valueNode: {
-    minHeight: 44,
+    minHeight: 52,
     marginBottom: Spacing.xs,
     justifyContent: 'center',
   },

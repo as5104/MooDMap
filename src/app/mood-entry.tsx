@@ -12,13 +12,12 @@ import {
   Animated,
   TextInput,
   Dimensions,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { MoodFace } from '@/components/ui/MoodFace';
-import { Button, Chip } from '@/components/ui';
+import { Button, Chip, customAlert } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius } from '@/constants/layout';
@@ -158,7 +157,7 @@ export default function MoodEntryScreen() {
       }, 1500);
     } catch (error) {
       console.error('[MoodEntry] Save error:', error);
-      Alert.alert('Error', 'Failed to save mood. Please try again.');
+      customAlert('Error', 'Failed to save mood. Please try again.');
       setSaving(false);
     }
   }, [selectedMood, energyLevel, stressLevel, selectedTags, note, user]);

@@ -4,25 +4,26 @@
  * and reactively redirects based on authentication status.
  */
 
-import React, { useEffect } from 'react';
-import { StatusBar } from 'expo-status-bar';
-import { Stack, useRouter, useSegments } from 'expo-router';
 import {
-  useFonts,
   Poppins_400Regular,
   Poppins_500Medium,
   Poppins_600SemiBold,
   Poppins_700Bold,
+  useFonts,
 } from '@expo-google-fonts/poppins';
 import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { Colors } from '@/constants/colors';
-import { useAppStore } from '@/stores/appStore';
-import { supabase } from '@/lib/supabase';
 import { initializeDatabase } from '@/db/client';
+import { supabase } from '@/lib/supabase';
+import { useAppStore } from '@/stores/appStore';
+import { CustomAlert } from '@/components/ui';
 
 // Prevent splash from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -81,6 +82,15 @@ export default function RootLayout() {
       try {
         // Initialize SQLite database
         await initializeDatabase();
+
+        // Load settings from database
+        try {
+          const { getSetting } = require('@/services/settingsService');
+          const savedViewMode = getSetting('journal_view_mode', 'list');
+          useAppStore.getState().setJournalViewMode(savedViewMode as any);
+        } catch (settingsError) {
+          console.error('[App] Failed to load settings:', settingsError);
+        }
 
         // Check for existing session
         const { data } = await supabase.auth.getSession();
@@ -170,6 +180,7 @@ export default function RootLayout() {
           }}
         />
       </Stack>
+      <CustomAlert />
     </GestureHandlerRootView>
   );
 }

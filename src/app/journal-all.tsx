@@ -2,30 +2,29 @@
  * MoodMap — All Journals Screen
  */
 
-import React, { useState, useCallback } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  Alert,
-  RefreshControl,
-  Dimensions,
-} from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
-import { GradientBackground, GlassCard } from '@/components/ui';
+import { GlassCard, GradientBackground, customAlert } from '@/components/ui';
 import { Colors } from '@/constants/colors';
+import { Radius, Shadows, Spacing } from '@/constants/layout';
 import { Fonts, FontSizes } from '@/constants/typography';
-import { Spacing, Radius, Shadows } from '@/constants/layout';
-import { useAppStore } from '@/stores/appStore';
 import {
-  getRecentJournals,
   deleteJournalEntry,
+  getRecentJournals,
   type JournalEntryRow,
 } from '@/services/journalService';
+import { useAppStore } from '@/stores/appStore';
+import { Feather } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import {
+  Dimensions,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_GAP = Spacing.sm;
@@ -64,7 +63,7 @@ export default function AllJournalsScreen() {
   );
 
   const handleDelete = (entryId: string, entryTitle: string | null) => {
-    Alert.alert(
+    customAlert(
       'Delete Entry',
       `Delete "${entryTitle || 'this entry'}"? This cannot be undone.`,
       [

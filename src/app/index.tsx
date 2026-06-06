@@ -3,13 +3,12 @@
  * Routes user to auth, onboarding, or home based on state
  */
 
-import React from 'react';
-import { View, StyleSheet, Text } from 'react-native';
-import { Redirect } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
-import { useAppStore } from '@/stores/appStore';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
+import { useAppStore } from '@/stores/appStore';
+import { Feather } from '@expo/vector-icons';
+import { Redirect } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
 
 export default function Index() {
   const session = useAppStore((s) => s.session);

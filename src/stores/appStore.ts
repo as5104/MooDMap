@@ -115,7 +115,15 @@ export const useAppStore = create<AppState>((set) => ({
   latestJournal: null,
   setLatestJournal: (latestJournal) => set({ latestJournal }),
   journalViewMode: 'list',
-  setJournalViewMode: (journalViewMode) => set({ journalViewMode }),
+  setJournalViewMode: (journalViewMode) => {
+    set({ journalViewMode });
+    try {
+      const { saveSetting } = require('@/services/settingsService');
+      saveSetting('journal_view_mode', journalViewMode);
+    } catch (e) {
+      console.error('[Store] Failed to save view mode setting:', e);
+    }
+  },
 
   // XP
   totalXP: 0,
