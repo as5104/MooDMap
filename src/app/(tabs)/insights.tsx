@@ -11,6 +11,7 @@ import {
   Pressable,
   Animated,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -32,6 +33,9 @@ import {
   getMoodCalendarData,
   getMoodSummary,
   getAvgEnergyStress,
+  getSleepMetricsAndCorrelation,
+  getMCQInsights,
+  formatMoodNote,
   type DayMoodData,
   type MoodEntryRow,
   type MoodStatsData,
@@ -40,6 +44,8 @@ import {
   type MoodCalendarItem,
   type MoodSummaryData,
   type EnergyStressData,
+  type SleepInsightData,
+  type MCQInsightItem,
 } from '@/services/moodService';
 
 const GAP = Spacing.md;
@@ -110,8 +116,8 @@ export default function InsightsScreen() {
   const [activePeriod, setActivePeriod] = useState(0);
   const [renderedPeriod, setRenderedPeriod] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
-  const tabAnim = useRef(new Animated.Value(0)).current;
-  const contentOpacity = useRef(new Animated.Value(1)).current;
+  const [tabAnim] = useState(() => new Animated.Value(0));
+  const [contentOpacity] = useState(() => new Animated.Value(1));
 
   const translateX = useMemo(() => {
     const tabWidth = containerWidth > 0 ? (containerWidth - 6) / 4 : 0;
@@ -119,7 +125,7 @@ export default function InsightsScreen() {
       inputRange: [0, 1, 2, 3],
       outputRange: [0, tabWidth, tabWidth * 2, tabWidth * 3],
     });
-  }, [containerWidth]);
+  }, [containerWidth, tabAnim]);
 
   const [moodScore, setMoodScoreLocal] = useState(0);
   const [weeklyMoods, setWeeklyMoods] = useState<DayMoodData[]>([]);
@@ -131,9 +137,12 @@ export default function InsightsScreen() {
   const [calendarData, setCalendarData] = useState<MoodCalendarItem[]>([]);
   const [summary, setSummary] = useState<MoodSummaryData | null>(null);
   const [energyStress, setEnergyStress] = useState<EnergyStressData | null>(null);
+  const [sleepData, setSleepData] = useState<SleepInsightData | null>(null);
+  const [mcqInsights, setMcqInsights] = useState<MCQInsightItem[]>([]);
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calYear, setCalYear] = useState(new Date().getFullYear());
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const loadDataForPeriod = useCallback((targetPeriodIndex: number) => {
     if (!isAppReady) return;
     try {
@@ -151,6 +160,8 @@ export default function InsightsScreen() {
       const cal = getMoodCalendarData(userId, calYear, calMonth);
       const summ = getMoodSummary(userId, targetDays);
       const energy = getAvgEnergyStress(userId, targetDays);
+      const sleep = getSleepMetricsAndCorrelation(userId, targetDays);
+      const mcqs = getMCQInsights(userId, targetDays);
 
       // Consolidate updates to run in a single React render batch
       setMoodScoreLocal(score);
@@ -163,6 +174,8 @@ export default function InsightsScreen() {
       setCalendarData(cal);
       setSummary(summ);
       setEnergyStress(energy);
+      setSleepData(sleep);
+      setMcqInsights(mcqs);
 
       setRenderedPeriod(targetPeriodIndex);
     } catch (e) {
@@ -255,7 +268,7 @@ export default function InsightsScreen() {
   // Dominant mood helper
   const dominantMoodDef = useMemo(() => {
     if (!summary?.dominantMood) return null;
-    return MOOD_MAP[summary.dominantMood];
+    return MOOD_MAP[summary.dominantMood as MoodType];
   }, [summary?.dominantMood]);
 
   const trendInfo = useMemo(() => {
@@ -334,19 +347,44 @@ export default function InsightsScreen() {
             {/* Right Column: Trend Direction */}
             <View style={s.flex1}>
               <View style={s.scoreIconRow}>
-                <View style={[s.iconBg, { backgroundColor: (summary?.trendDirection === 'improving' ? Colors.accent.primary : summary?.trendDirection === 'declining' ? Colors.accent.coral : Colors.accent.amber) + '18' }]}>
-                  <Feather name={summary?.trendDirection === 'improving' ? 'arrow-up-right' : summary?.trendDirection === 'declining' ? 'arrow-down-right' : 'minus'} size={16} color={summary?.trendDirection === 'improving' ? Colors.accent.primary : summary?.trendDirection === 'declining' ? Colors.accent.coral : Colors.accent.amber} />
+                <View
+                  style={[
+                    s.iconBg,
+                    {
+                      backgroundColor: !hasData
+                        ? 'rgba(255, 255, 255, 0.04)'
+                        : (summary?.trendDirection === 'improving'
+                            ? Colors.accent.primary
+                            : summary?.trendDirection === 'declining'
+                            ? Colors.accent.coral
+                            : Colors.accent.amber) + '18'
+                    }
+                  ]}
+                >
+                  <Feather
+                    name={!hasData ? 'minus' : summary?.trendDirection === 'improving' ? 'arrow-up-right' : summary?.trendDirection === 'declining' ? 'arrow-down-right' : 'minus'}
+                    size={16}
+                    color={!hasData ? Colors.text.tertiary : summary?.trendDirection === 'improving' ? Colors.accent.primary : summary?.trendDirection === 'declining' ? Colors.accent.coral : Colors.accent.amber}
+                  />
                 </View>
               </View>
               <Text
                 style={[
                   s.trendValText,
-                  { color: summary?.trendDirection === 'improving' ? Colors.accent.primary : summary?.trendDirection === 'declining' ? Colors.accent.coral : Colors.accent.amber }
+                  {
+                    color: !hasData
+                      ? Colors.text.primary
+                      : summary?.trendDirection === 'improving'
+                      ? Colors.accent.primary
+                      : summary?.trendDirection === 'declining'
+                      ? Colors.accent.coral
+                      : Colors.accent.amber
+                  }
                 ]}
                 numberOfLines={1}
                 adjustsFontSizeToFit
               >
-                {summary?.trendDirection === 'improving' ? 'Improving' : summary?.trendDirection === 'declining' ? 'Declining' : 'Stable'}
+                {!hasData ? '—' : summary?.trendDirection === 'improving' ? 'Improving' : summary?.trendDirection === 'declining' ? 'Declining' : 'Stable'}
               </Text>
               <Text style={s.scoreLabel}>Trend Direction</Text>
               <Text style={[s.scoreHint, { textAlign: 'left', marginTop: Spacing.sm }]}>
@@ -398,7 +436,7 @@ export default function InsightsScreen() {
           </GlassCard>
         )}
 
-        {/* ROW 4: Weekly Summary (60% width) + Distribution (40% width) */}
+        {/* ROW 4: Weekly Summary (60% width) + Energy & Stress Rings (40% width, separate stacked cards) */}
         {hasData && (
           <View style={s.bentoRow}>
             {/* Weekly Summary (60%) */}
@@ -409,85 +447,122 @@ export default function InsightsScreen() {
               </View>
               {summary && summary.dominantMood ? (
                 <View style={s.summaryList}>
-                  {/* Dominant Mood Row */}
-                  <View style={s.summaryRow}>
-                    <Feather name="smile" size={13} color={Colors.text.tertiary} style={s.summaryRowIcon} />
-                    <Text style={s.summaryRowLabel}>Dominant mood</Text>
-                    <View style={s.summaryValueContainer}>
-                      {dominantMoodDef && (
-                        <View style={[s.summaryDot, { backgroundColor: dominantMoodDef.color }]} />
-                      )}
-                      <Text style={s.summaryRowVal}>{dominantMoodDef?.label ?? summary.dominantMood}</Text>
-                    </View>
-                  </View>
+                  {(() => {
+                    const rows = [
+                      <View key="dominant" style={s.summaryRow}>
+                        <Feather name="smile" size={14} color={Colors.text.tertiary} style={s.summaryRowIcon} />
+                        <Text style={s.summaryRowLabel}>Dominant mood</Text>
+                        <View style={s.summaryValueContainer}>
+                          {dominantMoodDef && (
+                            <View style={[s.summaryDot, { backgroundColor: dominantMoodDef.color }]} />
+                          )}
+                          <Text style={s.summaryRowVal}>{dominantMoodDef?.label ?? summary.dominantMood}</Text>
+                        </View>
+                      </View>,
+                      <View key="trend" style={s.summaryRow}>
+                        <Feather name={trendInfo.icon as any} size={14} color={trendInfo.color} style={s.summaryRowIcon} />
+                        <Text style={s.summaryRowLabel}>Trend</Text>
+                        <Text style={[s.summaryRowVal, { color: trendInfo.color, fontFamily: Fonts.bodySemiBold }]}>
+                          {trendInfo.label}
+                        </Text>
+                      </View>
+                    ];
 
-                  {/* Trend Row */}
-                  <View style={s.summaryRow}>
-                    <Feather name={trendInfo.icon as any} size={13} color={trendInfo.color} style={s.summaryRowIcon} />
-                    <Text style={s.summaryRowLabel}>Trend</Text>
-                    <Text style={[s.summaryRowVal, { color: trendInfo.color, fontFamily: Fonts.bodySemiBold }]}>
-                      {trendInfo.label}
-                    </Text>
-                  </View>
+                    if (summary.bestDay) {
+                      rows.push(
+                        <View key="bestDay" style={s.summaryRow}>
+                          <Feather name="star" size={14} color={Colors.accent.amber} style={s.summaryRowIcon} />
+                          <Text style={s.summaryRowLabel}>Best Day</Text>
+                          <Text style={s.summaryRowVal}>
+                            {new Date(summary.bestDay.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          </Text>
+                        </View>
+                      );
+                    }
 
-                  {/* Best Day Row */}
-                  {summary.bestDay && (
-                    <View style={s.summaryRow}>
-                      <Feather name="star" size={13} color={Colors.accent.amber} style={s.summaryRowIcon} />
-                      <Text style={s.summaryRowLabel}>Best Day</Text>
-                      <Text style={s.summaryRowVal}>
-                        {new Date(summary.bestDay.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                      </Text>
-                    </View>
-                  )}
+                    if (summary.topTrigger) {
+                      rows.push(
+                        <View key="topTrigger" style={s.summaryRow}>
+                          <Feather name="tag" size={14} color={Colors.accent.lavender} style={s.summaryRowIcon} />
+                          <Text style={s.summaryRowLabel}>Top Trigger</Text>
+                          <Text style={s.summaryRowVal}>
+                            {TAG_MAP[summary.topTrigger]?.label ?? summary.topTrigger}
+                          </Text>
+                        </View>
+                      );
+                    }
 
-                  {/* Top Trigger Row */}
-                  {summary.topTrigger && (
-                    <View style={s.summaryRow}>
-                      <Feather name="tag" size={13} color={Colors.accent.lavender} style={s.summaryRowIcon} />
-                      <Text style={s.summaryRowLabel}>Top Trigger</Text>
-                      <Text style={s.summaryRowVal}>
-                        {TAG_MAP[summary.topTrigger]?.label ?? summary.topTrigger}
-                      </Text>
-                    </View>
-                  )}
+                    if (sleepData && sleepData.sleepCount > 0) {
+                      rows.push(
+                        <View key="avgSleep" style={s.summaryRow}>
+                          <Feather name="moon" size={14} color="#7AA2F7" style={s.summaryRowIcon} />
+                          <Text style={s.summaryRowLabel}>Avg Sleep</Text>
+                          <Text style={s.summaryRowVal}>
+                            {sleepData.avgSleepHours}h ({sleepData.avgSleepQuality}/5)
+                          </Text>
+                        </View>
+                      );
+                    }
+
+                    return rows.map((row, index) => (
+                      <React.Fragment key={row.key ?? String(index)}>
+                        {row}
+                        {index < rows.length - 1 && <View style={s.summaryDivider} />}
+                      </React.Fragment>
+                    ));
+                  })()}
                 </View>
               ) : (
                 <Text style={s.narrativeText}>Log more moods to view weekly summary.</Text>
               )}
             </GlassCard>
 
-            {/* Distribution (40%) */}
-            <GlassCard intensity="medium" padding="lg" style={s.flex4}>
-              <View style={s.cardHeader}>
-                <Feather name="pie-chart" size={13} color={Colors.accent.primary} />
-                <Text style={s.cardTitleSm}>Distribution</Text>
-              </View>
-              <View style={s.distRow}>
-                <View style={[s.distDot, { backgroundColor: Colors.accent.primary }]} />
-                <Text style={s.distLabel}>Positive</Text>
-                <Text style={s.distValue}>{stats.positive}</Text>
-              </View>
-              <View style={s.distRow}>
-                <View style={[s.distDot, { backgroundColor: Colors.accent.amber }]} />
-                <Text style={s.distLabel}>Neutral</Text>
-                <Text style={s.distValue}>{stats.neutral}</Text>
-              </View>
-              <View style={s.distRow}>
-                <View style={[s.distDot, { backgroundColor: Colors.accent.coral }]} />
-                <Text style={s.distLabel}>Negative</Text>
-                <Text style={s.distValue}>{stats.negative}</Text>
-              </View>
-              <View style={s.stackedBar}>
-                {stats.total > 0 && (
-                  <>
-                    <View style={[s.stackedSeg, { flex: stats.positive, backgroundColor: Colors.accent.primary, borderTopLeftRadius: 4, borderBottomLeftRadius: 4 }]} />
-                    <View style={[s.stackedSeg, { flex: Math.max(stats.neutral, 0.01), backgroundColor: Colors.accent.amber }]} />
-                    <View style={[s.stackedSeg, { flex: stats.negative, backgroundColor: Colors.accent.coral, borderTopRightRadius: 4, borderBottomRightRadius: 4 }]} />
-                  </>
-                )}
-              </View>
-            </GlassCard>
+            {/* Energy & Stress Rings (40% - Stacked separate cards) */}
+            <View style={[s.flex4, s.bentoCol]}>
+              {/* Energy Ring Card (Upper side) */}
+              <GlassCard intensity="medium" padding="md" style={s.ringCard}>
+                <View style={s.ringContainer}>
+                  <Svg width={60} height={60} viewBox="0 0 60 60">
+                    <Circle cx="30" cy="30" r="24" stroke="rgba(255, 255, 255, 0.04)" strokeWidth="4.5" fill="none" />
+                    {energyStress && energyStress.avgEnergy > 0 && (
+                      <>
+                        <Circle cx="30" cy="30" r="24" stroke={Colors.accent.primary} strokeWidth="7" strokeDasharray={`${Math.PI * 2 * 24}`} strokeDashoffset={`${Math.PI * 2 * 24 * (1 - energyStress.avgEnergy / 5)}`} strokeLinecap="round" fill="none" opacity="0.12" transform="rotate(-90 30 30)" />
+                        <Circle cx="30" cy="30" r="24" stroke={Colors.accent.primary} strokeWidth="4.5" strokeDasharray={`${Math.PI * 2 * 24}`} strokeDashoffset={`${Math.PI * 2 * 24 * (1 - energyStress.avgEnergy / 5)}`} strokeLinecap="round" fill="none" transform="rotate(-90 30 30)" />
+                      </>
+                    )}
+                  </Svg>
+                  <View style={s.ringTextOverlay}>
+                    <Text style={[s.ringTextValue, { color: Colors.accent.primary }]}>
+                      {energyStress && energyStress.avgEnergy > 0 ? energyStress.avgEnergy.toFixed(1) : '—'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={s.ringCardTitle} numberOfLines={1}>Energy</Text>
+                <Text style={s.ringCardSub} numberOfLines={1}>Avg Level</Text>
+              </GlassCard>
+
+              {/* Stress Ring Card (Down side) */}
+              <GlassCard intensity="medium" padding="md" style={s.ringCard}>
+                <View style={s.ringContainer}>
+                  <Svg width={60} height={60} viewBox="0 0 60 60">
+                    <Circle cx="30" cy="30" r="24" stroke="rgba(255, 255, 255, 0.04)" strokeWidth="4.5" fill="none" />
+                    {energyStress && energyStress.avgStress > 0 && (
+                      <>
+                        <Circle cx="30" cy="30" r="24" stroke={Colors.accent.coral} strokeWidth="7" strokeDasharray={`${Math.PI * 2 * 24}`} strokeDashoffset={`${Math.PI * 2 * 24 * (1 - energyStress.avgStress / 5)}`} strokeLinecap="round" fill="none" opacity="0.12" transform="rotate(-90 30 30)" />
+                        <Circle cx="30" cy="30" r="24" stroke={Colors.accent.coral} strokeWidth="4.5" strokeDasharray={`${Math.PI * 2 * 24}`} strokeDashoffset={`${Math.PI * 2 * 24 * (1 - energyStress.avgStress / 5)}`} strokeLinecap="round" fill="none" transform="rotate(-90 30 30)" />
+                      </>
+                    )}
+                  </Svg>
+                  <View style={s.ringTextOverlay}>
+                    <Text style={[s.ringTextValue, { color: Colors.accent.coral }]}>
+                      {energyStress && energyStress.avgStress > 0 ? energyStress.avgStress.toFixed(1) : '—'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={s.ringCardTitle} numberOfLines={1}>Stress</Text>
+                <Text style={s.ringCardSub} numberOfLines={1}>Avg Level</Text>
+              </GlassCard>
+            </View>
           </View>
         )}
 
@@ -509,24 +584,34 @@ export default function InsightsScreen() {
               ))}
             </View>
             <View style={s.barLegend}>
-              <View style={s.barLegendItem}><View style={[s.barLegendDot, { backgroundColor: Colors.accent.primary }]} /><Text style={s.barLegendText}>Positive</Text></View>
-              <View style={s.barLegendItem}><View style={[s.barLegendDot, { backgroundColor: Colors.accent.coral }]} /><Text style={s.barLegendText}>Negative</Text></View>
+              <View style={s.barLegendItem}>
+                <View style={[s.barLegendDot, { backgroundColor: Colors.accent.primary }]} />
+                <Text style={s.barLegendText}>Positive: {stats.positive}</Text>
+              </View>
+              <View style={s.barLegendItem}>
+                <View style={[s.barLegendDot, { backgroundColor: Colors.accent.amber }]} />
+                <Text style={s.barLegendText}>Neutral: {stats.neutral}</Text>
+              </View>
+              <View style={s.barLegendItem}>
+                <View style={[s.barLegendDot, { backgroundColor: Colors.accent.coral }]} />
+                <Text style={s.barLegendText}>Negative: {stats.negative}</Text>
+              </View>
             </View>
           </GlassCard>
         )}
 
-        {/* ROW 6: Top Triggers (55% width) + Energy/Stress stacked (45% width) */}
+        {/* ROW 6: Top Triggers (60% width) + Key Influencers (40% width) */}
         {hasData && (
           <View style={s.bentoRow}>
-            {/* LEFT — Trigger tags (55%) */}
-            <GlassCard intensity="medium" padding="lg" style={s.flex55}>
+            {/* LEFT — Trigger tags (60%) */}
+            <GlassCard intensity="medium" padding="md" style={s.flex60}>
               <View style={s.cardHeader}>
-                <Feather name="hash" size={13} color={Colors.accent.lavender} />
-                <Text style={s.cardTitleSm}>Top Triggers</Text>
+                <Feather name="hash" size={14} color={Colors.accent.lavender} />
+                <Text style={[s.cardTitleSm, { flexShrink: 1 }]} numberOfLines={1} adjustsFontSizeToFit>Top Triggers</Text>
               </View>
               {tagFreq.length > 0 ? (
                 <View style={s.triggerWrap}>
-                  {tagFreq.slice(0, 8).map((item) => {
+                  {tagFreq.slice(0, 5).map((item) => {
                     const tagDef = TAG_MAP[item.tag];
                     const chipColor = item.avgScore >= 7 ? Colors.accent.primary : item.avgScore >= 5 ? Colors.accent.amber : Colors.accent.coral;
                     return (
@@ -539,47 +624,105 @@ export default function InsightsScreen() {
                   })}
                 </View>
               ) : (
-                <Text style={s.emptyMini}>No tags recorded yet</Text>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', minHeight: 120 }}>
+                  <Text style={[s.emptyMini, { marginTop: 0, textAlign: 'center' }]}>No tags recorded yet</Text>
+                </View>
               )}
             </GlassCard>
 
-            {/* RIGHT — Energy & Stress stacked up and down (45%) */}
-            <View style={[s.flex45, s.bentoCol]}>
-              <GlassCard intensity="medium" padding="md" style={s.energyStressCard}>
-                <View style={s.energyStressHeader}>
-                  <View style={[s.iconBg, { backgroundColor: Colors.accent.primaryMuted, width: 22, height: 22, borderRadius: 6, marginBottom: 0 }]}>
-                    <Feather name="zap" size={11} color={Colors.accent.primary} />
-                  </View>
-                  <Text style={s.energyStressLabel}>Energy</Text>
-                  <Text style={[s.energyStressValue, { color: Colors.accent.primary }]}>
-                    {energyStress && energyStress.avgEnergy > 0 ? energyStress.avgEnergy.toFixed(1) : '—'}
-                  </Text>
+            {/* RIGHT — Key Influencers (40%) */}
+            <GlassCard intensity="medium" padding="md" style={s.flex40}>
+              <View style={[s.cardHeader, { justifyContent: 'center', width: '100%' }]}>
+                <Feather name="layers" size={14} color={Colors.accent.lavender} />
+                <Text style={[s.cardTitleSm, { flexShrink: 1 }]} numberOfLines={1} adjustsFontSizeToFit>Key Influencers</Text>
+              </View>
+              {mcqInsights.length > 0 ? (
+                <View style={s.mcqList}>
+                  {mcqInsights.slice(0, 3).map((item) => (
+                    <View key={item.category} style={[s.mcqInsightRow, { alignItems: 'center' }]}>
+                      <Text style={[s.mcqCategory, { textAlign: 'center' }]}>{item.category}</Text>
+                      <Text style={[s.mcqText, { textAlign: 'center' }]}>
+                        Primary factor: <Text style={{ fontFamily: Fonts.bodySemiBold, color: '#7AA2F7' }}>{item.topAnswer}</Text>
+                      </Text>
+                    </View>
+                  ))}
                 </View>
-                {energyStress && energyStress.avgEnergy > 0 && (
-                  <View style={s.energyStressGauge}>
-                    <View style={[s.gaugeFill, { width: `${(energyStress.avgEnergy / 5) * 100}%`, backgroundColor: Colors.accent.primary }]} />
-                  </View>
-                )}
-              </GlassCard>
-
-              <GlassCard intensity="medium" padding="md" style={s.energyStressCard}>
-                <View style={s.energyStressHeader}>
-                  <View style={[s.iconBg, { backgroundColor: Colors.accent.coralMuted, width: 22, height: 22, borderRadius: 6, marginBottom: 0 }]}>
-                    <Feather name="alert-circle" size={11} color={Colors.accent.coral} />
-                  </View>
-                  <Text style={s.energyStressLabel}>Stress</Text>
-                  <Text style={[s.energyStressValue, { color: Colors.accent.coral }]}>
-                    {energyStress && energyStress.avgStress > 0 ? energyStress.avgStress.toFixed(1) : '—'}
-                  </Text>
+              ) : (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', minHeight: 120 }}>
+                  <Text style={[s.emptyMini, { marginTop: 0, textAlign: 'center' }]}>Log more check-ins to discover behavioral influencers</Text>
                 </View>
-                {energyStress && energyStress.avgStress > 0 && (
-                  <View style={s.energyStressGauge}>
-                    <View style={[s.gaugeFill, { width: `${(energyStress.avgStress / 5) * 100}%`, backgroundColor: Colors.accent.coral }]} />
-                  </View>
-                )}
-              </GlassCard>
-            </View>
+              )}
+            </GlassCard>
           </View>
+        )}
+
+        {/* Sleep Insights (Averages + Correlation) */}
+        {hasData && sleepData && sleepData.sleepCount > 0 && (
+          <GlassCard intensity="subtle" padding="lg" style={s.fullCard}>
+            <View style={s.cardHeader}>
+              <Feather name="moon" size={14} color="#7AA2F7" />
+              <Text style={s.cardTitle}>Sleep & Mood Correlation</Text>
+            </View>
+            <View style={s.sleepBentoRow}>
+              {/* Left Column: Sleep Averages */}
+              <View style={s.sleepAveragesCol}>
+                <View style={s.sleepAverageStat}>
+                  <View style={s.sleepStatIconHeader}>
+                    <Feather name="clock" size={12} color="#7AA2F7" />
+                    <Text style={[s.sleepStatLabel, { flexShrink: 1 }]} numberOfLines={1} adjustsFontSizeToFit>Avg Sleep</Text>
+                  </View>
+                  <Text style={s.sleepStatValue}>
+                    {sleepData.avgSleepHours > 0 ? `${sleepData.avgSleepHours}h` : '—'}
+                  </Text>
+                </View>
+                
+                <View style={s.sleepAverageStat}>
+                  <View style={s.sleepStatIconHeader}>
+                    <Feather name="award" size={12} color="#7AA2F7" />
+                    <Text style={[s.sleepStatLabel, { flexShrink: 1 }]} numberOfLines={1} adjustsFontSizeToFit>Avg Quality</Text>
+                  </View>
+                  <Text style={s.sleepStatValue}>
+                    {sleepData.avgSleepQuality > 0 ? `${sleepData.avgSleepQuality}/5` : '—'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Divider */}
+              <View style={s.sleepDivider} />
+
+              {/* Right Column: Mood Correlation Narrative */}
+              <View style={s.sleepCorrelationCol}>
+                {sleepData.avgMoodGoodSleep !== null && sleepData.avgMoodPoorSleep !== null ? (
+                  <View style={s.correlationContainer}>
+                    <Text style={s.correlationTitle}>Sleep Impact on Mood</Text>
+                    
+                    <View style={s.correlationRow}>
+                      <View style={[s.correlationBar, { backgroundColor: Colors.accent.primary, width: `${sleepData.avgMoodGoodSleep}%` }]} />
+                      <Text style={s.correlationLabel}>7+ hrs sleep: <Text style={{ fontFamily: Fonts.bodySemiBold, color: Colors.accent.primary }}>{sleepData.avgMoodGoodSleep}%</Text></Text>
+                    </View>
+
+                    <View style={s.correlationRow}>
+                      <View style={[s.correlationBar, { backgroundColor: Colors.accent.coral, width: `${sleepData.avgMoodPoorSleep}%` }]} />
+                      <Text style={s.correlationLabel}>&lt; 7 hrs sleep: <Text style={{ fontFamily: Fonts.bodySemiBold, color: Colors.accent.coral }}>{sleepData.avgMoodPoorSleep}%</Text></Text>
+                    </View>
+                    
+                    <Text style={s.correlationNote}>
+                      {sleepData.avgMoodGoodSleep > sleepData.avgMoodPoorSleep
+                        ? `Restful sleep increases your daily mood score by ${Math.round(sleepData.avgMoodGoodSleep - sleepData.avgMoodPoorSleep)}% on average.`
+                        : `Your mood is relatively stable regardless of sleep duration.`}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={s.correlationEmpty}>
+                    <Feather name="trending-up" size={16} color="rgba(255,255,255,0.3)" style={{ marginBottom: Spacing.xs }} />
+                    <Text style={s.correlationEmptyText}>
+                      Log more sleep patterns to unlock correlation insights.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </GlassCard>
         )}
 
         {/* ROW 7: Top Emotions (full width) */}
@@ -648,7 +791,7 @@ export default function InsightsScreen() {
                         <Text style={s.historyLabel}>{mood?.label ?? entry.mood_type}</Text>
                         <Text style={s.historyDate}>{dateLabel}</Text>
                       </View>
-                      <Text style={s.historyNote} numberOfLines={1}>{entry.note ? entry.note.slice(0, 60) : `Score: ${entry.mood_score}/10`}</Text>
+                      <Text style={s.historyNote} numberOfLines={1}>{entry.note ? formatMoodNote(entry.note).slice(0, 60) : `Score: ${entry.mood_score}/10`}</Text>
                     </View>
                     <View style={[s.historyBadge, { borderColor: entry.mood_score >= 7 ? Colors.accent.primary : entry.mood_score >= 5 ? Colors.accent.amber : Colors.accent.coral }]}>
                       <Text style={[s.historyBadgeText, { color: entry.mood_score >= 7 ? Colors.accent.primary : entry.mood_score >= 5 ? Colors.accent.amber : Colors.accent.coral }]}>
@@ -717,8 +860,10 @@ const s = StyleSheet.create({
   flex4: { flex: 4 },
   flex6: { flex: 6 },
   flex7: { flex: 7 },
+  flex40: { flex: 40 },
   flex45: { flex: 45 },
   flex55: { flex: 55 },
+  flex60: { flex: 60 },
   trendValText: { fontFamily: Fonts.heading, fontSize: 32, lineHeight: 38 },
   energyStressCard: { flex: 1, minHeight: 80, justifyContent: 'center' },
   energyStressHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
@@ -757,13 +902,17 @@ const s = StyleSheet.create({
 
   // Narrative
   narrativeText: { fontFamily: Fonts.body, fontSize: FontSizes.bodySmall, color: Colors.text.secondary, lineHeight: 22 },
-  summaryList: { gap: Spacing.sm, marginTop: Spacing.xs },
-  summaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 2 },
-  summaryRowIcon: { marginRight: Spacing.xs },
-  summaryRowLabel: { fontFamily: Fonts.body, fontSize: FontSizes.caption, color: Colors.text.secondary, flex: 1 },
+  summaryList: { flex: 1, marginTop: Spacing.sm },
+  ringCard: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm },
+  ringCardTitle: { fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.bodySmall, color: Colors.text.primary, marginTop: Spacing.xs, textAlign: 'center' },
+  ringCardSub: { fontFamily: Fonts.body, fontSize: FontSizes.tiny, color: Colors.text.tertiary, textAlign: 'center' },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  summaryRowIcon: { marginRight: Spacing.sm },
+  summaryRowLabel: { fontFamily: Fonts.body, fontSize: FontSizes.bodySmall, color: Colors.text.secondary, flex: 1 },
   summaryValueContainer: { flexDirection: 'row', alignItems: 'center' },
   summaryDot: { width: 6, height: 6, borderRadius: 3, marginRight: Spacing.xs },
-  summaryRowVal: { fontFamily: Fonts.bodyMedium, fontSize: FontSizes.caption, color: Colors.text.primary },
+  summaryRowVal: { fontFamily: Fonts.bodyMedium, fontSize: FontSizes.bodySmall, color: Colors.text.primary },
+  summaryDivider: { height: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)' },
 
   // Top Emotions
   emotionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm + 2 },
@@ -788,8 +937,8 @@ const s = StyleSheet.create({
   // Triggers
   triggerWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
   triggerChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.05)', paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.chip, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
-  triggerText: { fontFamily: Fonts.body, fontSize: FontSizes.tiny, color: Colors.text.primary },
-  triggerCount: { fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.tiny },
+  triggerText: { fontFamily: Fonts.body, fontSize: FontSizes.caption, color: Colors.text.primary },
+  triggerCount: { fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption },
   emptyMini: { fontFamily: Fonts.body, fontSize: FontSizes.caption, color: Colors.text.tertiary, textAlign: 'center', marginTop: Spacing.md },
 
   // Bar Chart
@@ -824,4 +973,154 @@ const s = StyleSheet.create({
   emptyIcon: { width: 72, height: 72, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.04)', alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.lg },
   emptyTitle: { fontFamily: Fonts.subheading, fontSize: FontSizes.h3, color: Colors.text.primary, marginBottom: Spacing.sm },
   emptySub: { fontFamily: Fonts.body, fontSize: FontSizes.bodySmall, color: Colors.text.secondary, textAlign: 'center', lineHeight: 22, maxWidth: 280 },
+
+  // Sleep Insights Styles
+  sleepBentoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+  },
+  sleepAveragesCol: {
+    flex: 3.5,
+    gap: Spacing.md,
+  },
+  sleepAverageStat: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: Radius.card,
+    padding: Spacing.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sleepStatIconHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    gap: Spacing.xs,
+    marginBottom: 4,
+  },
+  sleepStatLabel: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+  },
+  sleepStatValue: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h2,
+    color: '#7AA2F7',
+    textAlign: 'center',
+  },
+  sleepDivider: {
+    width: 1,
+    height: '90%',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginHorizontal: Spacing.lg,
+  },
+  sleepCorrelationCol: {
+    flex: 6.5,
+  },
+  correlationContainer: {
+    justifyContent: 'center',
+  },
+  correlationTitle: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.sm,
+  },
+  correlationRow: {
+    marginBottom: Spacing.xs,
+  },
+  correlationBar: {
+    height: 6,
+    borderRadius: 3,
+    marginBottom: 2,
+  },
+  correlationLabel: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.tertiary,
+  },
+  correlationNote: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    marginTop: Spacing.sm,
+    lineHeight: 16,
+  },
+  correlationEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.md,
+  },
+  correlationEmptyText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.tertiary,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.sm,
+  },
+  mcqList: {
+    gap: Spacing.xs,
+  },
+  mcqInsightRow: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: Radius.card,
+    padding: Spacing.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.04)',
+    marginBottom: Spacing.xs,
+  },
+  mcqCategory: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  mcqText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.tertiary,
+    lineHeight: 14,
+  },
+  ringWidgetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  ringContainer: {
+    position: 'relative',
+    width: 60,
+    height: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringTextOverlay: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringTextValue: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.bodySmall,
+  },
+  ringInfoCol: {
+    flex: 1,
+  },
+  ringTitle: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.primary,
+  },
+  ringSub: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.tertiary,
+  },
 });

@@ -68,6 +68,8 @@ export const initializeDatabase = async (): Promise<void> => {
         mood_score INTEGER NOT NULL,
         energy_level INTEGER,
         stress_level INTEGER,
+        sleep_hours REAL,
+        sleep_quality INTEGER,
         tags TEXT,
         note TEXT,
         time_of_day TEXT,
@@ -128,6 +130,18 @@ export const initializeDatabase = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_badges_user ON badges(user_id);
       CREATE INDEX IF NOT EXISTS idx_drafts_user ON journal_drafts(user_id);
     `);
+
+    // Run safe migrations for existing tables
+    try {
+      db.execSync('ALTER TABLE mood_entries ADD COLUMN sleep_hours REAL;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE mood_entries ADD COLUMN sleep_quality INTEGER;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
 
     console.log('[DB] Database initialized successfully');
   } catch (error) {

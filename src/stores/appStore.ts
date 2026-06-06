@@ -17,6 +17,8 @@ interface TodayMood {
   moodScore: number;
   energyLevel?: number;
   stressLevel?: number;
+  sleepHours?: number;
+  sleepQuality?: number;
   tags?: string[];
   note?: string;
   date: string;

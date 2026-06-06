@@ -36,7 +36,7 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
     if (Platform.OS === 'android' && targetRef.current && !ready) {
       setReady(true);
     }
-  });
+  }, [ready]);
 
   const ctx: BlurCtx = { ref: targetRef, ready };
   const isAndroid = Platform.OS === 'android';

@@ -19,6 +19,7 @@ import {
   getTodayMood,
   getTopMoods,
   getWeeklyMoods,
+  formatMoodNote,
   type DayMoodData,
   type MoodSummaryData,
   type TopMoodItem,
@@ -94,6 +95,8 @@ export default function HomeScreen() {
           moodScore: todayEntry.mood_score,
           energyLevel: todayEntry.energy_level ?? undefined,
           stressLevel: todayEntry.stress_level ?? undefined,
+          sleepHours: todayEntry.sleep_hours ?? undefined,
+          sleepQuality: todayEntry.sleep_quality ?? undefined,
           tags: todayEntry.tags ? JSON.parse(todayEntry.tags) : undefined,
           note: todayEntry.note ?? undefined,
           date: todayEntry.date,
@@ -250,7 +253,7 @@ export default function HomeScreen() {
         {todayMood && currentMood && (
           <GlassCard intensity="medium" padding="lg" style={styles.todayCard}>
             <View style={styles.todayHeader}>
-              <Text style={styles.todayLabel}>Today's Check-in</Text>
+              <Text style={styles.todayLabel}>Today&apos;s Check-in</Text>
               <Pressable
                 style={styles.todayEditBtn}
                 onPress={() => router.push('/mood-entry')}
@@ -276,7 +279,7 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.todayScore}>Score: {todayMood.moodScore}/10</Text>
                 {todayMood.note && (
-                  <Text style={styles.todayNote} numberOfLines={1}>"{todayMood.note}"</Text>
+                  <Text style={styles.todayNote}>{formatMoodNote(todayMood.note)}</Text>
                 )}
               </View>
               <View style={styles.todayRight}>
@@ -422,7 +425,7 @@ export default function HomeScreen() {
             <View style={styles.sectionRow}>
               <View style={styles.sectionTitleRow}>
                 <Feather name="star" size={15} color={Colors.accent.amber} />
-                <Text style={styles.sectionTitle}>Recommended</Text>
+                <Text style={styles.sectionTitleInline}>Recommended</Text>
               </View>
             </View>
             <GlassCard
@@ -704,7 +707,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
     color: Colors.text.tertiary,
-    fontStyle: 'italic',
     marginTop: 4,
   },
   todayRight: {

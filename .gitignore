@@ -57,3 +57,6 @@ scripts/
 
 # Implementation plan
 implementation_plan.md
+
+# ESLint
+eslint.config.js

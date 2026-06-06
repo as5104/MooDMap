@@ -3,7 +3,7 @@
  * Using Drizzle ORM for type-safe queries
  */
 
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 
 // Mood Entries
 export const moodEntries = sqliteTable('mood_entries', {
@@ -15,6 +15,8 @@ export const moodEntries = sqliteTable('mood_entries', {
   moodScore: integer('mood_score').notNull(), // 1-10
   energyLevel: integer('energy_level'), // 1-5
   stressLevel: integer('stress_level'), // 1-5
+  sleepHours: real('sleep_hours'),
+  sleepQuality: integer('sleep_quality'),
   tags: text('tags'), // JSON array
   note: text('note'),
   timeOfDay: text('time_of_day'), // morning, afternoon, evening, night

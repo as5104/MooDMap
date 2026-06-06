@@ -1,8 +1,8 @@
 /**
- * MoodMap — Input (Premium)
+ * MoodMap — Input
  */
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   StyleSheet,
   TextInput,
@@ -34,7 +34,7 @@ export const Input: React.FC<InputProps> = ({
   onBlur,
   ...props
 }) => {
-  const focusAnim = useRef(new Animated.Value(0)).current;
+  const [focusAnim] = useState(() => new Animated.Value(0));
 
   const handleFocus = useCallback(
     (e: any) => {

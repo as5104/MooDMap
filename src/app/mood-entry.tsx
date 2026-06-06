@@ -2,7 +2,7 @@
  * MoodMap — Mood Entry (Multi-Step Check-in)
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -10,34 +10,240 @@ import {
   ScrollView,
   Pressable,
   Animated,
-  TextInput,
   Dimensions,
 } from 'react-native';
-import { router } from 'expo-router';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { MoodFace } from '@/components/ui/MoodFace';
-import { Button, Chip, customAlert } from '@/components/ui';
+import { Button, Chip, customAlert, GlassCard } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius } from '@/constants/layout';
-import { MOODS, type MoodDefinition, type MoodType } from '@/constants/moods';
+import { MOODS, type MoodType } from '@/constants/moods';
 import { TAGS } from '@/constants/tags';
 import { useAppStore } from '@/stores/appStore';
 import { saveMoodEntry, getWeeklyMoods, getMoodScore, getMoodStreak } from '@/services/moodService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 
 // Energy & Stress Labels
 const ENERGY_LABELS = ['Very Low', 'Low', 'Normal', 'High', 'Very High'];
-const ENERGY_ICONS: Array<keyof typeof Feather.glyphMap> = ['moon', 'battery-charging', 'zap', 'activity', 'trending-up'];
+const ENERGY_ICONS: (keyof typeof Feather.glyphMap)[] = ['moon', 'battery-charging', 'zap', 'activity', 'trending-up'];
 const STRESS_LABELS = ['Calm', 'Mild', 'Moderate', 'High', 'Extreme'];
-const STRESS_ICONS: Array<keyof typeof Feather.glyphMap> = ['smile', 'meh', 'minus', 'alert-circle', 'alert-triangle'];
+const STRESS_ICONS: (keyof typeof Feather.glyphMap)[] = ['smile', 'meh', 'minus', 'alert-circle', 'alert-triangle'];
+
+// Sleep Quality Labels
+const SLEEP_QUALITY_LABELS = ['Poor Sleep', 'Restless', 'Average', 'Good Sleep', 'Very Restful'];
+const SLEEP_QUALITY_ICONS: (keyof typeof Feather.glyphMap)[] = ['frown', 'battery', 'battery-charging', 'moon', 'award'];
+
+interface SleepMoonProps {
+  hours: number;
+}
+
+function SleepMoon({ hours }: SleepMoonProps) {
+  let moonColor = '#FDF6E2';
+  let glowColor = 'rgba(253, 246, 226, 0.2)';
+  
+  if (hours < 6) {
+    moonColor = '#E2E8F0'; // Pale silver
+    glowColor = 'rgba(226, 232, 240, 0.15)';
+  } else if (hours < 8) {
+    moonColor = '#FFEBA7'; // Soft gold
+    glowColor = 'rgba(255, 235, 167, 0.2)';
+  } else {
+    moonColor = '#FFD23F'; // Bright Golden Yellow
+    glowColor = 'rgba(255, 210, 63, 0.35)';
+  }
+
+  const stars = [
+    { cx: 20, cy: 30, r: 1.5, opacity: hours >= 8 ? 0.9 : 0.4 },
+    { cx: 80, cy: 25, r: 1.2, opacity: hours >= 6 ? 0.8 : 0.2 },
+    { cx: 15, cy: 75, r: 1.8, opacity: hours >= 8 ? 0.95 : 0.3 },
+    { cx: 85, cy: 80, r: 1.0, opacity: hours >= 6 ? 0.7 : 0.1 },
+    { cx: 70, cy: 90, r: 1.3, opacity: hours >= 8 ? 0.85 : 0.5 },
+  ];
+
+  return (
+    <View style={sleepMoonStyles.container}>
+      <Svg width={120} height={120} viewBox="0 0 100 100">
+        <Circle cx="50" cy="50" r="38" fill={glowColor} />
+        {hours >= 8 && <Circle cx="50" cy="50" r="48" fill={glowColor} opacity={0.5} />}
+
+        {stars.map((s, idx) => (
+          <Circle key={idx} cx={s.cx} cy={s.cy} r={s.r} fill="#FFF" opacity={s.opacity} />
+        ))}
+
+        {hours < 6 ? (
+          <Path
+            d="M50 20 C66.5 20 80 33.5 80 50 C80 66.5 66.5 80 50 80 C41.7 80 34.2 76.6 28.8 71.2 C38.8 71.2 47 63 47 50 C47 37 38.8 28.8 28.8 28.8 C34.2 23.4 41.7 20 50 20 Z"
+            fill={moonColor}
+          />
+        ) : hours < 8 ? (
+          <Path
+            d="M50 20 C66.5 20 80 33.5 80 50 C80 66.5 66.5 80 50 80 C39 80 30 70 30 50 C30 30 39 20 50 20 Z"
+            fill={moonColor}
+          />
+        ) : (
+          <Circle cx="50" cy="50" r="30" fill={moonColor} />
+        )}
+      </Svg>
+    </View>
+  );
+}
+
+const sleepMoonStyles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: Spacing.md,
+  },
+});
+
+interface MCQDefinition {
+  id: string;
+  question: string;
+  options: string[];
+  category: string;
+}
+
+/**
+ * Determine dynamic MCQ based on check-in answers
+ */
+function getDynamicMCQ(
+  moodType: string,
+  energy: number,
+  stress: number,
+  sleepHrs: number,
+  sleepQual: number,
+  tags: string[]
+): MCQDefinition {
+  if (stress >= 4) {
+    return {
+      id: 'stress_coping',
+      question: 'How are you coping with today’s stress?',
+      options: [
+        'Taking active breaks & resting',
+        'Talking to friends or family',
+        'Practicing mindfulness/meditation',
+        'Focusing on work/pushing through',
+        'Feeling a bit overwhelmed'
+      ],
+      category: 'Stress Coping'
+    };
+  }
+
+  if (sleepHrs < 6 || sleepQual <= 2) {
+    return {
+      id: 'sleep_disruption',
+      question: 'What impacted your sleep last night?',
+      options: [
+        'Late night screen time / work',
+        'Stress, anxiety, or overthinking',
+        'Physical discomfort or pain',
+        'Late meals or caffeine intake',
+        'Environment (noise, heat, light)'
+      ],
+      category: 'Sleep Disruption'
+    };
+  }
+
+  if (energy <= 2) {
+    return {
+      id: 'energy_drain',
+      question: 'What do you feel drained from today?',
+      options: [
+        'Work / study fatigue',
+        'Lack of physical movement',
+        'Social burnout / interaction',
+        'Poor nutrition / hydration',
+        'Just an off-day physically'
+      ],
+      category: 'Energy Drain'
+    };
+  }
+
+  if ((moodType === 'happy' || moodType === 'calm') && (tags.includes('friends') || tags.includes('family') || tags.includes('social'))) {
+    return {
+      id: 'social_impact',
+      question: 'How did today’s social interactions affect you?',
+      options: [
+        'Boosted my energy and mood',
+        'Provided comfortable support',
+        'Felt a bit tiring but positive',
+        'Helped distract me from worries',
+        'Neutral / standard interactions'
+      ],
+      category: 'Social Impact'
+    };
+  }
+
+  if ((moodType === 'happy' || moodType === 'calm') && (tags.includes('work') || tags.includes('study'))) {
+    return {
+      id: 'productivity_mood',
+      question: 'How was your focus during work/study today?',
+      options: [
+        'Flow state — highly productive',
+        'Moderate focus — made progress',
+        'Took it slow but got things done',
+        'Distracted but stayed positive',
+        'Felt light and effortless'
+      ],
+      category: 'Work Productivity'
+    };
+  }
+
+  if (tags.includes('exercise')) {
+    return {
+      id: 'exercise_feel',
+      question: 'How did your exercise affect your state?',
+      options: [
+        'Left me feeling energized & happy',
+        'Cleared my mind of stress',
+        'Felt physically challenging but good',
+        'Tired me out, ready to sleep',
+        'Just part of my regular routine'
+      ],
+      category: 'Exercise Impact'
+    };
+  }
+
+  if (moodType === 'sad' || moodType === 'anxious' || moodType === 'angry') {
+    return {
+      id: 'mood_trigger',
+      question: 'What was the main trigger for this feeling?',
+      options: [
+        'Work, school, or career stress',
+        'A relationship or social conflict',
+        'Health, fatigue, or body issues',
+        'Internal thoughts / overthinking',
+        'Nothing specific — just arose'
+      ],
+      category: 'Mood Trigger'
+    };
+  }
+
+  return {
+    id: 'daily_focus',
+    question: 'What was your primary focus today?',
+    options: [
+      'Self-care and personal time',
+      'Career growth and productivity',
+      'Connecting with loved ones',
+      'Physical health and exercise',
+      'Rest and recovery'
+    ],
+    category: 'Daily Focus'
+  };
+}
 
 export default function MoodEntryScreen() {
   const insets = useSafeAreaInsets();
   const user = useAppStore((s) => s.user);
+  const todayMood = useAppStore((s) => s.todayMood);
   const setTodayMood = useAppStore((s) => s.setTodayMood);
   const setWeeklyMoods = useAppStore((s) => s.setWeeklyMoods);
   const setMoodScore = useAppStore((s) => s.setMoodScore);
@@ -53,20 +259,58 @@ export default function MoodEntryScreen() {
   const [selectedMoodIndex, setSelectedMoodIndex] = useState(0);
   const [energyLevel, setEnergyLevel] = useState(3);
   const [stressLevel, setStressLevel] = useState(2);
+  const [sleepHours, setSleepHours] = useState(7.0);
+  const [sleepQuality, setSleepQuality] = useState(3);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [note, setNote] = useState('');
+  const [selectedMCQOption, setSelectedMCQOption] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const triggerHaptic = () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (_) {}
+  };
+
+  const [fadeAnim] = useState(() => new Animated.Value(1));
   const [bgColor, setBgColor] = useState(MOODS[0].bgColor);
 
   const selectedMood = MOODS[selectedMoodIndex];
 
+  // Prefill state if todayMood exists
+  useEffect(() => {
+    if (todayMood) {
+      const frame = requestAnimationFrame(() => {
+        const mIndex = MOODS.findIndex((m) => m.type === todayMood.moodType);
+        if (mIndex !== -1) {
+          setSelectedMoodIndex(mIndex);
+          setBgColor(MOODS[mIndex].bgColor);
+        }
+        if (todayMood.energyLevel !== undefined) setEnergyLevel(todayMood.energyLevel);
+        if (todayMood.stressLevel !== undefined) setStressLevel(todayMood.stressLevel);
+        if (todayMood.sleepHours !== undefined) setSleepHours(todayMood.sleepHours);
+        if (todayMood.sleepQuality !== undefined) setSleepQuality(todayMood.sleepQuality);
+        if (todayMood.tags !== undefined) setSelectedTags(todayMood.tags);
+        
+        if (todayMood.note !== undefined && todayMood.note) {
+          try {
+            const parsed = JSON.parse(todayMood.note);
+            if (parsed && parsed.mcqId && parsed.answer) {
+              setSelectedMCQOption(parsed.answer);
+            }
+          } catch {
+            // Old plain note format, leave MCQ blank
+          }
+        }
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [todayMood]);
+
   // Animations
   const selectMood = (index: number) => {
+    triggerHaptic();
     setSelectedMoodIndex(index);
-    // Quick fade out → change color → fade back in
     Animated.sequence([
       Animated.timing(fadeAnim, {
         toValue: 0.7,
@@ -79,7 +323,6 @@ export default function MoodEntryScreen() {
         useNativeDriver: false,
       }),
     ]).start();
-    // Set color immediately during the fade
     setTimeout(() => setBgColor(MOODS[index].bgColor), 100);
   };
 
@@ -89,8 +332,21 @@ export default function MoodEntryScreen() {
     extrapolate: 'clamp',
   });
 
+  // Dynamic MCQ based on inputs
+  const currentMCQ = useMemo(() => {
+    return getDynamicMCQ(
+      selectedMood.type,
+      energyLevel,
+      stressLevel,
+      sleepHours,
+      sleepQuality,
+      selectedTags
+    );
+  }, [selectedMood.type, energyLevel, stressLevel, sleepHours, sleepQuality, selectedTags]);
+
   // Navigation
   const goNext = () => {
+    triggerHaptic();
     if (step < TOTAL_STEPS - 1) {
       setStep(step + 1);
     } else {
@@ -99,6 +355,7 @@ export default function MoodEntryScreen() {
   };
 
   const goBack = () => {
+    triggerHaptic();
     if (step > 0) {
       setStep(step - 1);
     } else {
@@ -106,8 +363,34 @@ export default function MoodEntryScreen() {
     }
   };
 
+  const selectEnergyLevel = (level: number) => {
+    triggerHaptic();
+    setEnergyLevel(level);
+  };
+
+  const selectStressLevel = (level: number) => {
+    triggerHaptic();
+    setStressLevel(level);
+  };
+
+  const selectSleepHours = (hours: number) => {
+    triggerHaptic();
+    setSleepHours(hours);
+  };
+
+  const selectSleepQuality = (quality: number) => {
+    triggerHaptic();
+    setSleepQuality(quality);
+  };
+
+  const selectMCQOption = (option: string) => {
+    triggerHaptic();
+    setSelectedMCQOption(option);
+  };
+
   // Tag Toggle
   const toggleTag = (key: string) => {
+    triggerHaptic();
     setSelectedTags((prev) =>
       prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key]
     );
@@ -117,13 +400,25 @@ export default function MoodEntryScreen() {
   const handleSave = useCallback(() => {
     setSaving(true);
     try {
+      let finalNote = '';
+      if (selectedMCQOption) {
+        finalNote = JSON.stringify({
+          mcqId: currentMCQ.id,
+          question: currentMCQ.question,
+          category: currentMCQ.category,
+          answer: selectedMCQOption
+        });
+      }
+
       const entry = saveMoodEntry({
         moodType: selectedMood.type,
         moodScore: selectedMood.score,
         energyLevel,
         stressLevel,
+        sleepHours,
+        sleepQuality,
         tags: selectedTags.length > 0 ? selectedTags : undefined,
-        note: note.trim() || undefined,
+        note: finalNote || undefined,
         userId: user?.id,
       });
 
@@ -134,6 +429,8 @@ export default function MoodEntryScreen() {
         moodScore: entry.mood_score,
         energyLevel: entry.energy_level ?? undefined,
         stressLevel: entry.stress_level ?? undefined,
+        sleepHours: entry.sleep_hours ?? undefined,
+        sleepQuality: entry.sleep_quality ?? undefined,
         tags: entry.tags ? JSON.parse(entry.tags) : undefined,
         note: entry.note ?? undefined,
         date: entry.date,
@@ -160,7 +457,7 @@ export default function MoodEntryScreen() {
       customAlert('Error', 'Failed to save mood. Please try again.');
       setSaving(false);
     }
-  }, [selectedMood, energyLevel, stressLevel, selectedTags, note, user]);
+  }, [selectedMood, energyLevel, stressLevel, sleepHours, sleepQuality, selectedTags, selectedMCQOption, currentMCQ, user]);
 
   // Success Screen
   if (saved) {
@@ -175,7 +472,7 @@ export default function MoodEntryScreen() {
           />
           <Text style={styles.successTitle}>Mood Logged!</Text>
           <Text style={styles.successSubtitle}>
-            You're feeling {selectedMood.label.toLowerCase()} today
+            You&apos;re feeling {selectedMood.label.toLowerCase()} today
           </Text>
           <View style={styles.successXPRow}>
             <Feather name="star" size={16} color={Colors.accent.olive} />
@@ -194,9 +491,11 @@ export default function MoodEntryScreen() {
       case 1:
         return renderEnergyStressStep();
       case 2:
-        return renderTagsStep();
+        return renderSleepStep();
       case 3:
-        return renderNoteStep();
+        return renderTagsStep();
+      case 4:
+        return renderMCQStep();
       default:
         return null;
     }
@@ -220,7 +519,7 @@ export default function MoodEntryScreen() {
         />
       </View>
 
-      <Text style={styles.moodLabel}>I'm Feeling {selectedMood.label}</Text>
+      <Text style={styles.moodLabel}>I&apos;m Feeling {selectedMood.label}</Text>
 
       <View style={styles.moodGrid}>
         {MOODS.map((mood, i) => (
@@ -254,7 +553,7 @@ export default function MoodEntryScreen() {
   const renderEnergyStressStep = () => (
     <>
       <Text style={styles.stepTitle}>Energy & Stress</Text>
-      <Text style={styles.stepSubtitle}>How's your energy and stress level?</Text>
+      <Text style={styles.stepSubtitle}>How&apos;s your energy and stress level?</Text>
 
       {/* Energy */}
       <View style={styles.sliderSection}>
@@ -266,7 +565,7 @@ export default function MoodEntryScreen() {
           {[1, 2, 3, 4, 5].map((level) => (
             <Pressable
               key={level}
-              onPress={() => setEnergyLevel(level)}
+              onPress={() => selectEnergyLevel(level)}
               style={[
                 styles.sliderDot,
                 level <= energyLevel && styles.sliderDotActive,
@@ -295,7 +594,7 @@ export default function MoodEntryScreen() {
           {[1, 2, 3, 4, 5].map((level) => (
             <Pressable
               key={level}
-              onPress={() => setStressLevel(level)}
+              onPress={() => selectStressLevel(level)}
               style={[
                 styles.sliderDot,
                 level <= stressLevel && styles.sliderDotStress,
@@ -316,48 +615,151 @@ export default function MoodEntryScreen() {
     </>
   );
 
-  // Step 3: Tags
-  const renderTagsStep = () => (
+  // Step 3: Sleep Tracker (Duration & Quality)
+  const renderSleepStep = () => (
     <>
-      <Text style={styles.stepTitle}>What's happening?</Text>
-      <Text style={styles.stepSubtitle}>Select tags that describe your context</Text>
+      <Text style={styles.stepTitle}>Sleep Tracker</Text>
+      <Text style={styles.stepSubtitle}>How long and how well did you sleep?</Text>
 
-      <View style={styles.tagGrid}>
-        {TAGS.map((tag) => (
-          <Chip
-            key={tag.key}
-            label={tag.label}
-            icon={tag.icon}
-            selected={selectedTags.includes(tag.key)}
-            onPress={() => toggleTag(tag.key)}
-            color={Colors.accent.olive}
-          />
-        ))}
+      {/* Moon Animation */}
+      <SleepMoon hours={sleepHours} />
+
+      {/* Sleep Duration Selector */}
+      <View style={styles.sliderSection}>
+        <View style={styles.sliderLabelRow}>
+          <Text style={styles.sliderLabel}>Sleep Duration</Text>
+          <Text style={styles.sleepHoursVal}>{sleepHours} hours</Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.hoursScroll}
+        >
+          {[4, 5, 6, 7, 8, 9, 10, 11, 12].map((h) => (
+            <Pressable
+              key={h}
+              onPress={() => selectSleepHours(h)}
+              style={[
+                styles.hourCard,
+                sleepHours === h && styles.hourCardActive,
+              ]}
+            >
+              <Text style={[styles.hourNumber, sleepHours === h && styles.hourNumberActive]}>{h}</Text>
+              <Text style={[styles.hourLabel, sleepHours === h && styles.hourLabelActive]}>hrs</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+
+      {/* Sleep Quality */}
+      <View style={styles.sliderSection}>
+        <View style={styles.sliderLabelRow}>
+          <Text style={styles.sliderLabel}>Sleep Quality</Text>
+        </View>
+        <View style={styles.sliderRow}>
+          {[1, 2, 3, 4, 5].map((quality) => (
+            <Pressable
+              key={quality}
+              onPress={() => selectSleepQuality(quality)}
+              style={[
+                styles.sliderDot,
+                quality <= sleepQuality && styles.sliderDotSleepQuality,
+                quality === sleepQuality && styles.sliderDotCurrentSleepQuality,
+              ]}
+            >
+              <Feather
+                name={SLEEP_QUALITY_ICONS[quality - 1]}
+                size={20}
+                color={quality <= sleepQuality ? '#FFFFFF' : 'rgba(255, 255, 255, 0.3)'}
+              />
+            </Pressable>
+          ))}
+        </View>
+        <Text style={styles.sliderValue}>{SLEEP_QUALITY_LABELS[sleepQuality - 1]}</Text>
       </View>
     </>
   );
 
-  // Step 4: Note
-  const renderNoteStep = () => (
-    <>
-      <Text style={styles.stepTitle}>Quick Note</Text>
-      <Text style={styles.stepSubtitle}>Anything on your mind? (optional)</Text>
+  // Step 4: Categorized Tags
+  const renderTagsStep = () => {
+    const categories = [
+      { key: 'activity', label: 'Activities', icon: 'activity' as const },
+      { key: 'social', label: 'Social & People', icon: 'users' as const },
+      { key: 'health', label: 'Health & Body', icon: 'heart' as const },
+      { key: 'environment', label: 'Environment', icon: 'wind' as const },
+    ];
 
-      <View style={styles.noteContainer}>
-        <TextInput
-          style={styles.noteInput}
-          multiline
-          numberOfLines={6}
-          placeholder="Write a few words about how you're feeling..."
-          placeholderTextColor="rgba(255, 255, 255, 0.25)"
-          value={note}
-          onChangeText={setNote}
-          selectionColor={Colors.accent.olive}
-          textAlignVertical="top"
-        />
-        <Text style={styles.noteCount}>{note.length}/500</Text>
+    return (
+      <View style={{ width: '100%' }}>
+        <Text style={styles.stepTitle}>What&apos;s happening?</Text>
+        <Text style={styles.stepSubtitle}>Select tags that describe your context</Text>
+
+        {categories.map((cat) => {
+          const catTags = TAGS.filter((t) => t.category === cat.key);
+          return (
+            <View key={cat.key} style={styles.tagSection}>
+              <View style={styles.tagSectionHeader}>
+                <Feather name={cat.icon} size={14} color="rgba(255, 255, 255, 0.6)" style={{ marginRight: 6 }} />
+                <Text style={styles.tagSectionTitle}>{cat.label}</Text>
+              </View>
+              <View style={styles.tagGrid}>
+                {catTags.map((tag) => (
+                  <Chip
+                    key={tag.key}
+                    label={tag.label}
+                    icon={tag.icon}
+                    selected={selectedTags.includes(tag.key)}
+                    onPress={() => toggleTag(tag.key)}
+                    color={Colors.accent.olive}
+                  />
+                ))}
+              </View>
+            </View>
+          );
+        })}
       </View>
-    </>
+    );
+  };
+
+  // Step 5: Dynamic MCQ Questions
+  const renderMCQStep = () => (
+    <View style={{ width: '100%' }}>
+      <Text style={styles.stepTitle}>Daily Focus</Text>
+      <Text style={styles.stepSubtitle}>Help us understand your day better</Text>
+
+      <GlassCard intensity="subtle" padding="lg" style={styles.mcqCard}>
+        <Text style={styles.mcqQuestion}>{currentMCQ.question}</Text>
+        
+        <View style={styles.mcqOptionsContainer}>
+          {currentMCQ.options.map((option) => {
+            const isSelected = selectedMCQOption === option;
+            return (
+              <Pressable
+                key={option}
+                onPress={() => selectMCQOption(option)}
+                style={[
+                  styles.mcqOptionCard,
+                  isSelected && styles.mcqOptionCardActive,
+                ]}
+              >
+                <View style={[
+                  styles.mcqRadio,
+                  isSelected && styles.mcqRadioActive
+                ]}>
+                  {isSelected && <View style={styles.mcqRadioInner} />}
+                </View>
+                <Text style={[
+                  styles.mcqOptionText,
+                  isSelected && styles.mcqOptionTextActive
+                ]}>
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </GlassCard>
+    </View>
   );
 
   return (
@@ -405,7 +807,7 @@ export default function MoodEntryScreen() {
 
       {/* Footer */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.lg }]}>
-        {step === 2 && selectedTags.length === 0 ? (
+        {step === 3 && selectedTags.length === 0 ? (
           <View style={styles.footerRow}>
             <Button
               title="Skip"
@@ -422,7 +824,7 @@ export default function MoodEntryScreen() {
               style={styles.nextBtn}
             />
           </View>
-        ) : step === 3 ? (
+        ) : step === 4 ? (
           <Button
             title={saving ? 'Saving...' : 'Save Mood'}
             variant="pill"
@@ -515,6 +917,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: Spacing.xl,
     alignItems: 'center',
+    width: '100%',
   },
 
   // Step 1: Mood
@@ -644,6 +1047,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 122, 110, 0.35)',
     borderColor: Colors.accent.terracotta,
   },
+  sliderDotSleepQuality: {
+    backgroundColor: 'rgba(122, 162, 247, 0.2)',
+    borderColor: 'rgba(122, 162, 247, 0.3)',
+  },
+  sliderDotCurrentSleepQuality: {
+    backgroundColor: 'rgba(122, 162, 247, 0.4)',
+    borderColor: '#7AA2F7',
+  },
   sliderDotText: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
@@ -659,36 +1070,131 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Step 3: Tags
+  // Step 3: Sleep specific styles
+  hoursScroll: {
+    paddingVertical: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  hourCard: {
+    width: 60,
+    height: 70,
+    borderRadius: Radius.card,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.xs,
+  },
+  hourCardActive: {
+    backgroundColor: 'rgba(122, 162, 247, 0.25)',
+    borderColor: '#7AA2F7',
+  },
+  hourNumber: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h2,
+    color: 'rgba(255, 255, 255, 0.4)',
+  },
+  hourNumberActive: {
+    color: '#FFFFFF',
+  },
+  hourLabel: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: 'rgba(255, 255, 255, 0.3)',
+    marginTop: -2,
+  },
+  hourLabelActive: {
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  sleepHoursVal: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.body,
+    color: '#7AA2F7',
+    marginLeft: 'auto',
+  },
+
+  // Step 4: Tags
   tagGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.sm,
     width: '100%',
   },
-
-  // Step 4: Note
-  noteContainer: {
+  tagSection: {
     width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    padding: Spacing.lg,
+    marginBottom: Spacing.xl,
   },
-  noteInput: {
-    fontFamily: Fonts.body,
+  tagSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+    paddingLeft: Spacing.xs,
+  },
+  tagSectionTitle: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.caption,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  // Step 5: Dynamic MCQ Styles
+  mcqCard: {
+    width: '100%',
+    marginTop: Spacing.sm,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  mcqQuestion: {
+    fontFamily: Fonts.heading,
     fontSize: FontSizes.body,
     color: '#FFFFFF',
-    minHeight: 150,
-    lineHeight: 24,
+    marginBottom: Spacing.lg,
+    lineHeight: 22,
   },
-  noteCount: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.caption,
-    color: 'rgba(255, 255, 255, 0.25)',
-    textAlign: 'right',
-    marginTop: Spacing.sm,
+  mcqOptionsContainer: {
+    gap: Spacing.sm,
+  },
+  mcqOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: Radius.card,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  mcqOptionCardActive: {
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
+    borderColor: Colors.accent.olive,
+  },
+  mcqRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  mcqRadioActive: {
+    borderColor: Colors.accent.olive,
+  },
+  mcqRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.accent.olive,
+  },
+  mcqOptionText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.bodySmall,
+    color: 'rgba(255, 255, 255, 0.7)',
+    flex: 1,
+  },
+  mcqOptionTextActive: {
+    color: '#FFFFFF',
   },
 
   // Footer

@@ -14,6 +14,8 @@ export interface MoodEntryInput {
   moodScore: number;
   energyLevel?: number;
   stressLevel?: number;
+  sleepHours?: number;
+  sleepQuality?: number;
   tags?: string[];
   note?: string;
   userId?: string;
@@ -28,6 +30,8 @@ export interface MoodEntryRow {
   mood_score: number;
   energy_level: number | null;
   stress_level: number | null;
+  sleep_hours: number | null;
+  sleep_quality: number | null;
   tags: string | null;
   note: string | null;
   time_of_day: string | null;
@@ -107,12 +111,13 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
     execute(
       `UPDATE mood_entries SET
         updated_at = ?, mood_type = ?, mood_score = ?,
-        energy_level = ?, stress_level = ?, tags = ?,
-        note = ?, time_of_day = ?
+        energy_level = ?, stress_level = ?, sleep_hours = ?,
+        sleep_quality = ?, tags = ?, note = ?, time_of_day = ?
       WHERE id = ?`,
       [
         now, input.moodType, input.moodScore,
         input.energyLevel ?? null, input.stressLevel ?? null,
+        input.sleepHours ?? null, input.sleepQuality ?? null,
         tagsJson, input.note ?? null, timeOfDay,
         existing.id,
       ]
@@ -125,6 +130,8 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
       mood_score: input.moodScore,
       energy_level: input.energyLevel ?? null,
       stress_level: input.stressLevel ?? null,
+      sleep_hours: input.sleepHours ?? null,
+      sleep_quality: input.sleepQuality ?? null,
       tags: tagsJson,
       note: input.note ?? null,
       time_of_day: timeOfDay,
@@ -134,12 +141,13 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
   // Insert new
   const id = generateId();
   execute(
-    `INSERT INTO mood_entries (id, created_at, updated_at, date, mood_type, mood_score, energy_level, stress_level, tags, note, time_of_day, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO mood_entries (id, created_at, updated_at, date, mood_type, mood_score, energy_level, stress_level, sleep_hours, sleep_quality, tags, note, time_of_day, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id, now, now, today,
       input.moodType, input.moodScore,
       input.energyLevel ?? null, input.stressLevel ?? null,
+      input.sleepHours ?? null, input.sleepQuality ?? null,
       tagsJson, input.note ?? null, timeOfDay,
       input.userId ?? null,
     ]
@@ -159,6 +167,8 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
     mood_score: input.moodScore,
     energy_level: input.energyLevel ?? null,
     stress_level: input.stressLevel ?? null,
+    sleep_hours: input.sleepHours ?? null,
+    sleep_quality: input.sleepQuality ?? null,
     tags: tagsJson,
     note: input.note ?? null,
     time_of_day: timeOfDay,
@@ -676,8 +686,8 @@ export function getMoodSummary(userId?: string, days: number = 7): MoodSummaryDa
     const firstAvg = firstHalf.reduce((s, e) => s + e.mood_score, 0) / firstHalf.length;
     const secondAvg = secondHalf.reduce((s, e) => s + e.mood_score, 0) / secondHalf.length;
     const diff = secondAvg - firstAvg;
-    if (diff > 0.5) trendDirection = 'improving';
-    else if (diff < -0.5) trendDirection = 'declining';
+    if (diff > 1.0) trendDirection = 'improving';
+    else if (diff < -1.0) trendDirection = 'declining';
   }
 
   return {
@@ -726,3 +736,145 @@ export function getAvgEnergyStress(userId?: string, days: number = 7): EnergyStr
     stressCount: result?.stress_cnt ?? 0,
   };
 }
+
+export interface SleepInsightData {
+  avgSleepHours: number;
+  avgSleepQuality: number;
+  sleepCount: number;
+  avgMoodGoodSleep: number | null;
+  avgMoodPoorSleep: number | null;
+}
+
+/**
+ * Get average sleep duration, quality, and mood correlation
+ */
+export function getSleepMetricsAndCorrelation(userId?: string, days: number = 7): SleepInsightData {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const queryParams = userId ? [startDate, today, userId] : [startDate, today];
+  const userClause = userId ? 'AND user_id = ?' : '';
+
+  const avgResult = queryFirst<{ avg_hours: number | null; avg_quality: number | null; sleep_cnt: number }>(
+    `SELECT
+      AVG(CASE WHEN sleep_hours IS NOT NULL THEN sleep_hours END) as avg_hours,
+      AVG(CASE WHEN sleep_quality IS NOT NULL THEN sleep_quality END) as avg_quality,
+      SUM(CASE WHEN sleep_hours IS NOT NULL THEN 1 ELSE 0 END) as sleep_cnt
+    FROM mood_entries WHERE date >= ? AND date <= ? ${userClause}`,
+    queryParams
+  );
+
+  const goodSleepQueryParams = userId ? [startDate, today, 7, userId] : [startDate, today, 7];
+  const goodSleepResult = queryFirst<{ avg_mood: number | null }>(
+    `SELECT AVG(mood_score) as avg_mood FROM mood_entries
+     WHERE date >= ? AND date <= ? AND sleep_hours >= ? ${userClause}`,
+    goodSleepQueryParams
+  );
+
+  const poorSleepQueryParams = userId ? [startDate, today, 7, userId] : [startDate, today, 7];
+  const poorSleepResult = queryFirst<{ avg_mood: number | null }>(
+    `SELECT AVG(mood_score) as avg_mood FROM mood_entries
+     WHERE date >= ? AND date <= ? AND sleep_hours < ? ${userClause}`,
+    poorSleepQueryParams
+  );
+
+  return {
+    avgSleepHours: avgResult?.avg_hours ? Math.round(avgResult.avg_hours * 10) / 10 : 0,
+    avgSleepQuality: avgResult?.avg_quality ? Math.round(avgResult.avg_quality * 10) / 10 : 0,
+    sleepCount: avgResult?.sleep_cnt ?? 0,
+    avgMoodGoodSleep: goodSleepResult?.avg_mood ? Math.round((goodSleepResult.avg_mood / 10) * 100) : null,
+    avgMoodPoorSleep: poorSleepResult?.avg_mood ? Math.round((poorSleepResult.avg_mood / 10) * 100) : null,
+  };
+}
+
+export interface MCQInsightItem {
+  category: string;
+  question: string;
+  topAnswer: string;
+  count: number;
+}
+
+/**
+ * Get dynamic MCQ insights from logged check-ins by parsing JSON notes
+ */
+export function getMCQInsights(userId?: string, days: number = 30): MCQInsightItem[] {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const queryParams = userId ? [startDate, today, userId] : [startDate, today];
+  const userClause = userId ? 'AND user_id = ?' : '';
+
+  const entries = queryAll<{ note: string | null }>(
+    `SELECT note FROM mood_entries WHERE date >= ? AND date <= ? AND note IS NOT NULL ${userClause}`,
+    queryParams
+  );
+
+  const counts = new Map<string, { question: string; answers: Map<string, number> }>();
+
+  for (const entry of entries) {
+    if (!entry.note) continue;
+    try {
+      const parsed = JSON.parse(entry.note);
+      if (parsed && parsed.mcqId && parsed.category && parsed.answer) {
+        const cat = parsed.category;
+        const q = parsed.question;
+        const ans = parsed.answer;
+
+        const existing = counts.get(cat) ?? { question: q, answers: new Map<string, number>() };
+        existing.answers.set(ans, (existing.answers.get(ans) ?? 0) + 1);
+        counts.set(cat, existing);
+      }
+    } catch {
+      // Not a valid JSON note or old format note, skip silently
+    }
+  }
+
+  const result: MCQInsightItem[] = [];
+  for (const [cat, data] of counts.entries()) {
+    let topAnswer = '';
+    let maxCount = 0;
+    let totalCatCount = 0;
+
+    for (const [ans, count] of data.answers.entries()) {
+      totalCatCount += count;
+      if (count > maxCount) {
+        maxCount = count;
+        topAnswer = ans;
+      }
+    }
+
+    result.push({
+      category: cat,
+      question: data.question,
+      topAnswer,
+      count: totalCatCount,
+    });
+  }
+
+  result.sort((a, b) => b.count - a.count);
+  return result;
+}
+
+/**
+ * Formats a stored mood note. If the note is an MCQ JSON response, it parses
+ * it and returns a clean "Category: Answer" string; otherwise it returns the plain note.
+ */
+export function formatMoodNote(note: string | undefined | null): string {
+  if (!note) return '';
+  try {
+    const parsed = JSON.parse(note);
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.category && parsed.answer) {
+        return `${parsed.category}: ${parsed.answer}`;
+      }
+      if (parsed.answer) {
+        return parsed.answer;
+      }
+    }
+  } catch {
+    // Treat as plain text note
+  }
+  return note;
+}
+
+

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -21,8 +21,8 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CustomAlert: React.FC = () => {
   const { visible, title, message, buttons, hideAlert } = useAlertStore();
   
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const [scaleAnim] = useState(() => new Animated.Value(0.9));
+  const [opacityAnim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     if (visible) {
@@ -43,7 +43,7 @@ export const CustomAlert: React.FC = () => {
       scaleAnim.setValue(0.9);
       opacityAnim.setValue(0);
     }
-  }, [visible]);
+  }, [visible, scaleAnim, opacityAnim]);
 
   if (!visible) return null;
 

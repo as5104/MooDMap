@@ -2,7 +2,7 @@
  * MoodMap - Onboarding Flow
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -68,13 +68,14 @@ export default function OnboardingScreen() {
   const flatListRef = useRef<FlatList>(null);
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
-  const onViewableItemsChanged = useRef(
+  const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       if (viewableItems[0]) {
         setCurrentIndex(Number(viewableItems[0].index));
       }
-    }
-  ).current;
+    },
+    []
+  );
 
   const handleNext = () => {
     if (currentIndex < SLIDES.length - 1) {

@@ -71,7 +71,7 @@ export default function JournalEditorScreen() {
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const contentRef = useRef<TextInput>(null);
-  const successAnim = useRef(new Animated.Value(0)).current;
+  const [successAnim] = useState(() => new Animated.Value(0));
 
   // Refs for interval-based auto-save
   const isDirty = useRef(false);
@@ -83,43 +83,46 @@ export default function JournalEditorScreen() {
 
   // Load entry or draft on mount
   useEffect(() => {
-    if (isEditMode && params.entryId) {
-      const entry = getJournalEntryById(params.entryId);
-      if (entry) {
-        setTitle(entry.title ?? '');
-        setContent(entry.content);
-        setUsedPromptId(entry.prompt_used);
-        latestTitle.current = entry.title ?? '';
-        latestContent.current = entry.content;
-        latestPromptId.current = entry.prompt_used;
-      }
-      setLoadingEntry(false);
-    } else if (params.prompt) {
-      setContent(params.prompt);
-      latestContent.current = params.prompt;
-      if (params.promptId) {
-        setUsedPromptId(params.promptId);
-        latestPromptId.current = params.promptId;
-      }
-      setLoadingEntry(false);
-    } else {
-      // New entry: check for existing draft
-      try {
-        const draft = loadDraft(user?.id);
-        if (draft && (draft.content.trim().length > 0 || (draft.title && draft.title.trim().length > 0))) {
-          setTitle(draft.title ?? '');
-          setContent(draft.content);
-          setUsedPromptId(draft.prompt_used);
-          latestTitle.current = draft.title ?? '';
-          latestContent.current = draft.content;
-          latestPromptId.current = draft.prompt_used;
-          setDraftRestored(true);
+    const frame = requestAnimationFrame(() => {
+      if (isEditMode && params.entryId) {
+        const entry = getJournalEntryById(params.entryId);
+        if (entry) {
+          setTitle(entry.title ?? '');
+          setContent(entry.content);
+          setUsedPromptId(entry.prompt_used);
+          latestTitle.current = entry.title ?? '';
+          latestContent.current = entry.content;
+          latestPromptId.current = entry.prompt_used;
         }
-      } catch (e) {
-        console.error('[JournalEditor] Draft load error:', e);
+        setLoadingEntry(false);
+      } else if (params.prompt) {
+        setContent(params.prompt);
+        latestContent.current = params.prompt;
+        if (params.promptId) {
+          setUsedPromptId(params.promptId);
+          latestPromptId.current = params.promptId;
+        }
+        setLoadingEntry(false);
+      } else {
+        // New entry: check for existing draft
+        try {
+          const draft = loadDraft(user?.id);
+          if (draft && (draft.content.trim().length > 0 || (draft.title && draft.title.trim().length > 0))) {
+            setTitle(draft.title ?? '');
+            setContent(draft.content);
+            setUsedPromptId(draft.prompt_used);
+            latestTitle.current = draft.title ?? '';
+            latestContent.current = draft.content;
+            latestPromptId.current = draft.prompt_used;
+            setDraftRestored(true);
+          }
+        } catch (e) {
+          console.error('[JournalEditor] Draft load error:', e);
+        }
+        setLoadingEntry(false);
       }
-      setLoadingEntry(false);
-    }
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   // Interval-based auto-save (runs continuously while editor is open)

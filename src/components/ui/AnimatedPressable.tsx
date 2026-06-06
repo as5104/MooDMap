@@ -47,6 +47,7 @@ export const AnimatedPressable: React.FC<AnimatedPressableProps> = ({
 
   const handlePressIn = useCallback(
     (e: any) => {
+      // eslint-disable-next-line react-hooks/immutability
       scale.value = withSpring(pressScale, {
         damping: 15,
         stiffness: 400,
@@ -58,6 +59,7 @@ export const AnimatedPressable: React.FC<AnimatedPressableProps> = ({
 
   const handlePressOut = useCallback(
     (e: any) => {
+      // eslint-disable-next-line react-hooks/immutability
       scale.value = withSpring(1, {
         damping: 15,
         stiffness: 400,
