@@ -419,6 +419,7 @@ export default function HomeScreen() {
                 day: d.day,
                 expression: d.expression,
                 faceColor: d.faceColor,
+                moodScore: d.moodScore,
               }))}
             />
           </GlassCard>

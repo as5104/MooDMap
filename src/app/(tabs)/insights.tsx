@@ -35,6 +35,8 @@ import {
   getAvgEnergyStress,
   getSleepMetricsAndCorrelation,
   getMCQInsights,
+  getTimeOfDayAnalysis,
+  getDayOfWeekAnalysis,
   formatMoodNote,
   type DayMoodData,
   type MoodEntryRow,
@@ -46,6 +48,8 @@ import {
   type EnergyStressData,
   type SleepInsightData,
   type MCQInsightItem,
+  type TimeOfDayInsight,
+  type DayOfWeekInsight,
 } from '@/services/moodService';
 
 const GAP = Spacing.md;
@@ -139,6 +143,8 @@ export default function InsightsScreen() {
   const [energyStress, setEnergyStress] = useState<EnergyStressData | null>(null);
   const [sleepData, setSleepData] = useState<SleepInsightData | null>(null);
   const [mcqInsights, setMcqInsights] = useState<MCQInsightItem[]>([]);
+  const [timeOfDayData, setTimeOfDayData] = useState<TimeOfDayInsight[]>([]);
+  const [dayOfWeekData, setDayOfWeekData] = useState<DayOfWeekInsight[]>([]);
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calYear, setCalYear] = useState(new Date().getFullYear());
 
@@ -162,6 +168,8 @@ export default function InsightsScreen() {
       const energy = getAvgEnergyStress(userId, targetDays);
       const sleep = getSleepMetricsAndCorrelation(userId, targetDays);
       const mcqs = getMCQInsights(userId, targetDays);
+      const tod = getTimeOfDayAnalysis(userId, targetDays);
+      const dow = getDayOfWeekAnalysis(userId, targetDays);
 
       // Consolidate updates to run in a single React render batch
       setMoodScoreLocal(score);
@@ -176,6 +184,8 @@ export default function InsightsScreen() {
       setEnergyStress(energy);
       setSleepData(sleep);
       setMcqInsights(mcqs);
+      setTimeOfDayData(tod);
+      setDayOfWeekData(dow);
 
       setRenderedPeriod(targetPeriodIndex);
     } catch (e) {
@@ -432,7 +442,7 @@ export default function InsightsScreen() {
               <Feather name="smile" size={14} color={Colors.accent.primary} />
               <Text style={s.cardTitle}>This Week</Text>
             </View>
-            <WeeklyMoodRow days={weeklyMoods.map((d) => ({ day: d.day, expression: d.expression, faceColor: d.faceColor }))} />
+            <WeeklyMoodRow days={weeklyMoods.map((d) => ({ day: d.day, expression: d.expression, faceColor: d.faceColor, moodScore: d.moodScore }))} />
           </GlassCard>
         )}
 
@@ -698,18 +708,18 @@ export default function InsightsScreen() {
                     
                     <View style={s.correlationRow}>
                       <View style={[s.correlationBar, { backgroundColor: Colors.accent.primary, width: `${sleepData.avgMoodGoodSleep}%` }]} />
-                      <Text style={s.correlationLabel}>7+ hrs sleep: <Text style={{ fontFamily: Fonts.bodySemiBold, color: Colors.accent.primary }}>{sleepData.avgMoodGoodSleep}%</Text></Text>
+                      <Text style={s.correlationLabel}>Good sleep: <Text style={{ fontFamily: Fonts.bodySemiBold, color: Colors.accent.primary }}>{sleepData.avgMoodGoodSleep}%</Text></Text>
                     </View>
 
                     <View style={s.correlationRow}>
                       <View style={[s.correlationBar, { backgroundColor: Colors.accent.coral, width: `${sleepData.avgMoodPoorSleep}%` }]} />
-                      <Text style={s.correlationLabel}>&lt; 7 hrs sleep: <Text style={{ fontFamily: Fonts.bodySemiBold, color: Colors.accent.coral }}>{sleepData.avgMoodPoorSleep}%</Text></Text>
+                      <Text style={s.correlationLabel}>Poor sleep: <Text style={{ fontFamily: Fonts.bodySemiBold, color: Colors.accent.coral }}>{sleepData.avgMoodPoorSleep}%</Text></Text>
                     </View>
                     
                     <Text style={s.correlationNote}>
                       {sleepData.avgMoodGoodSleep > sleepData.avgMoodPoorSleep
-                        ? `Restful sleep increases your daily mood score by ${Math.round(sleepData.avgMoodGoodSleep - sleepData.avgMoodPoorSleep)}% on average.`
-                        : `Your mood is relatively stable regardless of sleep duration.`}
+                        ? `Good quality sleep boosts your wellbeing score by ${Math.round(sleepData.avgMoodGoodSleep - sleepData.avgMoodPoorSleep)}% on average.`
+                        : `Your mood is relatively stable regardless of sleep quality.`}
                     </Text>
                   </View>
                 ) : (
@@ -770,7 +780,72 @@ export default function InsightsScreen() {
           </GlassCard>
         )}
 
-        {/* ROW 8: Recent Entries (full width) */}
+        {/* ROW 9: Best Time & Day Patterns */}
+        {hasData && timeOfDayData.length > 0 && (
+          <View style={s.bentoRow}>
+            {/* Time of Day */}
+            <GlassCard intensity="medium" padding="lg" style={s.flex1}>
+              <View style={s.cardHeader}>
+                <Feather name="clock" size={13} color={Colors.accent.amber} />
+                <Text style={s.cardTitle}>Best Time</Text>
+              </View>
+              {timeOfDayData.map((t, idx) => {
+                const icons: Record<string, string> = { morning: 'sunrise', afternoon: 'sun', evening: 'sunset', night: 'moon' };
+                const labels: Record<string, string> = { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening', night: 'Night' };
+                const barW = Math.max((t.avgScore / 10) * 100, 12);
+                const isTop = idx === 0;
+                return (
+                  <View key={t.period} style={s.todRow}>
+                    <Feather name={(icons[t.period] || 'clock') as keyof typeof Feather.glyphMap} size={12} color={isTop ? Colors.accent.amber : Colors.text.tertiary} />
+                    <Text style={[s.todLabel, isTop && { color: Colors.text.primary }]}>{labels[t.period] || t.period}</Text>
+                    <View style={s.todBarTrack}>
+                      <View style={[s.todBarFill, { width: `${barW}%`, backgroundColor: isTop ? Colors.accent.amber : Colors.text.tertiary }]} />
+                    </View>
+                    <Text style={[s.todScore, isTop && { color: Colors.accent.amber }]}>{t.avgScore}</Text>
+                  </View>
+                );
+              })}
+            </GlassCard>
+
+            {/* Day of Week */}
+            <GlassCard intensity="medium" padding="lg" style={s.flex1}>
+              <View style={s.cardHeader}>
+                <Feather name="bar-chart-2" size={13} color={Colors.accent.primary} />
+                <Text style={s.cardTitle}>Week Pattern</Text>
+              </View>
+              <View style={s.dowContainer}>
+                {dayOfWeekData.map((d) => {
+                  const barH = d.avgScore > 0 ? Math.max((d.avgScore / 10) * 52, 4) : 4;
+                  const best = dayOfWeekData.reduce((a, b) => (b.avgScore > a.avgScore ? b : a), dayOfWeekData[0]);
+                  const isBest = d.day === best?.day && d.avgScore > 0;
+                  return (
+                    <View key={d.day} style={s.dowCol}>
+                      <Text style={[s.dowScore, isBest && { color: Colors.accent.primary }]}>{d.avgScore > 0 ? d.avgScore : ''}</Text>
+                      <View style={s.dowBarTrack}>
+                        <View style={[s.dowBarFill, { height: barH, backgroundColor: isBest ? Colors.accent.primary : d.avgScore > 0 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)' }]} />
+                      </View>
+                      <Text style={[s.dowDay, isBest && { color: Colors.accent.primary }]}>{d.day.charAt(0)}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+              {(() => {
+                const best = dayOfWeekData.reduce((a, b) => (b.avgScore > a.avgScore ? b : a), dayOfWeekData[0]);
+                const worst = dayOfWeekData.filter(d => d.avgScore > 0).reduce((a, b) => (b.avgScore < a.avgScore ? b : a), dayOfWeekData[0]);
+                if (best && worst && best.avgScore > 0) {
+                  return (
+                    <Text style={s.dowSummary}>
+                      Best on {best.day}s{worst.day !== best.day && worst.avgScore > 0 ? ` · Lowest on ${worst.day}s` : ''}
+                    </Text>
+                  );
+                }
+                return null;
+              })()}
+            </GlassCard>
+          </View>
+        )}
+
+        {/* ROW 10: Recent Entries (full width) */}
         {history.length > 0 && (
           <>
             <View style={s.sectionHeader}>
@@ -1122,5 +1197,80 @@ const s = StyleSheet.create({
     fontFamily: Fonts.body,
     fontSize: FontSizes.tiny,
     color: Colors.text.tertiary,
+  },
+  // Time-of-Day styles
+  todRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: Spacing.sm,
+  },
+  todLabel: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.tertiary,
+    width: 60,
+  },
+  todBarTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    overflow: 'hidden',
+  },
+  todBarFill: {
+    height: '100%',
+    borderRadius: 3,
+    opacity: 0.7,
+  },
+  todScore: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    width: 24,
+    textAlign: 'right',
+  },
+  // Day-of-Week styles
+  dowContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginTop: Spacing.md,
+    height: 80,
+  },
+  dowCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 3,
+  },
+  dowBarTrack: {
+    width: 12,
+    height: 52,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  dowBarFill: {
+    width: '100%',
+    borderRadius: 6,
+  },
+  dowDay: {
+    fontFamily: Fonts.body,
+    fontSize: 9,
+    color: Colors.text.tertiary,
+  },
+  dowScore: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: 8,
+    color: Colors.text.tertiary,
+    height: 12,
+  },
+  dowSummary: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginTop: Spacing.sm,
   },
 });

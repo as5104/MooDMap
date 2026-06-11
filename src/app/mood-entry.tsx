@@ -25,7 +25,7 @@ import { Spacing, Radius } from '@/constants/layout';
 import { MOODS, type MoodType } from '@/constants/moods';
 import { TAGS } from '@/constants/tags';
 import { useAppStore } from '@/stores/appStore';
-import { saveMoodEntry, getWeeklyMoods, getMoodScore, getMoodStreak } from '@/services/moodService';
+import { saveMoodEntry, getWeeklyMoods, getMoodScoreForPeriod, getMoodStreak } from '@/services/moodService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOTAL_STEPS = 5;
@@ -410,7 +410,7 @@ export default function MoodEntryScreen() {
         });
       }
 
-      const entry = saveMoodEntry({
+      const { entry, isNew } = saveMoodEntry({
         moodType: selectedMood.type,
         moodScore: selectedMood.score,
         energyLevel,
@@ -438,13 +438,18 @@ export default function MoodEntryScreen() {
 
       // Refresh cached data
       const weekly = getWeeklyMoods(user?.id);
-      const score = getMoodScore(user?.id);
+      const score = getMoodScoreForPeriod(user?.id);
       const streak = getMoodStreak(user?.id);
 
       setWeeklyMoods(weekly);
       setMoodScore(score);
       setMoodStreak(streak.current);
-      addXP(25);
+
+      // Only award XP for NEW entries, not edits
+      if (isNew) {
+        addXP(25);
+      }
+
       refreshData();
 
       setSaved(true);

@@ -79,6 +79,71 @@ function getDateNDaysAgo(n: number): string {
   return d.toISOString().split('T')[0];
 }
 
+/**
+ * Compute a Composite Wellbeing Score (1-10) from all user inputs.
+ * Weights: Mood preset 40%, Energy 15%, Stress (inverted) 15%,
+ *          Sleep Duration (bell curve) 15%, Sleep Quality 15%.
+ * Falls back gracefully if optional fields are missing.
+ */
+export function computeCompositeScore(
+  baseMoodScore: number,
+  energyLevel?: number | null,
+  stressLevel?: number | null,
+  sleepHours?: number | null,
+  sleepQuality?: number | null,
+): number {
+  const baseMood = Math.max(1, Math.min(10, baseMoodScore));
+
+  const energyScore = energyLevel != null ? energyLevel * 2 : null;
+
+  // Stress: INVERTED
+  const stressScore = stressLevel != null ? (6 - stressLevel) * 2 : null;
+
+  // Sleep Duration: bell curve — 7-9h optimal
+  let sleepDurationScore: number | null = null;
+  if (sleepHours != null) {
+    if (sleepHours >= 7 && sleepHours <= 9) sleepDurationScore = 10;
+    else if (sleepHours === 6 || (sleepHours > 9 && sleepHours <= 10)) sleepDurationScore = 7;
+    else if (sleepHours === 5 || sleepHours === 11) sleepDurationScore = 5;
+    else sleepDurationScore = 3;
+  }
+
+  const sleepQualScore = sleepQuality != null ? sleepQuality * 2 : null;
+
+  // Collect available components with their weights
+  const components: { score: number; weight: number }[] = [
+    { score: baseMood, weight: 0.40 },
+  ];
+
+  // Distribute remaining 60% among available optional components
+  const optionals = [
+    { score: energyScore, baseWeight: 0.15 },
+    { score: stressScore, baseWeight: 0.15 },
+    { score: sleepDurationScore, baseWeight: 0.15 },
+    { score: sleepQualScore, baseWeight: 0.15 },
+  ];
+
+  const availableOptionals = optionals.filter(o => o.score != null);
+  const missingWeight = optionals
+    .filter(o => o.score == null)
+    .reduce((sum, o) => sum + o.baseWeight, 0);
+
+  if (availableOptionals.length > 0) {
+    // Redistribute missing weight proportionally among available optionals
+    const totalAvailableBaseWeight = availableOptionals.reduce((s, o) => s + o.baseWeight, 0);
+    for (const opt of availableOptionals) {
+      const extraWeight = (opt.baseWeight / totalAvailableBaseWeight) * missingWeight;
+      components.push({ score: opt.score!, weight: opt.baseWeight + extraWeight });
+    }
+  } else {
+    // No optional data at all — base mood gets 100% weight
+    components[0].weight = 1.0;
+  }
+
+  const raw = components.reduce((sum, c) => sum + c.score * c.weight, 0);
+  return Math.round(Math.max(1, Math.min(10, raw)));
+}
+
 function getDayLabel(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
@@ -89,9 +154,18 @@ function getDayLabel(dateStr: string): string {
 /**
  * Save a mood entry. If one already exists for today, update it.
  */
-export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
+export function saveMoodEntry(input: MoodEntryInput): { entry: MoodEntryRow; isNew: boolean } {
   const now = new Date().toISOString();
   const today = getTodayDate();
+
+  // Compute composite score from all inputs
+  const compositeScore = computeCompositeScore(
+    input.moodScore,
+    input.energyLevel,
+    input.stressLevel,
+    input.sleepHours,
+    input.sleepQuality,
+  );
 
   // Check if entry for today already exists
   const whereClause = input.userId
@@ -106,6 +180,9 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
 
   const tagsJson = input.tags ? JSON.stringify(input.tags) : null;
   const timeOfDay = getTimeOfDay();
+  let isNew = false;
+
+  let result: MoodEntryRow;
 
   if (existing) {
     execute(
@@ -115,7 +192,7 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
         sleep_quality = ?, tags = ?, note = ?, time_of_day = ?
       WHERE id = ?`,
       [
-        now, input.moodType, input.moodScore,
+        now, input.moodType, compositeScore,
         input.energyLevel ?? null, input.stressLevel ?? null,
         input.sleepHours ?? null, input.sleepQuality ?? null,
         tagsJson, input.note ?? null, timeOfDay,
@@ -123,11 +200,11 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
       ]
     );
 
-    return {
+    result = {
       ...existing,
       updated_at: now,
       mood_type: input.moodType,
-      mood_score: input.moodScore,
+      mood_score: compositeScore,
       energy_level: input.energyLevel ?? null,
       stress_level: input.stressLevel ?? null,
       sleep_hours: input.sleepHours ?? null,
@@ -136,44 +213,47 @@ export function saveMoodEntry(input: MoodEntryInput): MoodEntryRow {
       note: input.note ?? null,
       time_of_day: timeOfDay,
     };
+  } else {
+    // Insert new
+    const id = generateId();
+    isNew = true;
+    execute(
+      `INSERT INTO mood_entries (id, created_at, updated_at, date, mood_type, mood_score, energy_level, stress_level, sleep_hours, sleep_quality, tags, note, time_of_day, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, now, now, today,
+        input.moodType, compositeScore,
+        input.energyLevel ?? null, input.stressLevel ?? null,
+        input.sleepHours ?? null, input.sleepQuality ?? null,
+        tagsJson, input.note ?? null, timeOfDay,
+        input.userId ?? null,
+      ]
+    );
+
+    result = {
+      id,
+      created_at: now,
+      updated_at: now,
+      date: today,
+      mood_type: input.moodType,
+      mood_score: compositeScore,
+      energy_level: input.energyLevel ?? null,
+      stress_level: input.stressLevel ?? null,
+      sleep_hours: input.sleepHours ?? null,
+      sleep_quality: input.sleepQuality ?? null,
+      tags: tagsJson,
+      note: input.note ?? null,
+      time_of_day: timeOfDay,
+      user_id: input.userId ?? null,
+    };
   }
 
-  // Insert new
-  const id = generateId();
-  execute(
-    `INSERT INTO mood_entries (id, created_at, updated_at, date, mood_type, mood_score, energy_level, stress_level, sleep_hours, sleep_quality, tags, note, time_of_day, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id, now, now, today,
-      input.moodType, input.moodScore,
-      input.energyLevel ?? null, input.stressLevel ?? null,
-      input.sleepHours ?? null, input.sleepQuality ?? null,
-      tagsJson, input.note ?? null, timeOfDay,
-      input.userId ?? null,
-    ]
-  );
-
-  // Update streak
+  // Update streak on BOTH insert and update paths
   if (input.userId) {
     updateMoodStreak(input.userId);
   }
 
-  return {
-    id,
-    created_at: now,
-    updated_at: now,
-    date: today,
-    mood_type: input.moodType,
-    mood_score: input.moodScore,
-    energy_level: input.energyLevel ?? null,
-    stress_level: input.stressLevel ?? null,
-    sleep_hours: input.sleepHours ?? null,
-    sleep_quality: input.sleepQuality ?? null,
-    tags: tagsJson,
-    note: input.note ?? null,
-    time_of_day: timeOfDay,
-    user_id: input.userId ?? null,
-  };
+  return { entry: result, isNew };
 }
 
 /**
@@ -219,42 +299,34 @@ export function getWeeklyMoods(userId?: string): DayMoodData[] {
   for (let i = 6; i >= 0; i--) {
     const dateStr = getDateNDaysAgo(i);
     const entry = entryMap.get(dateStr);
-    const moodType = (entry?.mood_type ?? 'calm') as MoodType;
-    const mood = MOOD_MAP[moodType] ?? MOOD_MAP.calm;
-
-    result.push({
-      day: getDayLabel(dateStr),
-      date: dateStr,
-      expression: mood.expression,
-      faceColor: mood.faceColor,
-      moodType,
-      moodScore: entry?.mood_score ?? 0,
-    });
+    if (entry) {
+      const moodType = entry.mood_type as MoodType;
+      const mood = MOOD_MAP[moodType] ?? MOOD_MAP.calm;
+      result.push({
+        day: getDayLabel(dateStr),
+        date: dateStr,
+        expression: mood.expression,
+        faceColor: mood.faceColor,
+        moodType,
+        moodScore: entry.mood_score,
+      });
+    } else {
+      // No entry for this day — push a "missing" marker
+      result.push({
+        day: getDayLabel(dateStr),
+        date: dateStr,
+        expression: 'neutral' as const,
+        faceColor: '#555555',
+        moodType: null as unknown as MoodType,
+        moodScore: 0,
+      });
+    }
   }
 
   return result;
 }
 
-/**
- * Calculate mood score (0-100) from last 7 days
- */
-export function getMoodScore(userId?: string): number {
-  const weekAgo = getDateNDaysAgo(6);
-  const today = getTodayDate();
-
-  const result = userId
-    ? queryFirst<{ avg_score: number; cnt: number }>(
-        'SELECT AVG(mood_score) as avg_score, COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ?',
-        [weekAgo, today, userId]
-      )
-    : queryFirst<{ avg_score: number; cnt: number }>(
-        'SELECT AVG(mood_score) as avg_score, COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ?',
-        [weekAgo, today]
-      );
-
-  if (!result || result.cnt === 0 || result.avg_score === null) return 0;
-  return Math.round((result.avg_score / 10) * 100);
-}
+// getMoodScore() removed — use getMoodScoreForPeriod() instead
 
 /**
  * Get mood statistics (positive/negative/neutral counts)
@@ -677,17 +749,24 @@ export function getMoodSummary(userId?: string, days: number = 7): MoodSummaryDa
     }
   }
 
-  // Determine trend (compare first half vs second half)
+  // Determine trend using linear regression slope
   let trendDirection: 'improving' | 'declining' | 'stable' = 'stable';
-  if (entries.length >= 4) {
-    const mid = Math.floor(entries.length / 2);
-    const firstHalf = entries.slice(0, mid);
-    const secondHalf = entries.slice(mid);
-    const firstAvg = firstHalf.reduce((s, e) => s + e.mood_score, 0) / firstHalf.length;
-    const secondAvg = secondHalf.reduce((s, e) => s + e.mood_score, 0) / secondHalf.length;
-    const diff = secondAvg - firstAvg;
-    if (diff > 1.0) trendDirection = 'improving';
-    else if (diff < -1.0) trendDirection = 'declining';
+  if (entries.length >= 3) {
+    // Simple linear regression: y = scores, x = 0,1,2,...
+    const n = entries.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (let i = 0; i < n; i++) {
+      const y = entries[i].mood_score;
+      sumX += i;
+      sumY += y;
+      sumXY += i * y;
+      sumX2 += i * i;
+    }
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    // Threshold: slope > 0.15 per day = improving, < -0.15 = declining
+    // On a 1-10 scale over 7 days, 0.15/day ≈ ~1 point change across the week
+    if (slope > 0.15) trendDirection = 'improving';
+    else if (slope < -0.15) trendDirection = 'declining';
   }
 
   return {
@@ -746,7 +825,8 @@ export interface SleepInsightData {
 }
 
 /**
- * Get average sleep duration, quality, and mood correlation
+ * Get average sleep duration, quality, and mood correlation.
+ * Uses a composite sleep score (hours bell curve + quality) to split good vs poor sleep.
  */
 export function getSleepMetricsAndCorrelation(userId?: string, days: number = 7): SleepInsightData {
   const startDate = getDateNDaysAgo(days);
@@ -764,26 +844,44 @@ export function getSleepMetricsAndCorrelation(userId?: string, days: number = 7)
     queryParams
   );
 
-  const goodSleepQueryParams = userId ? [startDate, today, 7, userId] : [startDate, today, 7];
-  const goodSleepResult = queryFirst<{ avg_mood: number | null }>(
-    `SELECT AVG(mood_score) as avg_mood FROM mood_entries
-     WHERE date >= ? AND date <= ? AND sleep_hours >= ? ${userClause}`,
-    goodSleepQueryParams
+  // Use composite sleep score: combine duration score + quality score
+  // Good sleep = composite sleep score >= 6 out of 10
+  // (hours bell curve normalized to 1-5 + quality 1-5, average >= 3 out of 5)
+  const sleepEntries = queryAll<{ mood_score: number; sleep_hours: number | null; sleep_quality: number | null }>(
+    `SELECT mood_score, sleep_hours, sleep_quality FROM mood_entries
+     WHERE date >= ? AND date <= ? AND sleep_hours IS NOT NULL ${userClause}`,
+    queryParams
   );
 
-  const poorSleepQueryParams = userId ? [startDate, today, 7, userId] : [startDate, today, 7];
-  const poorSleepResult = queryFirst<{ avg_mood: number | null }>(
-    `SELECT AVG(mood_score) as avg_mood FROM mood_entries
-     WHERE date >= ? AND date <= ? AND sleep_hours < ? ${userClause}`,
-    poorSleepQueryParams
-  );
+  let goodSleepMoodSum = 0, goodSleepCount = 0;
+  let poorSleepMoodSum = 0, poorSleepCount = 0;
+
+  for (const e of sleepEntries) {
+    // Duration score (1-5): 7-9h=5, 6or10=4, 5or11=3, else=2
+    let durationScore = 2;
+    if (e.sleep_hours != null) {
+      if (e.sleep_hours >= 7 && e.sleep_hours <= 9) durationScore = 5;
+      else if (e.sleep_hours === 6 || (e.sleep_hours > 9 && e.sleep_hours <= 10)) durationScore = 4;
+      else if (e.sleep_hours === 5 || e.sleep_hours === 11) durationScore = 3;
+    }
+    const qualityScore = e.sleep_quality ?? 3; // default to average
+    const compositeSleep = (durationScore + qualityScore) / 2; // 1-5 range
+
+    if (compositeSleep >= 3.5) {
+      goodSleepMoodSum += e.mood_score;
+      goodSleepCount++;
+    } else {
+      poorSleepMoodSum += e.mood_score;
+      poorSleepCount++;
+    }
+  }
 
   return {
     avgSleepHours: avgResult?.avg_hours ? Math.round(avgResult.avg_hours * 10) / 10 : 0,
     avgSleepQuality: avgResult?.avg_quality ? Math.round(avgResult.avg_quality * 10) / 10 : 0,
     sleepCount: avgResult?.sleep_cnt ?? 0,
-    avgMoodGoodSleep: goodSleepResult?.avg_mood ? Math.round((goodSleepResult.avg_mood / 10) * 100) : null,
-    avgMoodPoorSleep: poorSleepResult?.avg_mood ? Math.round((poorSleepResult.avg_mood / 10) * 100) : null,
+    avgMoodGoodSleep: goodSleepCount > 0 ? Math.round((goodSleepMoodSum / goodSleepCount / 10) * 100) : null,
+    avgMoodPoorSleep: poorSleepCount > 0 ? Math.round((poorSleepMoodSum / poorSleepCount / 10) * 100) : null,
   };
 }
 
@@ -877,4 +975,90 @@ export function formatMoodNote(note: string | undefined | null): string {
   return note;
 }
 
+// Time-of-Day & Day-of-Week Analytics
 
+export interface TimeOfDayInsight {
+  period: string;           // 'morning' | 'afternoon' | 'evening' | 'night'
+  avgScore: number;
+  count: number;
+}
+
+/**
+ * Get average mood score by time of day.
+ * Returns entries sorted from best to worst time period.
+ */
+export function getTimeOfDayAnalysis(userId?: string, days: number = 30): TimeOfDayInsight[] {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const rows = userId
+    ? queryAll<{ time_of_day: string; avg_score: number; cnt: number }>(
+        `SELECT time_of_day, AVG(mood_score) as avg_score, COUNT(*) as cnt
+         FROM mood_entries
+         WHERE date >= ? AND date <= ? AND user_id = ? AND time_of_day IS NOT NULL
+         GROUP BY time_of_day`,
+        [startDate, today, userId]
+      )
+    : queryAll<{ time_of_day: string; avg_score: number; cnt: number }>(
+        `SELECT time_of_day, AVG(mood_score) as avg_score, COUNT(*) as cnt
+         FROM mood_entries
+         WHERE date >= ? AND date <= ? AND time_of_day IS NOT NULL
+         GROUP BY time_of_day`,
+        [startDate, today]
+      );
+
+  return rows
+    .map(r => ({
+      period: r.time_of_day,
+      avgScore: Math.round(r.avg_score * 10) / 10,
+      count: r.cnt,
+    }))
+    .sort((a, b) => b.avgScore - a.avgScore);
+}
+
+export interface DayOfWeekInsight {
+  day: string;              // 'Mon', 'Tue', etc.
+  dayIndex: number;         // 0 (Sun) – 6 (Sat)
+  avgScore: number;
+  count: number;
+}
+
+/**
+ * Get average mood score by day of week.
+ * Returns all 7 days sorted Monday→Sunday, with avgScore 0 if no data.
+ */
+export function getDayOfWeekAnalysis(userId?: string, days: number = 30): DayOfWeekInsight[] {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const entries = userId
+    ? queryAll<{ date: string; mood_score: number }>(
+        'SELECT date, mood_score FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ?',
+        [startDate, today, userId]
+      )
+    : queryAll<{ date: string; mood_score: number }>(
+        'SELECT date, mood_score FROM mood_entries WHERE date >= ? AND date <= ?',
+        [startDate, today]
+      );
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const buckets: { totalScore: number; count: number }[] = Array.from({ length: 7 }, () => ({ totalScore: 0, count: 0 }));
+
+  for (const e of entries) {
+    const d = new Date(e.date + 'T00:00:00');
+    const dayIdx = d.getDay(); // 0=Sun, 6=Sat
+    buckets[dayIdx].totalScore += e.mood_score;
+    buckets[dayIdx].count += 1;
+  }
+
+  // Return Mon→Sun order (1,2,3,4,5,6,0)
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  return order.map(idx => ({
+    day: dayNames[idx],
+    dayIndex: idx,
+    avgScore: buckets[idx].count > 0
+      ? Math.round((buckets[idx].totalScore / buckets[idx].count) * 10) / 10
+      : 0,
+    count: buckets[idx].count,
+  }));
+}
