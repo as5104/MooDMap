@@ -253,18 +253,23 @@ export default function HomeScreen() {
         {todayMood && currentMood && (
           <GlassCard intensity="medium" padding="lg" style={styles.todayCard}>
             <View style={styles.todayHeader}>
-              <Text style={styles.todayLabel}>Today&apos;s Check-in</Text>
+              <View style={styles.todayHeaderLeft}>
+                <View style={[styles.glowingDot, { backgroundColor: currentMood.color }]} />
+                <Text style={styles.todayLabel}>Today&apos;s Check-in</Text>
+              </View>
               <Pressable
-                style={styles.todayEditBtn}
+                style={styles.todayEditBtnPremium}
                 onPress={() => router.push('/mood-entry')}
                 hitSlop={8}
               >
-                <Feather name="edit-2" size={14} color={Colors.text.secondary} />
+                <Feather name="edit-3" size={12} color={Colors.text.secondary} />
+                <Text style={styles.todayEditBtnText}>Edit</Text>
               </Pressable>
             </View>
-            <View style={styles.todayContent}>
-              <View style={styles.todayLeft}>
-                <View style={[styles.todayFaceWrap, { backgroundColor: currentMood.color + '20' }]}>
+
+            <View style={styles.todayMainRow}>
+              <View style={[styles.todayFaceContainer, { borderColor: `${currentMood.color}40` }]}>
+                <View style={[styles.todayFaceBackground, { backgroundColor: `${currentMood.color}15` }]}>
                   <MoodFace
                     expression={currentMood.expression}
                     size="sm"
@@ -273,80 +278,89 @@ export default function HomeScreen() {
                   />
                 </View>
               </View>
-              <View style={styles.todayMid}>
-                <Text style={[styles.todayMoodLabel, { color: currentMood.color }]}>
+              
+              <View style={styles.todayMoodDetails}>
+                <Text style={[styles.todayMoodLabelPremium, { color: currentMood.color }]}>
                   {currentMood.label}
                 </Text>
-                <Text style={styles.todayScore}>Score: {todayMood.moodScore}/10</Text>
-                {todayMood.note && (
-                  <Text style={styles.todayNote}>{formatMoodNote(todayMood.note)}</Text>
-                )}
+                <Text style={styles.todayTimeSubtitle}>
+                  Mood Score: {Math.round((todayMood.moodScore / 10) * 100)}%
+                </Text>
               </View>
-              <View style={styles.todayRight}>
-                <View style={[styles.todayScoreBadge, { borderColor: currentMood.color }]}>
-                  <Text style={[styles.todayScoreText, { color: currentMood.color }]}>
-                    {Math.round((todayMood.moodScore / 10) * 100)}
-                  </Text>
-                </View>
+
+              <View style={[styles.todayScoreCapsule, { backgroundColor: `${currentMood.color}20`, borderColor: `${currentMood.color}35` }]}>
+                <Text style={[styles.todayScoreCapsuleText, { color: currentMood.color }]}>
+                  {todayMood.moodScore}/10
+                </Text>
               </View>
             </View>
-            {/* Energy & Stress mini bars */}
-            {(todayMood.energyLevel != null || todayMood.stressLevel != null) && (
-              <View style={styles.todayBars}>
-                {todayMood.energyLevel != null && (
-                  <View style={styles.miniBar}>
-                    <View style={styles.miniBarLabelRow}>
-                      <Feather name="zap" size={10} color={Colors.accent.primary} />
-                      <Text style={styles.miniBarLabel}>Energy</Text>
-                    </View>
-                    <View style={styles.miniBarTrack}>
-                      <View
-                        style={[
-                          styles.miniBarFill,
-                          {
-                            width: `${(todayMood.energyLevel / 5) * 100}%`,
-                            backgroundColor: Colors.accent.primary,
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.miniBarValue}>{todayMood.energyLevel}/5</Text>
-                  </View>
-                )}
-                {todayMood.stressLevel != null && (
-                  <View style={styles.miniBar}>
-                    <View style={styles.miniBarLabelRow}>
-                      <Feather name="alert-circle" size={10} color={Colors.accent.coral} />
-                      <Text style={styles.miniBarLabel}>Stress</Text>
-                    </View>
-                    <View style={styles.miniBarTrack}>
-                      <View
-                        style={[
-                          styles.miniBarFill,
-                          {
-                            width: `${(todayMood.stressLevel / 5) * 100}%`,
-                            backgroundColor: Colors.accent.coral,
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.miniBarValue}>{todayMood.stressLevel}/5</Text>
-                  </View>
-                )}
+
+            {/* Metrics Row (Energy, Stress, Sleep) */}
+            <View style={styles.todayMetricsRow}>
+              <View style={styles.todayMetricCol}>
+                <View style={styles.todayMetricHeader}>
+                  <Feather name="zap" size={13} color={Colors.accent.primary} />
+                  <Text style={styles.todayMetricTitle}>Energy</Text>
+                </View>
+                <Text style={styles.todayMetricValue}>
+                  {todayMood.energyLevel != null ? `${todayMood.energyLevel}/5` : '—'}
+                </Text>
               </View>
-            )}
+
+              <View style={styles.todayMetricDivider} />
+
+              <View style={styles.todayMetricCol}>
+                <View style={styles.todayMetricHeader}>
+                  <Feather name="activity" size={13} color={Colors.accent.coral} />
+                  <Text style={styles.todayMetricTitle}>Stress</Text>
+                </View>
+                <Text style={styles.todayMetricValue}>
+                  {todayMood.stressLevel != null ? `${todayMood.stressLevel}/5` : '—'}
+                </Text>
+              </View>
+
+              <View style={styles.todayMetricDivider} />
+
+              <View style={styles.todayMetricCol}>
+                <View style={styles.todayMetricHeader}>
+                  <Feather name="moon" size={13} color={Colors.accent.lavender} />
+                  <Text style={styles.todayMetricTitle}>Sleep</Text>
+                </View>
+                <Text style={styles.todayMetricValue} numberOfLines={1} adjustsFontSizeToFit>
+                  {todayMood.sleepHours != null 
+                    ? `${todayMood.sleepHours}h${todayMood.sleepQuality != null ? ` (${todayMood.sleepQuality}/5)` : ''}` 
+                    : '—'}
+                </Text>
+              </View>
+            </View>
+
             {/* Tags */}
             {todayMood.tags && todayMood.tags.length > 0 && (
-              <View style={styles.todayTags}>
+              <View style={styles.todayTagsPremium}>
                 {todayMood.tags.slice(0, 5).map((tag) => {
                   const tagDef = TAG_MAP[tag];
                   return (
-                    <View key={tag} style={styles.todayTagChip}>
-                      <Feather name={(tagDef?.icon ?? 'tag') as any} size={10} color={Colors.text.secondary} />
-                      <Text style={styles.todayTagText}>{tagDef?.label ?? tag}</Text>
+                    <View key={tag} style={styles.todayTagChipPremium}>
+                      {tagDef?.icon && (
+                        <Feather name={tagDef.icon as any} size={10} color={Colors.text.secondary} />
+                      )}
+                      <Text style={styles.todayTagTextPremium}>{tagDef?.label ?? tag}</Text>
                     </View>
                   );
                 })}
+              </View>
+            )}
+
+            {/* Daily Focus / Note */}
+            {todayMood.note && (
+              <View style={[styles.todayNoteContainer, { borderLeftColor: currentMood.color }]}>
+                <View style={styles.todayNoteHeader}>
+                  <Feather name="edit-3" size={12} color={Colors.text.tertiary} style={styles.todayNoteIcon} />
+                  <Text style={styles.todayNoteTitle}>Daily Focus</Text>
+                </View>
+                <Text style={styles.todayNoteText}>
+                  {formatMoodNote(todayMood.note)}
+                </Text>
               </View>
             )}
           </GlassCard>
@@ -661,6 +675,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.md,
   },
+  todayHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  glowingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   todayLabel: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.caption,
@@ -668,123 +692,152 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  todayEditBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  todayContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  todayLeft: {
-    marginRight: Spacing.lg,
-  },
-  todayFaceWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  todayMid: {
-    flex: 1,
-  },
-  todayMoodLabel: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h3,
-    marginBottom: 2,
-  },
-  todayScore: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
-  },
-  todayNote: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.caption,
-    color: Colors.text.tertiary,
-    marginTop: 4,
-  },
-  todayRight: {
-    marginLeft: Spacing.sm,
-  },
-  todayScoreBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 2.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  todayScoreText: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.body,
-  },
-
-  // Mini bars
-  todayBars: {
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
-  },
-  miniBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  miniBarLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    width: 65,
-  },
-  miniBarLabel: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.tiny,
-    color: Colors.text.secondary,
-  },
-  miniBarTrack: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-  },
-  miniBarFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  miniBarValue: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: FontSizes.tiny,
-    color: Colors.text.tertiary,
-    width: 24,
-    textAlign: 'right',
-  },
-
-  // Tags
-  todayTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.xs,
-    marginTop: Spacing.md,
-  },
-  todayTagChip: {
+  todayEditBtnPremium: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 5,
+    borderRadius: Radius.md,
+  },
+  todayEditBtnText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+  },
+  todayMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  todayFaceContainer: {
+    borderWidth: 1.5,
+    borderRadius: 20,
+    padding: 2,
+    marginRight: Spacing.md,
+  },
+  todayFaceBackground: {
+    width: 48,
+    height: 48,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todayMoodDetails: {
+    flex: 1,
+  },
+  todayMoodLabelPremium: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h3,
+    fontWeight: '700',
+  },
+  todayTimeSubtitle: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.secondary,
+    marginTop: 2,
+  },
+  todayScoreCapsule: {
+    borderWidth: 1,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
     borderRadius: Radius.pill,
   },
-  todayTagText: {
+  todayScoreCapsuleText: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.body,
+    fontWeight: '600',
+  },
+  todayMetricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  todayMetricCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  todayMetricHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  todayMetricTitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.tiny,
     color: Colors.text.secondary,
+  },
+  todayMetricValue: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.primary,
+  },
+  todayMetricDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  todayTagsPremium: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  todayTagChipPremium: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+  },
+  todayTagTextPremium: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+  },
+  todayNoteContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderLeftWidth: 3,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginTop: Spacing.xs,
+  },
+  todayNoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  todayNoteIcon: {
+    marginRight: 6,
+  },
+  todayNoteTitle: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  todayNoteText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.primary,
+    lineHeight: 18,
   },
 
   // Quick Insight
