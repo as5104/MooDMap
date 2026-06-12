@@ -16,4 +16,10 @@ export { MetricCard } from './MetricCard';
 export { WeeklyMoodRow } from './WeeklyMoodRow';
 export { CustomAlert } from './CustomAlert';
 export { customAlert } from '@/stores/alertStore';
+export {
+  JournalIllustration,
+  InsightsIllustration,
+  EmailSentIllustration,
+  MoodHistoryIllustration,
+} from './EmptyStateIllustrations';
 

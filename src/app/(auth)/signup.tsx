@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Button, Input, GlassCard, AnimatedPressable } from '@/components/ui';
+import { GradientBackground, Button, Input, GlassCard, AnimatedPressable, EmailSentIllustration } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
@@ -63,10 +63,10 @@ export default function SignupScreen() {
     return (
       <GradientBackground variant="glow">
         <View style={styles.successContainer}>
-          <View style={styles.successIconWrap}><Feather name="mail" size={36} color={Colors.accent.olive} /></View>
+          <EmailSentIllustration size={140} />
           <Text style={styles.successTitle}>Check your email</Text>
           <Text style={styles.successText}>
-            We've sent a confirmation link to{'\n'}
+            We&apos;ve sent a confirmation link to{'\n'}
             <Text style={styles.emailHighlight}>{email}</Text>
           </Text>
           <Button

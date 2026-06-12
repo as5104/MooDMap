@@ -15,7 +15,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, GlassCard, WeeklyMoodRow } from '@/components/ui';
+import { GradientBackground, GlassCard, WeeklyMoodRow, InsightsIllustration } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
@@ -883,7 +883,7 @@ export default function InsightsScreen() {
         {/* Empty State */}
         {!hasData && (
           <GlassCard intensity="subtle" padding="lg" style={s.emptyCard}>
-            <View style={s.emptyIcon}><Feather name="bar-chart-2" size={40} color={Colors.text.tertiary} /></View>
+            <InsightsIllustration size={140} />
             <Text style={s.emptyTitle}>No mood data yet</Text>
             <Text style={s.emptySub}>Start logging your mood daily to unlock powerful insights about your emotional patterns</Text>
           </GlassCard>

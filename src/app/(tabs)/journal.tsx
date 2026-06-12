@@ -2,7 +2,7 @@
  * MoodMap — Journal Screen
  */
 
-import { GlassCard, GradientBackground, customAlert } from '@/components/ui';
+import { GlassCard, GradientBackground, customAlert, JournalIllustration } from '@/components/ui';
 import { MoodFace } from '@/components/ui/MoodFace';
 import { Colors } from '@/constants/colors';
 import { Radius, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
@@ -35,6 +35,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+
 
 const DOT_COLORS: Record<string, string> = {
   positive: Colors.accent.primary,
@@ -200,34 +202,41 @@ export default function JournalScreen() {
           </Text>
         </View>
 
-        {/* Dot Grid */}
-        <GlassCard intensity="medium" padding="lg" style={styles.gridCard}>
-          <View style={styles.dotGrid}>
-            {dotGrid.map((dot, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.dot,
-                  { backgroundColor: DOT_COLORS[dot.sentiment] },
-                ]}
-              />
-            ))}
-          </View>
-          <View style={styles.legend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Colors.accent.coral }]} />
-              <Text style={styles.legendText}>Negative</Text>
+        {/* Dot Grid with Overlay sitting character */}
+        <View style={styles.gridCardContainer}>
+          <GlassCard intensity="medium" padding="lg" style={styles.gridCard}>
+            <View style={styles.dotGrid}>
+              {dotGrid.map((dot, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.dot,
+                    { backgroundColor: DOT_COLORS[dot.sentiment] },
+                  ]}
+                />
+              ))}
             </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Colors.accent.lavender }]} />
-              <Text style={styles.legendText}>Neutral</Text>
+            <View style={styles.legend}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: Colors.accent.coral }]} />
+                <Text style={styles.legendText}>Negative</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: Colors.accent.lavender }]} />
+                <Text style={styles.legendText}>Neutral</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: Colors.accent.primary }]} />
+                <Text style={styles.legendText}>Positive</Text>
+              </View>
             </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Colors.accent.primary }]} />
-              <Text style={styles.legendText}>Positive</Text>
-            </View>
-          </View>
-        </GlassCard>
+          </GlassCard>
+          <Image
+            source={require('../../../assets/images/sitting.svg')}
+            style={styles.sittingIllustration}
+            contentFit="contain"
+          />
+        </View>
 
         {/* Prompt Carousel */}
         <View style={styles.sectionRow}>
@@ -336,7 +345,7 @@ export default function JournalScreen() {
             onPress={() => router.push('/journal-editor')}
           >
             <View style={styles.emptyState}>
-              <Feather name="edit-3" size={32} color={Colors.accent.primary} />
+              <JournalIllustration size={120} />
               <Text style={styles.emptyTitle}>Start your first journal</Text>
               <Text style={styles.emptySubtitle}>
                 Writing helps you process your emotions and track your growth
@@ -466,9 +475,20 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
 
-  gridCard: {
+  gridCardContainer: {
+    position: 'relative',
     marginBottom: Spacing.xxl,
   },
+  gridCard: {},
+  sittingIllustration: {
+    position: 'absolute',
+    right: -75,
+    top: -102,
+    width: 210,
+    height: 210,
+    zIndex: 10,
+  },
+
   dotGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

@@ -1,13 +1,9 @@
-/**
- * MoodMap - Entry Point
- * Routes user to auth, onboarding, or home based on state
- */
-
+import React, { useEffect } from 'react';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { useAppStore } from '@/stores/appStore';
 import { Feather } from '@expo/vector-icons';
-import { Redirect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 export default function Index() {
@@ -15,27 +11,28 @@ export default function Index() {
   const isAuthLoading = useAppStore((s) => s.isAuthLoading);
   const isAppReady = useAppStore((s) => s.isAppReady);
   const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding);
+  const router = useRouter();
 
-  if (isAuthLoading || !isAppReady) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.logoWrap}>
-          <Feather name="map" size={34} color={Colors.accent.olive} />
-        </View>
-        <Text style={styles.title}>MoodMap</Text>
+  useEffect(() => {
+    if (isAuthLoading || !isAppReady) return;
+
+    if (!session) {
+      router.replace('/(auth)/login');
+    } else if (!hasCompletedOnboarding) {
+      router.replace('/(onboarding)');
+    } else {
+      router.replace('/(tabs)');
+    }
+  }, [session, isAuthLoading, isAppReady, hasCompletedOnboarding]);
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.logoWrap}>
+        <Feather name="map" size={34} color={Colors.accent.olive} />
       </View>
-    );
-  }
-
-  if (!session) {
-    return <Redirect href="/(auth)/login" />;
-  }
-
-  if (!hasCompletedOnboarding) {
-    return <Redirect href="/(onboarding)" />;
-  }
-
-  return <Redirect href="/(tabs)" />;
+      <Text style={styles.title}>MoodMap</Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({

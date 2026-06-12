@@ -2,10 +2,10 @@
  * MoodMap — Home Dashboard
  */
 
-import { GlassCard, GradientBackground, MetricCard, WeeklyMoodRow } from '@/components/ui';
+import { GlassCard, GradientBackground, MetricCard, WeeklyMoodRow, MoodHistoryIllustration, JournalIllustration } from '@/components/ui';
 import { MoodFace } from '@/components/ui/MoodFace';
 import { Colors } from '@/constants/colors';
-import { Radius, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
+import { Radius, Shadows, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { MOOD_MAP, type MoodType } from '@/constants/moods';
 import { getSuggestion } from '@/constants/suggestions';
 import { TAG_MAP } from '@/constants/tags';
@@ -36,6 +36,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 
 // Greeting based on time of day
 function getGreeting(): string {
@@ -144,6 +145,15 @@ export default function HomeScreen() {
     };
   }, [summary]);
 
+  // Random streak SVG selection on mount
+  const streakSvg = useMemo(() => {
+    const svgs = [
+      require('../../../assets/images/road_to_knowledge.svg'),
+      require('../../../assets/images/exploring.svg'),
+    ];
+    return svgs[Math.floor(Math.random() * svgs.length)];
+  }, []);
+
   return (
     <GradientBackground>
       <ScrollView
@@ -204,9 +214,11 @@ export default function HomeScreen() {
                   Log your mood to get personalized insights
                 </Text>
               </View>
-              <View style={styles.ctaIcon}>
-                <Feather name="plus" size={24} color={Colors.accent.primary} />
-              </View>
+              <Image
+                source={require('../../../assets/images/mindfulness.svg')}
+                style={styles.ctaMindfulness}
+                contentFit="contain"
+              />
             </View>
           </GlassCard>
         )}
@@ -240,14 +252,25 @@ export default function HomeScreen() {
         </View>
 
         {/* Streak Card */}
-        <MetricCard
-          variant="brown"
-          icon="zap"
-          label="Streak"
-          value={`${streak}`}
-          subtitle={streak === 1 ? 'day' : 'days in a row'}
-          style={styles.streakCard}
-        />
+        <View style={styles.streakCard}>
+          <View style={styles.streakRow}>
+            <Image
+              source={streakSvg}
+              style={styles.streakSvg}
+              contentFit="contain"
+            />
+            <View style={styles.streakRight}>
+              <View style={styles.streakHeader}>
+                <Feather name="zap" size={16} color="#FFFFFF" />
+                <Text style={styles.streakLabel}>Streak</Text>
+              </View>
+              <Text style={styles.streakValue}>{streak}</Text>
+              <Text style={styles.streakSubtitle}>
+                {streak === 1 ? 'day' : 'days in a row'}
+              </Text>
+            </View>
+          </View>
+        </View>
 
         {/* Today's Mood Detail */}
         {todayMood && currentMood && (
@@ -426,7 +449,7 @@ export default function HomeScreen() {
         ) : (
           <GlassCard intensity="subtle" padding="lg" style={styles.moodHistoryCard}>
             <View style={styles.emptySection}>
-              <Feather name="bar-chart-2" size={24} color={Colors.text.tertiary} />
+              <MoodHistoryIllustration size={100} />
               <Text style={styles.emptyText}>
                 Complete your first mood check-in to see your weekly history
               </Text>
@@ -526,7 +549,7 @@ export default function HomeScreen() {
             onPress={() => router.push('/journal-editor')}
           >
             <View style={styles.emptySection}>
-              <Feather name="edit-3" size={24} color={Colors.accent.primary} />
+              <JournalIllustration size={100} />
               <Text style={styles.emptyTitle}>Start journaling</Text>
               <Text style={styles.emptyText}>
                 Write about your day to track your growth
@@ -636,14 +659,10 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySmall,
     color: Colors.text.secondary,
   },
-  ctaIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(190, 255, 108, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: Spacing.lg,
+  ctaMindfulness: {
+    width: 110,
+    height: 76,
+    marginLeft: Spacing.md,
   },
 
   // Metrics
@@ -663,7 +682,50 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   streakCard: {
+    backgroundColor: '#2A2A35',
+    borderRadius: Radius.card,
+    padding: Spacing.lg,
+    minHeight: 120,
     marginBottom: Spacing.xxl,
+    ...Shadows.sm,
+  },
+  streakRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  streakRight: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  streakHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  streakLabel: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.caption,
+    color: '#FFFFFF',
+  },
+  streakValue: {
+    fontFamily: Fonts.heading,
+    fontSize: 48,
+    color: '#FFFFFF',
+    marginBottom: 2,
+    textAlign: 'right',
+  },
+  streakSubtitle: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textAlign: 'right',
+  },
+  streakSvg: {
+    width: 160,
+    height: 100,
+    marginRight: Spacing.md,
   },
 
   // Today's Check-in

@@ -6,7 +6,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Text } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Button, Input, GlassCard, AnimatedPressable } from '@/components/ui';
+import { GradientBackground, Button, Input, GlassCard, AnimatedPressable, EmailSentIllustration } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
@@ -39,7 +39,7 @@ export default function ForgotPasswordScreen() {
     return (
       <GradientBackground variant="glow">
         <View style={styles.successContainer}>
-          <View style={styles.successIconWrap}><Feather name="mail" size={36} color={Colors.accent.olive} /></View>
+          <EmailSentIllustration size={140} />
           <Text style={styles.successTitle}>Email Sent</Text>
           <Text style={styles.successText}>
             Check your inbox for a password reset link.
@@ -64,7 +64,7 @@ export default function ForgotPasswordScreen() {
 
         <Text style={styles.title}>Reset Password</Text>
         <Text style={styles.subtitle}>
-          Enter your email and we'll send you a link to reset your password.
+          Enter your email and we&apos;ll send you a link to reset your password.
         </Text>
 
         <GlassCard intensity="medium" padding="lg">
