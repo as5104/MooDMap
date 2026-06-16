@@ -80,12 +80,12 @@ function getDateNDaysAgo(n: number): string {
 }
 
 /**
- * Compute a Composite Wellbeing Score (1-10) from all user inputs.
+ * Internal helper — compute the raw composite wellbeing score on a 1-10 scale
  * Weights: Mood preset 40%, Energy 15%, Stress (inverted) 15%,
  *          Sleep Duration (bell curve) 15%, Sleep Quality 15%.
  * Falls back gracefully if optional fields are missing.
  */
-export function computeCompositeScore(
+function computeRawCompositeScore(
   baseMoodScore: number,
   energyLevel?: number | null,
   stressLevel?: number | null,
@@ -140,8 +140,35 @@ export function computeCompositeScore(
     components[0].weight = 1.0;
   }
 
-  const raw = components.reduce((sum, c) => sum + c.score * c.weight, 0);
+  return components.reduce((sum, c) => sum + c.score * c.weight, 0);
+}
+
+/**
+ * Compute a Composite Wellbeing Score (1-10, rounded integer) from all user inputs.
+ */
+export function computeCompositeScore(
+  baseMoodScore: number,
+  energyLevel?: number | null,
+  stressLevel?: number | null,
+  sleepHours?: number | null,
+  sleepQuality?: number | null,
+): number {
+  const raw = computeRawCompositeScore(baseMoodScore, energyLevel, stressLevel, sleepHours, sleepQuality);
   return Math.round(Math.max(1, Math.min(10, raw)));
+}
+
+/**
+ * Compute a Composite Wellbeing Score on a 0-100 scale
+ */
+export function computeCompositeScorePercent(
+  baseMoodScore: number,
+  energyLevel?: number | null,
+  stressLevel?: number | null,
+  sleepHours?: number | null,
+  sleepQuality?: number | null,
+): number {
+  const raw = computeRawCompositeScore(baseMoodScore, energyLevel, stressLevel, sleepHours, sleepQuality);
+  return Math.round(Math.max(10, Math.min(100, raw * 10)));
 }
 
 function getDayLabel(dateStr: string): string {
@@ -388,44 +415,45 @@ export function getMoodCount(userId?: string): number {
   return result?.cnt ?? 0;
 }
 
+export interface TrendBarItem {
+  /** Mood score 1-10 */
+  score: number;
+  /** Sentiment bucket: positive (>=7), neutral (5-6), negative (<=4) */
+  category: 'positive' | 'neutral' | 'negative';
+}
+
 /**
- * Get monthly bar chart data
+ * Get mood trend bar chart data.
  */
 export function getMonthlyBarData(
   userId?: string,
   days: number = 30
-): { positive: number; negative: number }[] {
+): TrendBarItem[] {
   const startDate = getDateNDaysAgo(days);
   const today = getTodayDate();
 
-  const entries = userId
+  let entries = userId
     ? queryAll<{ mood_score: number }>(
-        'SELECT mood_score FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ? ORDER BY date',
+        `SELECT mood_score FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ? ${days >= 30 ? 'ORDER BY date DESC LIMIT 10' : 'ORDER BY date ASC'}`,
         [startDate, today, userId]
       )
     : queryAll<{ mood_score: number }>(
-        'SELECT mood_score FROM mood_entries WHERE date >= ? AND date <= ? ORDER BY date',
+        `SELECT mood_score FROM mood_entries WHERE date >= ? AND date <= ? ${days >= 30 ? 'ORDER BY date DESC LIMIT 10' : 'ORDER BY date ASC'}`,
         [startDate, today]
       );
 
-  if (entries.length === 0) return [{ positive: 0.5, negative: 0.5 }];
-
-  const bucketSize = Math.max(1, Math.ceil(entries.length / 12));
-  const buckets: { positive: number; negative: number }[] = [];
-
-  for (let i = 0; i < entries.length; i += bucketSize) {
-    const slice = entries.slice(i, i + bucketSize);
-    let pos = 0;
-    let neg = 0;
-    for (const e of slice) {
-      if (e.mood_score >= 6) pos++;
-      else neg++;
-    }
-    const total = Math.max(pos + neg, 1);
-    buckets.push({ positive: pos / total, negative: neg / total });
+  if (days >= 30) {
+    entries.reverse();
   }
 
-  return buckets;
+  if (entries.length === 0) return [];
+
+  return entries.map((e) => {
+    const score = e.mood_score;
+    const category: TrendBarItem['category'] =
+      score >= 7 ? 'positive' : score >= 5 ? 'neutral' : 'negative';
+    return { score, category };
+  });
 }
 
 /**
@@ -890,6 +918,7 @@ export interface MCQInsightItem {
   question: string;
   topAnswer: string;
   count: number;
+  latestDate?: string;
 }
 
 /**
@@ -902,12 +931,12 @@ export function getMCQInsights(userId?: string, days: number = 30): MCQInsightIt
   const queryParams = userId ? [startDate, today, userId] : [startDate, today];
   const userClause = userId ? 'AND user_id = ?' : '';
 
-  const entries = queryAll<{ note: string | null }>(
-    `SELECT note FROM mood_entries WHERE date >= ? AND date <= ? AND note IS NOT NULL ${userClause}`,
+  const entries = queryAll<{ date: string; note: string | null }>(
+    `SELECT date, note FROM mood_entries WHERE date >= ? AND date <= ? AND note IS NOT NULL ${userClause} ORDER BY date DESC`,
     queryParams
   );
 
-  const counts = new Map<string, { question: string; answers: Map<string, number> }>();
+  const counts = new Map<string, { question: string; answers: Map<string, number>; latestDate: string }>();
 
   for (const entry of entries) {
     if (!entry.note) continue;
@@ -917,9 +946,15 @@ export function getMCQInsights(userId?: string, days: number = 30): MCQInsightIt
         const cat = parsed.category;
         const q = parsed.question;
         const ans = parsed.answer;
+        const date = entry.date;
 
-        const existing = counts.get(cat) ?? { question: q, answers: new Map<string, number>() };
+        const existing = counts.get(cat) ?? { question: q, answers: new Map<string, number>(), latestDate: date };
         existing.answers.set(ans, (existing.answers.get(ans) ?? 0) + 1);
+        
+        if (date > existing.latestDate) {
+          existing.latestDate = date;
+        }
+
         counts.set(cat, existing);
       }
     } catch {
@@ -946,10 +981,17 @@ export function getMCQInsights(userId?: string, days: number = 30): MCQInsightIt
       question: data.question,
       topAnswer,
       count: totalCatCount,
+      latestDate: data.latestDate,
     });
   }
 
-  result.sort((a, b) => b.count - a.count);
+  result.sort((a, b) => {
+    const dateA = a.latestDate || '';
+    const dateB = b.latestDate || '';
+    const dateCompare = dateB.localeCompare(dateA);
+    if (dateCompare !== 0) return dateCompare;
+    return b.count - a.count;
+  });
   return result;
 }
 

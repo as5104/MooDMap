@@ -38,6 +38,7 @@ import {
   getTimeOfDayAnalysis,
   getDayOfWeekAnalysis,
   formatMoodNote,
+  computeCompositeScorePercent,
   type DayMoodData,
   type MoodEntryRow,
   type MoodStatsData,
@@ -48,6 +49,7 @@ import {
   type EnergyStressData,
   type SleepInsightData,
   type MCQInsightItem,
+  type TrendBarItem,
   type TimeOfDayInsight,
   type DayOfWeekInsight,
 } from '@/services/moodService';
@@ -135,7 +137,7 @@ export default function InsightsScreen() {
   const [weeklyMoods, setWeeklyMoods] = useState<DayMoodData[]>([]);
   const [stats, setStats] = useState<MoodStatsData>({ positive: 0, negative: 0, neutral: 0, total: 0 });
   const [history, setHistory] = useState<MoodEntryRow[]>([]);
-  const [barData, setBarData] = useState<{ positive: number; negative: number }[]>([]);
+  const [barData, setBarData] = useState<TrendBarItem[]>([]);
   const [topMoods, setTopMoods] = useState<TopMoodItem[]>([]);
   const [tagFreq, setTagFreq] = useState<TagFrequencyItem[]>([]);
   const [calendarData, setCalendarData] = useState<MoodCalendarItem[]>([]);
@@ -584,14 +586,21 @@ export default function InsightsScreen() {
               <Text style={s.cardTitle}>Mood Trend</Text>
             </View>
             <View style={s.barChart}>
-              {barData.map((bar, i) => (
-                <View key={i} style={s.barGroup}>
-                  <View style={s.barContainer}>
-                    <View style={[s.barPos, { height: `${Math.max(bar.positive * 100, 4)}%` }]} />
-                    <View style={[s.barNeg, { height: `${Math.max(bar.negative * 100, 4)}%` }]} />
+              {barData.map((bar, i) => {
+                const heightPct = Math.max((bar.score / 10) * 100, 8);
+                const barColor = bar.category === 'positive'
+                  ? Colors.accent.primary
+                  : bar.category === 'neutral'
+                    ? Colors.accent.amber
+                    : Colors.accent.coral;
+                return (
+                  <View key={i} style={s.barGroup}>
+                    <View style={s.barContainer}>
+                      <View style={[s.barFill, { height: `${heightPct}%`, backgroundColor: barColor }]} />
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
             <View style={s.barLegend}>
               <View style={s.barLegendItem}>
@@ -648,7 +657,7 @@ export default function InsightsScreen() {
               </View>
               {mcqInsights.length > 0 ? (
                 <View style={s.mcqList}>
-                  {mcqInsights.slice(0, 3).map((item) => (
+                  {mcqInsights.slice(0, 2).map((item) => (
                     <View key={item.category} style={[s.mcqInsightRow, { alignItems: 'center' }]}>
                       <Text style={[s.mcqCategory, { textAlign: 'center' }]}>{item.category}</Text>
                       <Text style={[s.mcqText, { textAlign: 'center' }]}>
@@ -856,6 +865,14 @@ export default function InsightsScreen() {
               const mood = MOOD_MAP[entry.mood_type as MoodType];
               const dateLabel = new Date(entry.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
               const moodColor = mood?.color ?? Colors.text.tertiary;
+              const compositeScore = computeCompositeScorePercent(
+                entry.mood_score,
+                entry.energy_level,
+                entry.stress_level,
+                entry.sleep_hours,
+                entry.sleep_quality,
+              );
+              const badgeColor = compositeScore >= 70 ? Colors.accent.primary : compositeScore >= 50 ? Colors.accent.amber : Colors.accent.coral;
               return (
                 <GlassCard key={entry.id} intensity="medium" padding="md" style={s.historyCard}>
                   <View style={s.historyRow}>
@@ -866,11 +883,11 @@ export default function InsightsScreen() {
                         <Text style={s.historyLabel}>{mood?.label ?? entry.mood_type}</Text>
                         <Text style={s.historyDate}>{dateLabel}</Text>
                       </View>
-                      <Text style={s.historyNote} numberOfLines={1}>{entry.note ? formatMoodNote(entry.note).slice(0, 60) : `Score: ${entry.mood_score}/10`}</Text>
+                      <Text style={s.historyNote} numberOfLines={1}>{entry.note ? formatMoodNote(entry.note).slice(0, 60) : `Score: ${compositeScore}`}</Text>
                     </View>
-                    <View style={[s.historyBadge, { borderColor: entry.mood_score >= 7 ? Colors.accent.primary : entry.mood_score >= 5 ? Colors.accent.amber : Colors.accent.coral }]}>
-                      <Text style={[s.historyBadgeText, { color: entry.mood_score >= 7 ? Colors.accent.primary : entry.mood_score >= 5 ? Colors.accent.amber : Colors.accent.coral }]}>
-                        {Math.round((entry.mood_score / 10) * 100)}
+                    <View style={[s.historyBadge, { borderColor: badgeColor }]}>
+                      <Text style={[s.historyBadgeText, { color: badgeColor }]}>
+                        {compositeScore}
                       </Text>
                     </View>
                   </View>
@@ -1019,9 +1036,8 @@ const s = StyleSheet.create({
   // Bar Chart
   barChart: { flexDirection: 'row', justifyContent: 'space-between', height: 100, alignItems: 'flex-end' },
   barGroup: { flex: 1, alignItems: 'center' },
-  barContainer: { width: 8, height: '100%', borderRadius: 4, overflow: 'hidden', justifyContent: 'flex-end' },
-  barPos: { backgroundColor: Colors.accent.primary, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
-  barNeg: { backgroundColor: Colors.accent.coral },
+  barContainer: { width: 12, height: '100%', borderRadius: 6, overflow: 'hidden', justifyContent: 'flex-end' },
+  barFill: { borderRadius: 6 },
   barLegend: { flexDirection: 'row', gap: Spacing.lg, marginTop: Spacing.md, justifyContent: 'center' },
   barLegendItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   barLegendDot: { width: 6, height: 6, borderRadius: 3 },

@@ -12,6 +12,7 @@ import { TAG_MAP } from '@/constants/tags';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { getJournalCount, getLatestJournal, type JournalEntryRow } from '@/services/journalService';
 import {
+  computeCompositeScorePercent,
   getMoodCount,
   getMoodScoreForPeriod,
   getMoodStreak,
@@ -307,7 +308,13 @@ export default function HomeScreen() {
                   {currentMood.label}
                 </Text>
                 <Text style={styles.todayTimeSubtitle}>
-                  Mood Score: {Math.round((todayMood.moodScore / 10) * 100)}%
+                  Mood Score: {computeCompositeScorePercent(
+                    todayMood.moodScore,
+                    todayMood.energyLevel,
+                    todayMood.stressLevel,
+                    todayMood.sleepHours,
+                    todayMood.sleepQuality,
+                  )}
                 </Text>
               </View>
 

@@ -363,7 +363,7 @@ export default function OnboardingScreen() {
               <Image
                 source={
                   item.id === '1'
-                    ? require('../../../assets/images/olive_tree_rafiki.svg')
+                    ? require('../../../assets/images/Enthusiastic.svg')
                     : require('../../../assets/images/its_friday_cuate.svg')
                 }
                 style={styles.illustration}
