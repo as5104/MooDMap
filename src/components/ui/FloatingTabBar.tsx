@@ -7,6 +7,7 @@ import { StyleSheet, View, Pressable, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/colors';
 import { TAB_BAR_HEIGHT, TAB_BAR_MARGIN, TAB_BAR_RADIUS, FAB_SIZE, Spacing } from '@/constants/layout';
 import { useBlurTarget } from './GradientBackground';
@@ -15,7 +16,7 @@ const TAB_ICONS: Record<string, keyof typeof Feather.glyphMap> = {
   index: 'home',
   insights: 'bar-chart-2',
   journal: 'book-open',
-  profile: 'user',
+  activities: 'compass',
 };
 
 interface FloatingTabBarProps {
@@ -51,6 +52,7 @@ export const FloatingTabBar: React.FC<FloatingTabBarProps> = ({
     const iconName = TAB_ICONS[route.name] ?? 'circle';
 
     const onPress = () => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       const event = navigation.emit({
         type: 'tabPress',
         target: route.key,

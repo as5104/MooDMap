@@ -1,5 +1,5 @@
 /**
- * MoodMap — Rule-Based Suggestion Definitions (Premium Palette)
+ * MoodMap — Rule-Based Suggestion
  */
 
 import { type MoodType, type SuggestionType } from './moods';
@@ -28,7 +28,7 @@ const SUGGESTION_MAP: Record<MoodType, Suggestion> = {
     subtitle: 'Ambient sounds can help soothe your mood',
     icon: 'music',
     color: '#74B9FF',
-    route: '/sound-player',
+    route: '/music',
   },
   tired: {
     type: 'rest',

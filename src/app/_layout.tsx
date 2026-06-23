@@ -25,6 +25,8 @@ import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/stores/appStore';
 import { CustomAlert } from '@/components/ui';
 
+import { MusicProvider } from '@/context/MusicContext';
+
 // Prevent splash from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
@@ -140,47 +142,49 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: Colors.background.primary },
-          animation: 'fade',
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(onboarding)" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen
-          name="mood-entry"
-          options={{
-            presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
+      <MusicProvider>
+        <StatusBar style="light" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: Colors.background.primary },
+            animation: 'fade',
           }}
-        />
-        <Stack.Screen
-          name="journal-editor"
-          options={{
-            presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
-          }}
-        />
-        <Stack.Screen
-          name="sound-player"
-          options={{
-            presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
-          }}
-        />
-        <Stack.Screen
-          name="journal-all"
-          options={{
-            animation: 'slide_from_right',
-          }}
-        />
-      </Stack>
-      <CustomAlert />
+        >
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(onboarding)" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen
+            name="mood-entry"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: 'slide_from_bottom',
+            }}
+          />
+          <Stack.Screen
+            name="journal-editor"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: 'slide_from_bottom',
+            }}
+          />
+          <Stack.Screen
+            name="music"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: 'slide_from_bottom',
+            }}
+          />
+          <Stack.Screen
+            name="journal-all"
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
+        </Stack>
+        <CustomAlert />
+      </MusicProvider>
     </GestureHandlerRootView>
   );
 }

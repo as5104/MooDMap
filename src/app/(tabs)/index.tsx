@@ -147,13 +147,13 @@ export default function HomeScreen() {
   }, [summary]);
 
   // Random streak SVG selection on mount
-  const streakSvg = useMemo(() => {
+  const [streakSvg] = useState(() => {
     const svgs = [
       require('../../../assets/images/road_to_knowledge.svg'),
       require('../../../assets/images/exploring.svg'),
     ];
     return svgs[Math.floor(Math.random() * svgs.length)];
-  }, []);
+  });
 
   return (
     <GradientBackground>
