@@ -2,23 +2,35 @@
  * MoodMap — Profile Screen
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   ScrollView,
   Pressable,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSequence,
+  withTiming,
+  withSpring,
+} from 'react-native-reanimated';
 import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { GradientBackground, GlassCard, Button, customAlert } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { useAppStore } from '@/stores/appStore';
+import { useTierStore } from '@/stores/tierStore';
+import { useSpotify } from '@/hooks/useSpotify';
 import { signOut } from '@/lib/auth';
 import { getMoodScoreForPeriod, getMoodStreak, getMoodCount } from '@/services/moodService';
 import { getJournalCount } from '@/services/journalService';
@@ -43,6 +55,58 @@ export default function ProfileScreen() {
 
   const refreshData = useAppStore((s) => s.refreshData);
 
+  // VIP & Spotify
+  const isVIP = useTierStore((s) => s.isVIP);
+  const vipStatus = useTierStore((s) => s.vipStatus);
+  const requestVIPAccess = useTierStore((s) => s.requestVIPAccess);
+  const checkVIPStatus = useTierStore((s) => s.checkVIPStatus);
+  const deactivateVIP = useTierStore((s) => s.deactivateVIP);
+  const { isConnected: spotifyConnected, spotifyUser, connect: connectSpotify, disconnect: disconnectSpotify, isConnecting } = useSpotify();
+
+  const [requesting, setRequesting] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const successScale = useSharedValue(1);
+
+  const successStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: successScale.value }],
+  }));
+
+  const handleRequestAccess = useCallback(async () => {
+    if (!user?.id) return;
+    setRequesting(true);
+    const success = await requestVIPAccess(user.id, user.email || '');
+    setRequesting(false);
+    if (success) {
+      customAlert('Request Submitted', 'Your request has been sent to the developer.');
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      customAlert('Submission Failed', 'Please check your connection and try again.');
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }, [user?.id, user?.email, requestVIPAccess]);
+
+  const handleCheckStatus = useCallback(async () => {
+    if (!user?.id) return;
+    setChecking(true);
+    await checkVIPStatus(user.id);
+    setChecking(false);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, [user?.id, checkVIPStatus]);
+
+  const handleVIPDeactivation = useCallback(() => {
+    customAlert('Deactivate VIP', 'This will disconnect Spotify and remove VIP access. Continue?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Deactivate',
+        style: 'destructive',
+        onPress: async () => {
+          await deactivateVIP();
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        },
+      },
+    ]);
+  }, [deactivateVIP]);
+
   const loadData = useCallback(() => {
     if (!isAppReady) return;
     try {
@@ -57,13 +121,18 @@ export default function ProfileScreen() {
       setStreak(streakData.current);
       setScore(scoreVal);
 
+      // Check VIP status asynchronously
+      if (userId) {
+        checkVIPStatus(userId);
+      }
+
       // Dynamically calculate and update total XP in store
       const computedXP = (mCount * 25) + (jCount * 15);
       useAppStore.getState().setTotalXP(computedXP);
     } catch (e) {
       console.error('[Profile] Load error:', e);
     }
-  }, [user?.id, dataVersion, isAppReady]);
+  }, [user?.id, dataVersion, isAppReady, checkVIPStatus]);
 
   const handleExport = async () => {
     if (!user?.id) return;
@@ -145,8 +214,8 @@ export default function ProfileScreen() {
               <Text style={styles.name}>{displayName}</Text>
               <Text style={styles.email}>{email}</Text>
               <View style={styles.memberBadge}>
-                <Feather name="star" size={12} color={Colors.accent.olive} />
-                <Text style={styles.memberText}>Member</Text>
+                <Feather name={isVIP ? "award" : "star"} size={12} color={isVIP ? Colors.accent.amber : Colors.accent.olive} />
+                <Text style={styles.memberText}>{isVIP ? 'VIP' : 'Member'}</Text>
               </View>
             </View>
           </View>
@@ -250,6 +319,154 @@ export default function ProfileScreen() {
             </Pressable>
           ))}
         </GlassCard>
+
+        {/* VIP ACCESS SECTION */}
+        <View style={styles.vipSection}>
+          <View style={styles.vipSectionHeader}>
+            <Feather name="award" size={16} color={Colors.accent.amber} />
+            <Text style={styles.vipSectionTitle}>VIP Access</Text>
+          </View>
+
+          {!isVIP ? (
+            /* Locked State */
+            <GlassCard intensity="medium" padding="lg" style={styles.vipLockedCard}>
+              {/* Ambient glow */}
+              <View style={styles.vipGlowOrb} />
+
+              <View style={styles.vipLockedHeader}>
+                <View style={styles.vipLockIconWrap}>
+                  <Feather
+                    name={vipStatus === 'pending' ? 'clock' : vipStatus === 'declined' ? 'alert-circle' : 'lock'}
+                    size={22}
+                    color={vipStatus === 'declined' ? Colors.accent.coral : Colors.accent.amber}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.vipLockedTitle}>
+                    {vipStatus === 'pending' ? 'VIP Request Pending' : vipStatus === 'declined' ? 'Request Declined' : 'Unlock VIP Features'}
+                  </Text>
+                  <Text style={styles.vipLockedDesc}>
+                    {vipStatus === 'pending'
+                      ? 'Your access request is currently awaiting developer approval.'
+                      : vipStatus === 'declined'
+                      ? 'Your request was declined. Please contact support.'
+                      : 'Connect Spotify, mood-music insights, and more.'}
+                  </Text>
+                </View>
+              </View>
+
+              {vipStatus === 'pending' ? (
+                <View style={{ gap: Spacing.sm }}>
+                  <Pressable
+                    style={styles.vipCheckStatusBtn}
+                    onPress={handleCheckStatus}
+                    disabled={checking}
+                  >
+                    {checking ? (
+                      <ActivityIndicator size="small" color="#0A0A0C" />
+                    ) : (
+                      <>
+                        <Feather name="refresh-cw" size={14} color="#0A0A0C" />
+                        <Text style={styles.vipCheckStatusText}>Check Approval Status</Text>
+                      </>
+                    )}
+                  </Pressable>
+                  <Text style={styles.vipWaitHint}>
+                    Approval typically takes less than 24 hours.
+                  </Text>
+                </View>
+              ) : (
+                <View>
+                  <Pressable
+                    style={[styles.vipRequestBtn, requesting && styles.vipRequestBtnDisabled]}
+                    onPress={handleRequestAccess}
+                    disabled={requesting}
+                  >
+                    {requesting ? (
+                      <ActivityIndicator size="small" color="#0A0A0C" />
+                    ) : (
+                      <>
+                        <Feather name="send" size={14} color="#0A0A0C" />
+                        <Text style={styles.vipRequestText}>Request VIP Access</Text>
+                      </>
+                    )}
+                  </Pressable>
+                  <Text style={styles.vipHintText}>
+                    Tapping will send an access request directly to the developer.
+                  </Text>
+                </View>
+              )}
+            </GlassCard>
+          ) : (
+            /* Unlocked State */
+            <Animated.View style={successStyle}>
+              <GlassCard intensity="medium" padding="lg" style={styles.vipUnlockedCard}>
+                {/* Ambient glow */}
+                <View style={styles.vipGlowOrbActive} />
+
+                {/* VIP Active Badge */}
+                <View style={styles.vipActiveBadge}>
+                  <Feather name="check-circle" size={16} color={Colors.accent.primary} />
+                  <Text style={styles.vipActiveText}>VIP Active</Text>
+                </View>
+
+                {/* Spotify Connection */}
+                <View style={styles.spotifySection}>
+                  <View style={styles.spotifyHeader}>
+                    <View style={styles.spotifyIconWrap}>
+                      <Feather name="music" size={18} color="#1DB954" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.spotifyTitle}>Spotify</Text>
+                      <Text style={styles.spotifyStatus}>
+                        {spotifyConnected
+                          ? spotifyUser?.display_name
+                            ? `Connected as ${spotifyUser.display_name}`
+                            : 'Connected'
+                          : 'Not connected'}
+                      </Text>
+                    </View>
+                    {spotifyConnected ? (
+                      <View style={styles.spotifyConnectedDot} />
+                    ) : null}
+                  </View>
+
+                  {spotifyConnected ? (
+                    <Pressable
+                      style={styles.spotifyDisconnectBtn}
+                      onPress={() => {
+                        customAlert('Disconnect Spotify', 'Remove Spotify connection?', [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Disconnect', style: 'destructive', onPress: disconnectSpotify },
+                        ]);
+                      }}
+                    >
+                      <Feather name="link-2" size={14} color={Colors.text.secondary} />
+                      <Text style={styles.spotifyDisconnectText}>Disconnect</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={styles.spotifyConnectBtn}
+                      onPress={connectSpotify}
+                      disabled={isConnecting}
+                    >
+                      <Feather name="link" size={14} color={Colors.text.onAccent} />
+                      <Text style={styles.spotifyConnectText}>
+                        {isConnecting ? 'Connecting...' : 'Connect Spotify'}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+
+                {/* Deactivate link */}
+                <Pressable style={styles.vipDeactivateRow} onPress={handleVIPDeactivation}>
+                  <Feather name="x-circle" size={14} color={Colors.text.tertiary} />
+                  <Text style={styles.vipDeactivateText}>Deactivate VIP</Text>
+                </Pressable>
+              </GlassCard>
+            </Animated.View>
+          )}
+        </View>
 
         {/* Sign Out */}
         <Button
@@ -461,5 +678,222 @@ const styles = StyleSheet.create({
 
   signOutBtn: {
     marginBottom: Spacing.xxl,
+  },
+
+  // VIP Section
+  vipSection: {
+    marginBottom: Spacing.xxl,
+  },
+  vipSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  vipSectionTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.primary,
+  },
+
+  // Locked card
+  vipLockedCard: {
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 190, 106, 0.15)',
+  },
+  vipGlowOrb: {
+    position: 'absolute',
+    top: -30,
+    right: -30,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 190, 106, 0.08)',
+  },
+  vipLockedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  vipLockIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 190, 106, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vipLockedTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+  },
+  vipLockedDesc: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.secondary,
+    marginTop: 2,
+  },
+  vipRequestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.accent.amber,
+    borderRadius: Radius.button,
+    paddingVertical: 12,
+    marginTop: Spacing.xs,
+  },
+  vipRequestBtnDisabled: {
+    opacity: 0.6,
+  },
+  vipRequestText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.bodySmall,
+    color: '#0A0A0C',
+  },
+  vipCheckStatusBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.accent.primary,
+    borderRadius: Radius.button,
+    paddingVertical: 12,
+    marginTop: Spacing.xs,
+  },
+  vipCheckStatusText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.bodySmall,
+    color: '#0A0A0C',
+  },
+  vipWaitHint: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.tertiary,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  vipHintText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.tertiary,
+    marginTop: Spacing.md,
+    textAlign: 'center',
+  },
+
+  // Unlocked card
+  vipUnlockedCard: {
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.15)',
+  },
+  vipGlowOrbActive: {
+    position: 'absolute',
+    top: -30,
+    right: -30,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(190, 255, 108, 0.06)',
+  },
+  vipActiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(190, 255, 108, 0.1)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+    alignSelf: 'flex-start',
+    marginBottom: Spacing.lg,
+  },
+  vipActiveText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.caption,
+    color: Colors.accent.primary,
+  },
+
+  // Spotify
+  spotifySection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  spotifyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  spotifyIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(30, 215, 96, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spotifyTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+  },
+  spotifyStatus: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.secondary,
+    marginTop: 1,
+  },
+  spotifyConnectedDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#1DB954',
+  },
+  spotifyConnectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: '#1DB954',
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.xl,
+  },
+  spotifyConnectText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.onAccent,
+  },
+  spotifyDisconnectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.xl,
+  },
+  spotifyDisconnectText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+  },
+  vipDeactivateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingTop: Spacing.sm,
+  },
+  vipDeactivateText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.tertiary,
   },
 });

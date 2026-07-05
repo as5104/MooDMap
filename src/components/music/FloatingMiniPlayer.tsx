@@ -1,22 +1,23 @@
-import React, { useEffect } from 'react';
-import { StyleSheet, View, Text, Pressable } from 'react-native';
-import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
+import React, { useEffect } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
   cancelAnimation,
   Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
 } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
-import { useMusic, usePlaybackTime } from '../../context/MusicContext';
 import { Colors } from '../../constants/colors';
-import { Fonts, FontSizes } from '../../constants/typography';
 import { Spacing } from '../../constants/layout';
+import { Fonts, FontSizes } from '../../constants/typography';
+import { useMusic, usePlaybackTime } from '../../context/MusicContext';
+import { useSpotify } from '../../hooks/useSpotify';
 import { GlassCard } from '../ui';
-import * as Haptics from 'expo-haptics';
 import { MusicCover } from './MusicCover';
 
 const AVATAR_SIZE = 38;
@@ -67,16 +68,20 @@ interface FloatingMiniPlayerProps {
 
 export const FloatingMiniPlayer = React.memo(({ onPress, style }: FloatingMiniPlayerProps) => {
   const { currentTrack, isPlaying, pause, resume, next, prev } = useMusic();
-  
+  const { nowPlaying } = useSpotify();
+
+  const isSpotify = currentTrack?.category === 'spotify';
+  const isTrackPlaying = isPlaying;
+
   const rotation = useSharedValue(0);
 
   // Animate rotating cover art when playing
   useEffect(() => {
-    if (isPlaying) {
+    if (isTrackPlaying) {
       rotation.value = rotation.value % 360;
       rotation.value = withRepeat(
         withTiming(rotation.value + 360, {
-          duration: 12000,
+          duration: 35000,
           easing: Easing.linear,
         }),
         -1,
@@ -85,7 +90,7 @@ export const FloatingMiniPlayer = React.memo(({ onPress, style }: FloatingMiniPl
     } else {
       cancelAnimation(rotation);
     }
-  }, [isPlaying, rotation]);
+  }, [isTrackPlaying, rotation]);
 
   const animatedCoverStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
@@ -99,7 +104,7 @@ export const FloatingMiniPlayer = React.memo(({ onPress, style }: FloatingMiniPl
   const handlePlayPause = (e: any) => {
     e.stopPropagation();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (isPlaying) {
+    if (isTrackPlaying) {
       pause();
     } else {
       resume();
@@ -154,10 +159,10 @@ export const FloatingMiniPlayer = React.memo(({ onPress, style }: FloatingMiniPl
 
             <Pressable hitSlop={12} onPress={handlePlayPause} style={[styles.controlBtn, styles.playToggle]}>
               <Feather
-                name={isPlaying ? 'pause' : 'play'}
+                name={isTrackPlaying ? 'pause' : 'play'}
                 size={16}
                 color={Colors.text.primary}
-                style={!isPlaying ? { marginLeft: 1.5 } : undefined}
+                style={!isTrackPlaying ? { marginLeft: 1.5 } : undefined}
               />
             </Pressable>
 
@@ -170,9 +175,12 @@ export const FloatingMiniPlayer = React.memo(({ onPress, style }: FloatingMiniPl
           <View style={styles.artworkContainer}>
             {/* SVG Progress Ring (isolated re-render boundary) */}
             <MiniPlayerProgressRing />
-            
+
+            {/* Static background circle */}
+            <View style={{ position: 'absolute', width: AVATAR_SIZE - 4, height: AVATAR_SIZE - 4, borderRadius: (AVATAR_SIZE - 4) / 2, backgroundColor: '#1E1E24' }} />
+
             {/* Cover image (rotates) */}
-            <Animated.View style={[animatedCoverStyle, { width: AVATAR_SIZE - 4, height: AVATAR_SIZE - 4, borderRadius: (AVATAR_SIZE - 4) / 2, overflow: 'hidden' }]}>
+            <Animated.View style={[animatedCoverStyle, { width: AVATAR_SIZE - 4, height: AVATAR_SIZE - 4 }]}>
               <MusicCover
                 cover={currentTrack.cover}
                 style={{ width: '100%', height: '100%' }}

@@ -23,6 +23,7 @@ import { Colors } from '@/constants/colors';
 import { initializeDatabase } from '@/db/client';
 import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/stores/appStore';
+import { useTierStore } from '@/stores/tierStore';
 import { CustomAlert } from '@/components/ui';
 
 import { MusicProvider } from '@/context/MusicContext';
@@ -84,6 +85,9 @@ export default function RootLayout() {
       try {
         // Initialize SQLite database
         await initializeDatabase();
+
+        // Load VIP tier state from SecureStore
+        await useTierStore.getState().loadTierState();
 
         // Load settings from database
         try {

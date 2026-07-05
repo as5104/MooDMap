@@ -2,14 +2,14 @@
  * MoodMap — Floating Tab Bar
  */
 
-import React from 'react';
-import { StyleSheet, View, Pressable, Platform } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors } from '@/constants/colors';
+import { FAB_SIZE, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN, TAB_BAR_RADIUS } from '@/constants/layout';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-import { Colors } from '@/constants/colors';
-import { TAB_BAR_HEIGHT, TAB_BAR_MARGIN, TAB_BAR_RADIUS, FAB_SIZE, Spacing } from '@/constants/layout';
+import React from 'react';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBlurTarget } from './GradientBackground';
 
 const TAB_ICONS: Record<string, keyof typeof Feather.glyphMap> = {

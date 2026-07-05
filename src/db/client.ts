@@ -122,6 +122,20 @@ export const initializeDatabase = async (): Promise<void> => {
         user_id TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS mood_music_tags (
+        id TEXT PRIMARY KEY NOT NULL,
+        mood_entry_id TEXT,
+        mood_type TEXT NOT NULL,
+        track_id TEXT NOT NULL,
+        track_name TEXT NOT NULL,
+        artist_name TEXT NOT NULL,
+        track_source TEXT NOT NULL,
+        album_art TEXT,
+        play_count INTEGER NOT NULL DEFAULT 1,
+        last_played_at TEXT NOT NULL,
+        user_id TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_mood_date ON mood_entries(date);
       CREATE INDEX IF NOT EXISTS idx_mood_user ON mood_entries(user_id);
       CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
@@ -129,6 +143,9 @@ export const initializeDatabase = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_streaks_user ON streaks(user_id);
       CREATE INDEX IF NOT EXISTS idx_badges_user ON badges(user_id);
       CREATE INDEX IF NOT EXISTS idx_drafts_user ON journal_drafts(user_id);
+      CREATE INDEX IF NOT EXISTS idx_mmt_mood ON mood_music_tags(mood_type);
+      CREATE INDEX IF NOT EXISTS idx_mmt_track ON mood_music_tags(track_id);
+      CREATE INDEX IF NOT EXISTS idx_mmt_user ON mood_music_tags(user_id);
     `);
 
     // Run safe migrations for existing tables

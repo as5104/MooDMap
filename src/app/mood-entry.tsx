@@ -25,6 +25,7 @@ import { Spacing, Radius } from '@/constants/layout';
 import { MOODS, type MoodType } from '@/constants/moods';
 import { TAGS } from '@/constants/tags';
 import { useAppStore } from '@/stores/appStore';
+import { useMusic } from '@/context/MusicContext';
 import { saveMoodEntry, getWeeklyMoods, getMoodScoreForPeriod, getMoodStreak } from '@/services/moodService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -250,6 +251,8 @@ export default function MoodEntryScreen() {
   const setMoodStreak = useAppStore((s) => s.setMoodStreak);
   const addXP = useAppStore((s) => s.addXP);
   const refreshData = useAppStore((s) => s.refreshData);
+
+  const { currentTrack } = useMusic();
 
   const displayName = user?.user_metadata?.display_name ?? 'User';
   const firstName = displayName.split(' ')[0];
@@ -479,6 +482,14 @@ export default function MoodEntryScreen() {
           <Text style={styles.successSubtitle}>
             You&apos;re feeling {selectedMood.label.toLowerCase()} today
           </Text>
+          {currentTrack && (
+            <View style={styles.successMusicTag}>
+              <Feather name="music" size={12} color={Colors.accent.primary} />
+              <Text style={styles.successMusicText}>
+                Tagged &apos;{currentTrack.title}&apos; to this mood
+              </Text>
+            </View>
+          )}
           <View style={styles.successXPRow}>
             <Feather name="star" size={16} color={Colors.accent.olive} />
             <Text style={styles.successXP}>+25 XP</Text>
@@ -1236,6 +1247,21 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.body,
     color: 'rgba(255, 255, 255, 0.7)',
     marginBottom: Spacing.lg,
+  },
+  successMusicTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    backgroundColor: 'rgba(190, 255, 108, 0.1)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: Radius.pill,
+    marginBottom: Spacing.xl,
+  },
+  successMusicText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.accent.primary,
   },
   successXPRow: {
     flexDirection: 'row',

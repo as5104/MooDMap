@@ -2,11 +2,11 @@
  * MoodMap — GlassCard
  */
 
-import React, { type ReactNode } from 'react';
-import { StyleSheet, View, type ViewStyle, type StyleProp, Pressable, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { Radius, Spacing } from '@/constants/layout';
 import { Colors } from '@/constants/colors';
+import { Radius, Spacing } from '@/constants/layout';
+import { BlurView } from 'expo-blur';
+import React, { type ReactNode } from 'react';
+import { Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useBlurTarget } from './GradientBackground';
 
 type Intensity = 'subtle' | 'medium' | 'strong';
@@ -20,6 +20,7 @@ interface GlassCardProps {
   glowColor?: string;
   onPress?: () => void;
   metric?: MetricVariant;
+  disablePressAnimation?: boolean;
 }
 
 const IOS_BLUR: Record<Intensity, number> = {
@@ -74,6 +75,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
   glowColor,
   onPress,
   metric,
+  disablePressAnimation,
 }) => {
   const blurCtx = useBlurTarget();
   const isMetric = !!metric;
@@ -101,7 +103,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
               padding: PADDING_MAP[padding],
             },
             style,
-            pressed && styles.pressed,
+            pressed && !disablePressAnimation && styles.pressed,
           ]}
         >
           {children}
@@ -117,13 +119,13 @@ export const GlassCard: React.FC<GlassCardProps> = ({
     { borderColor: BORDER[intensity] },
     glowColor
       ? {
-          borderColor: `${glowColor}40`,
-          shadowColor: glowColor,
-          shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.2,
-          shadowRadius: 16,
-          elevation: 4,
-        }
+        borderColor: `${glowColor}40`,
+        shadowColor: glowColor,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.2,
+        shadowRadius: 16,
+        elevation: 4,
+      }
       : {},
     style,
   ];
@@ -189,16 +191,16 @@ export const GlassCard: React.FC<GlassCardProps> = ({
           { borderColor: BORDER[intensity] },
           glowColor
             ? {
-                borderColor: `${glowColor}40`,
-                shadowColor: glowColor,
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.2,
-                shadowRadius: 16,
-                elevation: 4,
-              }
+              borderColor: `${glowColor}40`,
+              shadowColor: glowColor,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.2,
+              shadowRadius: 16,
+              elevation: 4,
+            }
             : {},
           style,
-          pressed && styles.pressed,
+          pressed && !disablePressAnimation && styles.pressed,
         ]}
       >
         {cardContent}
@@ -217,6 +219,5 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.9,
-    transform: [{ scale: 0.98 }],
   },
 });

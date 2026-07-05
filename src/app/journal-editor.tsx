@@ -492,7 +492,7 @@ export default function JournalEditorScreen() {
             <TextInput
               style={styles.titleInput}
               placeholder="Give it a title..."
-              placeholderTextColor={Colors.text.tertiary}
+              placeholderTextColor="rgba(255, 255, 255, 0.45)"
               value={title}
               onChangeText={handleTitleChange}
               selectionColor={Colors.accent.primary}
@@ -503,7 +503,7 @@ export default function JournalEditorScreen() {
               ref={contentRef}
               style={styles.contentInput}
               placeholder="Start writing..."
-              placeholderTextColor={Colors.text.tertiary}
+              placeholderTextColor="rgba(255, 255, 255, 0.45)"
               value={content}
               onChangeText={handleContentChange}
               selectionColor={Colors.accent.primary}
@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
   autoSaveText: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.tiny,
-    color: Colors.text.tertiary,
+    color: 'rgba(255, 255, 255, 0.7)',
     marginTop: 2,
   },
   saveBtn: {
@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent.primary,
   },
   saveBtnDisabled: {
-    backgroundColor: Colors.glass.bg,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   saveBtnText: {
     fontFamily: Fonts.bodySemiBold,
@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
     color: Colors.text.onAccent,
   },
   saveBtnTextDisabled: {
-    color: Colors.text.tertiary,
+    color: 'rgba(255, 255, 255, 0.35)',
   },
 
   // Draft Banner
@@ -657,9 +657,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.xs + 2,
     borderRadius: Radius.pill,
-    backgroundColor: Colors.glass.bgSubtle,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: Colors.glass.borderSubtle,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   categoryChipActive: {
     backgroundColor: Colors.accent.primaryMuted,
@@ -668,7 +668,7 @@ const styles = StyleSheet.create({
   categoryText: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+    color: 'rgba(255, 255, 255, 0.7)',
   },
   categoryTextActive: {
     color: Colors.accent.primary,
@@ -749,12 +749,12 @@ const styles = StyleSheet.create({
   footerStat: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+    color: 'rgba(255, 255, 255, 0.7)',
   },
   footerCount: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
-    color: Colors.text.tertiary,
+    color: 'rgba(255, 255, 255, 0.5)',
   },
 
   // Success

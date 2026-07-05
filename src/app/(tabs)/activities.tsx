@@ -18,6 +18,8 @@ import { MOOD_MAP } from '@/constants/moods';
 import { getMoodCount } from '@/services/moodService';
 import { getJournalCount } from '@/services/journalService';
 
+import { useTierStore } from '@/stores/tierStore';
+
 interface ActivityItem {
   key: string;
   icon: keyof typeof Feather.glyphMap;
@@ -29,11 +31,11 @@ interface ActivityItem {
 }
 
 const ACTIVITIES: ActivityItem[] = [
+  { key: 'sounds', icon: 'music', title: 'Music Player', subtitle: 'Ambient & Lo-fi music', color: '#74B9FF', route: '/music', badge: 'Audio' },
   { key: 'breathing', icon: 'wind', title: 'Breathing', subtitle: '4-7-8 calming pattern', color: '#6BCB77', route: '/breathing', badge: 'Calm' },
   { key: 'grounding', icon: 'anchor', title: 'Grounding', subtitle: '5-4-3-2-1 senses', color: '#C59CFF', route: '/grounding', badge: 'Stabilize' },
   { key: 'gratitude', icon: 'heart', title: 'Gratitude', subtitle: '3 things grateful for', color: '#FFD166', route: '/gratitude', badge: 'Joy' },
   { key: 'pause', icon: 'clock', title: 'Pause Timer', subtitle: 'Take a mindful break', color: '#FF7A6E', route: '/pause-timer', badge: 'Pause' },
-  { key: 'sounds', icon: 'music', title: 'Music Player', subtitle: 'Ambient & Lo-fi music', color: '#74B9FF', route: '/music', badge: 'Audio' },
   { key: 'reflection', icon: 'message-circle', title: 'Reflection', subtitle: 'A question to ponder', color: '#4ECDC4', route: '/reflection', badge: 'Reflect' },
 ];
 
@@ -44,6 +46,7 @@ export default function ActivitiesScreen() {
   const todayMood = useAppStore((s) => s.todayMood);
   const user = useAppStore((s) => s.user);
   const isAppReady = useAppStore((s) => s.isAppReady);
+  const isVIP = useTierStore((s) => s.isVIP);
 
   // Mood-based recommended activity
   const recommendation = useMemo(() => {
@@ -68,7 +71,20 @@ export default function ActivitiesScreen() {
     router.push(route as any);
   };
 
-  const CARD_WIDTH = (SCREEN_WIDTH - Spacing.xl * 2 - Spacing.md) / 2;
+  const getCardWidth = (key: string) => {
+    const totalWidth = SCREEN_WIDTH - Spacing.xl * 2;
+    const gap = Spacing.md;
+    if (key === 'sounds' || key === 'reflection') {
+      return totalWidth;
+    }
+    if (key === 'breathing' || key === 'pause') {
+      return (totalWidth - gap) * 0.58;
+    }
+    if (key === 'grounding' || key === 'gratitude') {
+      return (totalWidth - gap) * 0.42;
+    }
+    return (totalWidth - gap) / 2;
+  };
 
   return (
     <GradientBackground>
@@ -85,10 +101,7 @@ export default function ActivitiesScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerBadge}>
-            <Text style={styles.headerBadgeText}>Mind Studio</Text>
-          </View>
-          <Text style={styles.title}>Wellness Studio</Text>
+          <Text style={styles.title}>Activities</Text>
           <Text style={styles.subtitle}>Mindful practices crafted for your inner balance.</Text>
         </View>
 
@@ -178,36 +191,74 @@ export default function ActivitiesScreen() {
         </View>
 
         <View style={styles.grid}>
-          {ACTIVITIES.map((activity) => (
-            <AnimatedPressable
-              key={activity.key}
-              style={[styles.activityCardWrapper, { width: CARD_WIDTH }]}
-              onPress={() => handleActivityPress(activity.route)}
-            >
-              <GlassCard intensity="subtle" padding="none" style={styles.activityGlassCard}>
-                {/* Glow Orb in background */}
-                <View style={[styles.cardGlow, { backgroundColor: activity.color }]} />
-                
-                <View style={styles.cardHeaderRow}>
-                  <View style={[styles.activityIconBg, { backgroundColor: `${activity.color}15` }]}>
-                    <Feather name={activity.icon} size={18} color={activity.color} />
-                  </View>
-                  <View style={[styles.activityBadge, { backgroundColor: `${activity.color}12`, borderColor: `${activity.color}25` }]}>
-                    <Text style={[styles.activityBadgeText, { color: activity.color }]}>{activity.badge}</Text>
-                  </View>
-                </View>
+          {ACTIVITIES.map((activity) => {
+            const cardWidth = getCardWidth(activity.key);
+            const isMusic = activity.key === 'sounds';
 
-                <View style={styles.cardBody}>
-                  <Text style={styles.activityTitle}>{activity.title}</Text>
-                  <Text numberOfLines={2} style={styles.activitySubtitle}>{activity.subtitle}</Text>
-                </View>
-                
-                <View style={styles.cardFooter}>
-                  <Feather name="arrow-up-right" size={14} color={`${activity.color}60`} />
-                </View>
-              </GlassCard>
-            </AnimatedPressable>
-          ))}
+            return (
+              <AnimatedPressable
+                key={activity.key}
+                style={[styles.activityCardWrapper, { width: cardWidth }]}
+                onPress={() => handleActivityPress(activity.route)}
+              >
+                {isMusic ? (
+                  <GlassCard intensity="strong" padding="none" style={[styles.activityGlassCard, styles.musicGlassCard]}>
+                    {/* Vibrant blue glow orb in background */}
+                    <View style={[styles.cardGlow, styles.musicCardGlow]} />
+                    
+                    <View style={styles.musicCardContent}>
+                      <View style={styles.musicCardLeft}>
+                        <View style={styles.musicIconBg}>
+                          <Feather name="music" size={20} color="#74B9FF" />
+                        </View>
+                        <View style={styles.musicTextContainer}>
+                          <Text style={styles.musicTitle}>Music Player</Text>
+                          <Text style={styles.musicSubtitle}>Ambient, Lo-fi & Spotify</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.musicCardRight}>
+                        {isVIP ? (
+                          <View style={styles.vipMusicBadge}>
+                            <Feather name="award" size={10} color="#FFD166" />
+                            <Text style={styles.vipMusicText}>VIP Active</Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.activityBadge, { backgroundColor: '#74B9FF12', borderColor: '#74B9FF25' }]}>
+                            <Text style={[styles.activityBadgeText, { color: '#74B9FF' }]}>Audio</Text>
+                          </View>
+                        )}
+                        <Feather name="arrow-up-right" size={16} color="#74B9FFCC" />
+                      </View>
+                    </View>
+                  </GlassCard>
+                ) : (
+                  <GlassCard intensity="subtle" padding="none" style={styles.activityGlassCard}>
+                    {/* Glow Orb in background */}
+                    <View style={[styles.cardGlow, { backgroundColor: activity.color }]} />
+                    
+                    <View style={styles.cardHeaderRow}>
+                      <View style={[styles.activityIconBg, { backgroundColor: `${activity.color}15` }]}>
+                        <Feather name={activity.icon} size={18} color={activity.color} />
+                      </View>
+                      <View style={[styles.activityBadge, { backgroundColor: `${activity.color}12`, borderColor: `${activity.color}25` }]}>
+                        <Text style={[styles.activityBadgeText, { color: activity.color }]}>{activity.badge}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.cardBody}>
+                      <Text style={styles.activityTitle}>{activity.title}</Text>
+                      <Text numberOfLines={2} style={styles.activitySubtitle}>{activity.subtitle}</Text>
+                    </View>
+                    
+                    <View style={styles.cardFooter}>
+                      <Feather name="arrow-up-right" size={14} color={`${activity.color}60`} />
+                    </View>
+                  </GlassCard>
+                )}
+              </AnimatedPressable>
+            );
+          })}
         </View>
 
         {/* Practice Progress Dashboard */}
@@ -463,6 +514,79 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     marginTop: Spacing.xs,
   },
+
+  // Music Bento Card Custom Styles
+  musicGlassCard: {
+    minHeight: 88,
+    justifyContent: 'center',
+    borderColor: 'rgba(116, 185, 255, 0.25)',
+  },
+  musicCardGlow: {
+    backgroundColor: '#74B9FF',
+    opacity: 0.08,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    right: -30,
+    bottom: -30,
+  },
+  musicCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.md,
+  },
+  musicCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  musicIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(116, 185, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  musicTextContainer: {
+    justifyContent: 'center',
+  },
+  musicTitle: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+    marginBottom: 2,
+  },
+  musicSubtitle: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.secondary,
+  },
+  musicCardRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  vipMusicBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 209, 102, 0.12)',
+    borderColor: 'rgba(255, 209, 102, 0.25)',
+    borderWidth: 0.5,
+  },
+  vipMusicText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: 9,
+    color: '#FFD166',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
 
   // Stats Card
   statsCard: {

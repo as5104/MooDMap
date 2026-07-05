@@ -18,6 +18,7 @@ const COVER_GRADIENTS: Record<string, [string, string]> = {
   heartbeat: ['#9F1D4F', '#2D0616'],
   ambient: ['#1E5E4E', '#081E18'],
   local: ['#593CFB', '#1B0975'],
+  spotify: ['#1DB954', '#121212'],
 };
 
 const COVER_ICONS: Record<string, string> = {
@@ -27,6 +28,7 @@ const COVER_ICONS: Record<string, string> = {
   heartbeat: 'heart',
   ambient: 'droplet',
   local: 'music',
+  spotify: 'music',
 };
 
 export const MusicCover = React.memo(({

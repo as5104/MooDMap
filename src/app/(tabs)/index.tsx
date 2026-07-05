@@ -38,6 +38,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import { useMusic } from '@/context/MusicContext';
+import { useTierStore } from '@/stores/tierStore';
+import { useSpotify } from '@/hooks/useSpotify';
+import { getSmartRecommendations, MOOD_GENRE_MAP, type RecommendedTrack } from '@/services/recommendationEngine';
+import { getBestImage, formatDuration } from '@/services/spotify';
+import { MusicCover } from '@/components/music/MusicCover';
 
 // Greeting based on time of day
 function getGreeting(): string {
@@ -66,6 +72,12 @@ export default function HomeScreen() {
   const [journalCount, setJournalCount] = useState(0);
   const [summary, setSummary] = useState<MoodSummaryData | null>(null);
   const [topMoods, setTopMoods] = useState<TopMoodItem[]>([]);
+  const [moodRecs, setMoodRecs] = useState<RecommendedTrack[]>([]);
+
+  // Music & Spotify
+  const { play: playTrack, queue, currentTrack } = useMusic();
+  const isVIP = useTierStore((s) => s.isVIP);
+  const { nowPlaying, isConnected: spotifyConnected } = useSpotify();
 
   const today = new Date();
   const dateStr = today.toLocaleDateString('en-US', {
@@ -114,6 +126,21 @@ export default function HomeScreen() {
       setJournalCount(jCount);
       setSummary(summaryData);
       setTopMoods(topMoodsData);
+
+      // Load mood-based music recommendations
+      if (todayEntry) {
+        try {
+          const recs = getSmartRecommendations(
+            todayEntry.mood_type as any,
+            queue.length > 0 ? queue : [],
+            userId ?? null,
+            6
+          );
+          setMoodRecs(recs);
+        } catch {
+          // Non-critical
+        }
+      }
 
       // Dynamically calculate and update total XP in store
       const computedXP = (mCount * 25) + (jCount * 15);
@@ -180,8 +207,8 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>{getGreeting()}, {firstName}!</Text>
             <View style={styles.badges}>
               <View style={styles.badge}>
-                <Feather name="star" size={12} color={Colors.accent.primary} />
-                <Text style={styles.badgeText}>Member</Text>
+                <Feather name={isVIP ? "award" : "star"} size={12} color={isVIP ? Colors.accent.amber : Colors.accent.primary} />
+                <Text style={styles.badgeText}>{isVIP ? 'VIP' : 'Member'}</Text>
               </View>
               {currentMood && (
                 <View style={[styles.badge, styles.badgeMood]}>
@@ -464,6 +491,125 @@ export default function HomeScreen() {
           </GlassCard>
         )}
 
+        {/* SPOTIFY NOW PLAYING (VIP only) */}
+        {isVIP && spotifyConnected && nowPlaying?.item && (
+          <>
+            <View style={styles.sectionRow}>
+              <View style={styles.sectionTitleRow}>
+                <Feather name="disc" size={15} color="#1DB954" />
+                <Text style={styles.sectionTitleInline}>Now on Spotify</Text>
+              </View>
+            </View>
+
+            <GlassCard
+              intensity="medium"
+              padding="md"
+              style={styles.spotifyNowCard}
+              onPress={() => router.push('/music')}
+            >
+              <View style={styles.spotifyNowGlow} />
+              <View style={styles.spotifyNowRow}>
+                {/* Album Art */}
+                <View style={styles.spotifyNowArt}>
+                  <Image
+                    source={getBestImage(nowPlaying.item.album.images, 120) ? { uri: getBestImage(nowPlaying.item.album.images, 120) as string } : undefined}
+                    style={styles.spotifyNowImage}
+                    contentFit="cover"
+                  />
+                  {/* Equalizer bars */}
+                  {nowPlaying.is_playing && (
+                    <View style={styles.eqBars}>
+                      <View style={[styles.eqBar, styles.eqBar1]} />
+                      <View style={[styles.eqBar, styles.eqBar2]} />
+                      <View style={[styles.eqBar, styles.eqBar3]} />
+                    </View>
+                  )}
+                </View>
+
+                {/* Track Info */}
+                <View style={styles.spotifyNowInfo}>
+                  <Text style={styles.spotifyNowTitle} numberOfLines={1}>
+                    {nowPlaying.item.name}
+                  </Text>
+                  <Text style={styles.spotifyNowArtist} numberOfLines={1}>
+                    {nowPlaying.item.artists.map((a) => a.name).join(', ')}
+                  </Text>
+                  <View style={styles.spotifyNowMeta}>
+                    <View style={styles.spotifyLiveDot} />
+                    <Text style={styles.spotifyNowTime}>
+                      {nowPlaying.is_playing ? 'Playing' : 'Paused'}
+                    </Text>
+                  </View>
+                </View>
+
+                <Feather name="external-link" size={16} color={Colors.text.tertiary} />
+              </View>
+            </GlassCard>
+          </>
+        )}
+
+        {/* MOOD MUSIC RECOMMENDATIONS */}
+        {todayMood && (
+          <>
+            <View style={styles.sectionRow}>
+              <View style={styles.sectionTitleRow}>
+                <Feather name={(MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') as any} size={15} color={Colors.mood[todayMood.moodType] ?? Colors.accent.primary} />
+                <Text style={styles.sectionTitleInline}>
+                  {MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood'}
+                </Text>
+              </View>
+              <Pressable onPress={() => router.push('/music')} hitSlop={8}>
+                <Text style={styles.seeAll}>Browse</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.moodRecsScroll}
+              style={styles.moodRecsContainer}
+            >
+              {moodRecs.length > 0 ? (
+                moodRecs.slice(0, 6).map((rec) => (
+                  <Pressable
+                    key={rec.track.id}
+                    style={styles.moodRecCard}
+                    onPress={() => {
+                      playTrack(rec.track);
+                      router.push('/music');
+                    }}
+                  >
+                    <View style={[
+                      styles.moodRecCover,
+                      { borderColor: (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) + '30' },
+                    ]}>
+                      <MusicCover
+                        cover={rec.track.cover}
+                        style={styles.moodRecImage}
+                        iconSize={16}
+                        borderRadius={10}
+                      />
+                    </View>
+                    <Text style={styles.moodRecTitle} numberOfLines={1}>{rec.track.title}</Text>
+                    <Text style={styles.moodRecArtist} numberOfLines={1}>{rec.track.artist}</Text>
+                    {rec.source === 'personal' && (
+                      <View style={styles.moodRecBadge}>
+                        <Feather name="heart" size={8} color={Colors.accent.primary} />
+                        <Text style={styles.moodRecBadgeText}>Your pick</Text>
+                      </View>
+                    )}
+                  </Pressable>
+                ))
+              ) : (
+                <View style={styles.moodRecsEmpty}>
+                  <Feather name="music" size={20} color={Colors.text.tertiary} />
+                  <Text style={styles.moodRecsEmptyText}>Play some tracks to get recommendations</Text>
+                </View>
+              )}
+            </ScrollView>
+          </>
+        )}
+
         {/* Recommendation */}
         {suggestion && (
           <>
@@ -573,6 +719,153 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: {
     paddingHorizontal: Spacing.xl,
+  },
+
+  // Mood Recommendations
+  moodRecsContainer: {
+    marginBottom: Spacing.xxl,
+    marginHorizontal: -Spacing.xl,
+  },
+  moodRecsScroll: {
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.md,
+  },
+  moodRecCard: {
+    width: 110,
+    alignItems: 'center',
+  },
+  moodRecCover: {
+    width: 100,
+    height: 100,
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    marginBottom: Spacing.sm,
+  },
+  moodRecImage: {
+    width: '100%',
+    height: '100%',
+  },
+  moodRecTitle: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.text.primary,
+    textAlign: 'center',
+    width: '100%',
+  },
+  moodRecArtist: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginTop: 1,
+    width: '100%',
+  },
+  moodRecBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(190, 255, 108, 0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+    marginTop: 4,
+  },
+  moodRecBadgeText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: 8,
+    color: Colors.accent.primary,
+  },
+  moodRecsEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xl,
+  },
+  moodRecsEmptyText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.tertiary,
+  },
+
+  // Spotify Now Playing
+  spotifyNowCard: {
+    overflow: 'hidden',
+    marginBottom: Spacing.xxl,
+    borderWidth: 1,
+    borderColor: 'rgba(30, 215, 96, 0.12)',
+  },
+  spotifyNowGlow: {
+    position: 'absolute',
+    top: -20,
+    left: -20,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(30, 215, 96, 0.06)',
+  },
+  spotifyNowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  spotifyNowArt: {
+    width: 56,
+    height: 56,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  spotifyNowImage: {
+    width: '100%',
+    height: '100%',
+  },
+  eqBars: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  eqBar: {
+    width: 3,
+    borderRadius: 1.5,
+    backgroundColor: '#1DB954',
+  },
+  eqBar1: { height: 8 },
+  eqBar2: { height: 14 },
+  eqBar3: { height: 6 },
+  spotifyNowInfo: {
+    flex: 1,
+  },
+  spotifyNowTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+  },
+  spotifyNowArtist: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: Colors.text.secondary,
+    marginTop: 1,
+  },
+  spotifyNowMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
+  spotifyLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#1DB954',
+  },
+  spotifyNowTime: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: '#1DB954',
   },
 
   // Header

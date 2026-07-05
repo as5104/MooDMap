@@ -2,10 +2,10 @@
  * MoodMap — Gradient Background
  */
 
-import React, { type ReactNode, useRef, useState, useEffect, createContext, useContext } from 'react';
-import { StyleSheet, View, type ViewStyle, Platform } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { BlurTargetView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { Platform, StyleSheet, View, type ViewStyle } from 'react-native';
 
 interface GradientBackgroundProps {
   children: ReactNode;
@@ -31,7 +31,6 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
   const targetRef = useRef<View>(null);
   const [ready, setReady] = useState(false);
 
-  // Mark ready after mount so children re-render with the ref
   useEffect(() => {
     if (Platform.OS === 'android' && targetRef.current && !ready) {
       setReady(true);
@@ -41,18 +40,67 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
   const ctx: BlurCtx = { ref: targetRef, ready };
   const isAndroid = Platform.OS === 'android';
 
-  // Shared background orbs
-  const renderOrbs = (isGlow: boolean) => (
-    <View style={styles.orbLayer}>
-      <View style={[styles.orb, styles.orbLime]} />
-      <View style={[styles.orb, styles.orbLavender]} />
-      <View style={[styles.orb, styles.orbTeal]} />
-      {isGlow && (
-        <>
-          <View style={[styles.orb, styles.orbAmber]} />
-          <View style={[styles.orb, styles.orbLimeBottom]} />
-        </>
-      )}
+  /**
+   * Smooth ambient mesh built from layered gradients.
+   */
+  const renderAmbientLayers = () => (
+    <View style={StyleSheet.absoluteFill}>
+      {/* Base: solid black */}
+      <View style={[StyleSheet.absoluteFill as ViewStyle, { backgroundColor: '#000000' }]} />
+
+      {/* Layer 1 — Top-left bright lime light flowing diagonally down-right */}
+      <LinearGradient
+        colors={['rgba(200, 255, 140, 0.70)', 'rgba(100, 200, 50, 0.30)', 'rgba(0, 0, 0, 0)']}
+        locations={[0, 0.35, 0.7]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0.8 }}
+        style={StyleSheet.absoluteFill as ViewStyle}
+      />
+
+      {/* Layer 2 — Center-left green glow flowing right */}
+      <LinearGradient
+        colors={['rgba(0, 0, 0, 0)', 'rgba(80, 180, 40, 0.40)', 'rgba(60, 160, 30, 0.25)', 'rgba(0, 0, 0, 0)']}
+        locations={[0, 0.3, 0.6, 1]}
+        start={{ x: 0, y: 0.3 }}
+        end={{ x: 1, y: 0.6 }}
+        style={StyleSheet.absoluteFill as ViewStyle}
+      />
+
+      {/* Layer 3 — Bottom teal/cyan glow flowing up */}
+      <LinearGradient
+        colors={['rgba(0, 0, 0, 0)', 'rgba(40, 180, 160, 0.35)', 'rgba(60, 200, 180, 0.50)']}
+        locations={[0.3, 0.7, 1]}
+        start={{ x: 0.3, y: 0.5 }}
+        end={{ x: 0.7, y: 1 }}
+        style={StyleSheet.absoluteFill as ViewStyle}
+      />
+
+      {/* Layer 4 — Dark vignette from right edge for depth */}
+      <LinearGradient
+        colors={['rgba(0, 10, 5, 0.80)', 'rgba(0, 0, 0, 0)', 'rgba(0, 10, 5, 0.60)']}
+        locations={[0, 0.45, 1]}
+        start={{ x: 1, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFill as ViewStyle}
+      />
+
+      {/* Layer 5 — Subtle mid-green wash across center for richness */}
+      <LinearGradient
+        colors={['rgba(0, 0, 0, 0)', 'rgba(90, 200, 70, 0.20)', 'rgba(0, 0, 0, 0)']}
+        locations={[0.1, 0.5, 0.9]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill as ViewStyle}
+      />
+
+      {/* Layer 6 — Top-left white highlight for that bright corner glow */}
+      <LinearGradient
+        colors={['rgba(255, 255, 240, 0.45)', 'rgba(180, 240, 120, 0.15)', 'rgba(0, 0, 0, 0)']}
+        locations={[0, 0.2, 0.5]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.6, y: 0.5 }}
+        style={StyleSheet.absoluteFill as ViewStyle}
+      />
     </View>
   );
 
@@ -83,19 +131,7 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
     );
   }
 
-  // Default / Auth / Glow variants
-  const isGlow = variant === 'glow' || variant === 'auth';
-
-  const defaultBg = (
-    <>
-      <LinearGradient
-        colors={['#0A0A0C', '#0F0F14', '#0A0A0C']}
-        locations={[0, 0.5, 1]}
-        style={StyleSheet.absoluteFill as ViewStyle}
-      />
-      {renderOrbs(isGlow)}
-    </>
-  );
+  const defaultBg = renderAmbientLayers();
 
   return (
     <BlurTargetCtx.Provider value={ctx}>
@@ -116,50 +152,7 @@ export const GradientBackground: React.FC<GradientBackgroundProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0A0C',
-  },
-  orbLayer: {
-    ...(StyleSheet.absoluteFill as object),
-    overflow: 'hidden',
-  },
-  orb: {
-    position: 'absolute',
-    borderRadius: 999,
-  },
-  orbLime: {
-    width: 350,
-    height: 350,
-    backgroundColor: 'rgba(190, 255, 108, 0.12)',
-    top: -100,
-    right: -80,
-  },
-  orbLavender: {
-    width: 300,
-    height: 300,
-    backgroundColor: 'rgba(184, 169, 255, 0.09)',
-    top: '35%',
-    left: -100,
-  },
-  orbTeal: {
-    width: 280,
-    height: 280,
-    backgroundColor: 'rgba(78, 205, 196, 0.07)',
-    bottom: -40,
-    left: '20%',
-  },
-  orbAmber: {
-    width: 300,
-    height: 300,
-    backgroundColor: 'rgba(255, 190, 106, 0.10)',
-    bottom: -80,
-    right: -60,
-  },
-  orbLimeBottom: {
-    width: 200,
-    height: 200,
-    backgroundColor: 'rgba(190, 255, 108, 0.08)',
-    bottom: '15%',
-    left: -50,
+    backgroundColor: '#000000',
   },
   topoCircle: {
     position: 'absolute',

@@ -63,3 +63,18 @@ export const userSettings = sqliteTable('user_settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
 });
+
+// Mood-Music Tags (tracks what music is played during each mood)
+export const moodMusicTags = sqliteTable('mood_music_tags', {
+  id: text('id').primaryKey(),
+  moodEntryId: text('mood_entry_id'),
+  moodType: text('mood_type').notNull(),
+  trackId: text('track_id').notNull(),
+  trackName: text('track_name').notNull(),
+  artistName: text('artist_name').notNull(),
+  trackSource: text('track_source').notNull(),
+  albumArt: text('album_art'),
+  playCount: integer('play_count').notNull().default(1),
+  lastPlayedAt: text('last_played_at').notNull(),
+  userId: text('user_id'),
+});

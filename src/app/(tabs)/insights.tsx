@@ -22,6 +22,7 @@ import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/lay
 import { MOOD_MAP, type MoodType } from '@/constants/moods';
 import { TAG_MAP } from '@/constants/tags';
 import { useAppStore } from '@/stores/appStore';
+import { getMoodMusicInsights } from '@/services/recommendationEngine';
 import {
   getMoodScoreForPeriod,
   getWeeklyMoods,
@@ -147,6 +148,7 @@ export default function InsightsScreen() {
   const [mcqInsights, setMcqInsights] = useState<MCQInsightItem[]>([]);
   const [timeOfDayData, setTimeOfDayData] = useState<TimeOfDayInsight[]>([]);
   const [dayOfWeekData, setDayOfWeekData] = useState<DayOfWeekInsight[]>([]);
+  const [musicInsights, setMusicInsights] = useState<Array<{ moodType: string; trackName: string; artistName: string; playCount: number }>>([]);
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calYear, setCalYear] = useState(new Date().getFullYear());
 
@@ -172,6 +174,7 @@ export default function InsightsScreen() {
       const mcqs = getMCQInsights(userId, targetDays);
       const tod = getTimeOfDayAnalysis(userId, targetDays);
       const dow = getDayOfWeekAnalysis(userId, targetDays);
+      const music = getMoodMusicInsights(userId ?? null, 3);
 
       // Consolidate updates to run in a single React render batch
       setMoodScoreLocal(score);
@@ -188,6 +191,7 @@ export default function InsightsScreen() {
       setMcqInsights(mcqs);
       setTimeOfDayData(tod);
       setDayOfWeekData(dow);
+      setMusicInsights(music);
 
       setRenderedPeriod(targetPeriodIndex);
     } catch (e) {
@@ -854,6 +858,59 @@ export default function InsightsScreen() {
           </View>
         )}
 
+        {/* MUSIC & MOOD CORRELATIONS */}
+        {hasData && (
+          <>
+            <View style={s.sectionHeader}>
+              <Feather name="music" size={14} color={Colors.text.secondary} />
+              <Text style={s.sectionTitle}>Music & Mood</Text>
+            </View>
+
+            {musicInsights.length > 0 ? (
+              <GlassCard intensity="medium" padding="lg" style={s.fullCard}>
+                <Text style={[s.cardTitle, { marginBottom: Spacing.md }]}>Top Music Associations</Text>
+                {musicInsights.map((insight, idx) => {
+                  const moodDef = MOOD_MAP[insight.moodType as MoodType];
+                  const moodColor = moodDef?.color ?? Colors.accent.primary;
+                  return (
+                    <View key={`${insight.trackName}-${idx}`} style={[s.musicInsightRow, idx < musicInsights.length - 1 && s.musicInsightDivider]}>
+                      {/* Left: Mood Icon Badge */}
+                      <View style={[s.musicMoodBadge, { backgroundColor: moodColor + '15', borderColor: moodColor + '30' }]}>
+                        <Feather name={(moodDef?.icon ?? 'smile') as any} size={14} color={moodColor} />
+                      </View>
+
+                      {/* Mid: Track Details */}
+                      <View style={s.musicTrackDetails}>
+                        <Text style={s.musicTrackName} numberOfLines={1}>{insight.trackName}</Text>
+                        <Text style={s.musicArtistName} numberOfLines={1}>by {insight.artistName}</Text>
+                        <Text style={s.musicMoodContext}>Associated with {moodDef?.label ?? insight.moodType}</Text>
+                      </View>
+
+                      {/* Right: Play Count */}
+                      <View style={s.musicPlayCountBadge}>
+                        <Feather name="headphones" size={10} color={Colors.accent.primary} />
+                        <Text style={s.musicPlayCountText}>{insight.playCount} plays</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </GlassCard>
+            ) : (
+              <GlassCard intensity="subtle" padding="lg" style={s.fullCard}>
+                <View style={s.musicEmptyState}>
+                  <View style={[s.iconBg, { backgroundColor: 'rgba(255, 255, 255, 0.04)', alignSelf: 'center', width: 40, height: 40, borderRadius: 20 }]}>
+                    <Feather name="headphones" size={18} color={Colors.text.tertiary} />
+                  </View>
+                  <Text style={[s.emptyTitle, { fontSize: FontSizes.body, textAlign: 'center', marginTop: Spacing.sm }]}>No music insights yet</Text>
+                  <Text style={[s.emptySub, { fontSize: FontSizes.caption, textAlign: 'center', marginTop: 4, maxWidth: '100%' }]}>
+                    Play recommended tracks or tag music to your mood entries to start mapping your emotional soundtrack.
+                  </Text>
+                </View>
+              </GlassCard>
+            )}
+          </>
+        )}
+
         {/* ROW 10: Recent Entries (full width) */}
         {history.length > 0 && (
           <>
@@ -1288,5 +1345,64 @@ const s = StyleSheet.create({
     color: Colors.text.secondary,
     textAlign: 'center',
     marginTop: Spacing.sm,
+  },
+
+  // Music Insights Styles
+  musicInsightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
+  },
+  musicInsightDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  musicMoodBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  musicTrackDetails: {
+    flex: 1,
+  },
+  musicTrackName: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.primary,
+  },
+  musicArtistName: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    marginTop: 1,
+  },
+  musicMoodContext: {
+    fontFamily: Fonts.body,
+    fontSize: 9,
+    color: Colors.text.tertiary,
+    marginTop: 2,
+  },
+  musicPlayCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(190, 255, 108, 0.1)',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+  },
+  musicPlayCountText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny - 1,
+    color: Colors.accent.primary,
+  },
+  musicEmptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.md,
   },
 });

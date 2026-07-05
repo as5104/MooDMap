@@ -2,134 +2,195 @@
  * MoodMap - Music Hub
  */
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  Image,
-  Dimensions,
-  ActivityIndicator,
-  TextInput,
-  BackHandler,
-  FlatList,
-  Platform,
-  PanResponder,
-  Animated as RNAnimated,
-  LayoutAnimation,
-} from 'react-native';
-import { router } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { File, Paths } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  BackHandler,
+  Dimensions,
+  FlatList,
+  Image,
+  LayoutAnimation,
+  PanResponder,
+  Platform,
+  Pressable,
+  RefreshControl,
+  Animated as RNAnimated,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  withSpring,
   cancelAnimation,
   Easing,
   runOnJS,
   SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSpring,
+  withTiming,
 } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import Svg, { Circle } from 'react-native-svg';
-import { useMusic, usePlaybackTime, Track, TRACKS_LIBRARY, Playlist } from '../context/MusicContext';
-import { Colors } from '../constants/colors';
-import { Fonts, FontSizes } from '../constants/typography';
-import { Spacing, Radius, SCREEN_PADDING } from '../constants/layout';
-import { GradientBackground, GlassCard, AnimatedPressable } from '../components/ui';
-import { useBlurTarget } from '../components/ui/GradientBackground';
-import { MusicCover } from '../components/music/MusicCover';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Defs, G, Mask, Path, Rect } from 'react-native-svg';
 import { FloatingMiniPlayer } from '../components/music/FloatingMiniPlayer';
+import { MusicCover } from '../components/music/MusicCover';
+import { AnimatedPressable, GlassCard, GradientBackground } from '../components/ui';
+import { useBlurTarget } from '../components/ui/GradientBackground';
+import { Colors } from '../constants/colors';
+import { Radius, SCREEN_PADDING, Spacing } from '../constants/layout';
+import { Fonts, FontSizes } from '../constants/typography';
+import { Playlist, Track, TRACKS_LIBRARY, useMusic, usePlaybackTime } from '../context/MusicContext';
+import { useSpotify } from '../hooks/useSpotify';
+import { getSmartRecommendations, MOOD_GENRE_MAP } from '../services/recommendationEngine';
+import { formatDuration as spotifyFormatDur, getBestImage as spotifyGetBestImage } from '../services/spotify';
+import { useAppStore } from '../stores/appStore';
+import { useTierStore } from '../stores/tierStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 
 
-const PlayerBackground = React.memo(() => {
+// dynamic color mappings for each mood category
+const CATEGORY_COLORS: Record<string, { primary: string, secondary: string, glow: string, backgroundGradColors: [string, string, string] }> = {
+  midnight: {
+    primary: '#A855F7', // Vibrant Purple
+    secondary: '#2E1065',
+    glow: 'rgba(168, 85, 247, 0.7)',
+    backgroundGradColors: ['#3B0764', '#1E1B4B', '#03070E'],
+  },
+  chill: {
+    primary: '#06B6D4', // Vibrant Cyan/Teal
+    secondary: '#083344',
+    glow: 'rgba(6, 182, 212, 0.7)',
+    backgroundGradColors: ['#0A424F', '#0F2A38', '#03070E'],
+  },
+  energy: {
+    primary: '#F97316', // Vibrant Orange/Rose
+    secondary: '#7C2D12',
+    glow: 'rgba(249, 115, 22, 0.7)',
+    backgroundGradColors: ['#4C1D95', '#6B1B62', '#03070E'],
+  },
+  heartbeat: {
+    primary: '#EF4444', // Vibrant Coral Red
+    secondary: '#7F1D1D',
+    glow: 'rgba(239, 68, 68, 0.7)',
+    backgroundGradColors: ['#5C0A0A', '#1E1B4B', '#03070E'],
+  },
+  ambient: {
+    primary: '#10B981', // Lush Emerald Green
+    secondary: '#064E3B',
+    glow: 'rgba(10, 185, 129, 0.7)',
+    backgroundGradColors: ['#023629', '#0F213A', '#03070E'],
+  },
+};
+
+// Generate unique premium music color schemes dynamically from track ID
+const getTrackColorPalette = (track?: Track | null) => {
+  if (!track) {
+    return {
+      primary: '#1DB954',
+      secondary: '#121212',
+      glow: 'rgba(29, 185, 84, 0.5)',
+      backgroundGradColors: ['#0D9488', '#0F5A47', '#03070E'] as [string, string, string],
+    };
+  }
+
+  // If it's a local category track with a known color mapping
+  const category = track.category;
+  if (category && CATEGORY_COLORS[category]) {
+    return CATEGORY_COLORS[category];
+  }
+
+  // Otherwise, hash the track ID to generate a vibrant color palette
+  const seedString = track.id || track.title || 'default';
+  let hash = 0;
+  for (let i = 0; i < seedString.length; i++) {
+    hash = seedString.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  const hue = Math.abs(hash) % 360;
+
+  // HSL values very vibrant and bright so they pop through the dark blur
+  const primaryColor = `hsl(${hue}, 85%, 50%)`;
+  const secondaryColor = `hsl(${(hue + 180) % 360}, 60%, 20%)`;
+  const primaryGlow = `hsla(${hue}, 90%, 55%, 0.65)`;
+  const backgroundGradColors = [
+    `hsl(${hue}, 75%, 20%)`, // Vibrant base primary
+    `hsl(${(hue + 45) % 360}, 70%, 14%)`, // Adjacent blend
+    '#03070E' // Solid dark base
+  ] as [string, string, string];
+
+  return {
+    primary: primaryColor,
+    secondary: secondaryColor,
+    glow: primaryGlow,
+    backgroundGradColors,
+  };
+};
+
+const PlayerBackground = React.memo(({ currentTrack }: { currentTrack: Track | null }) => {
   const blurCtx = useBlurTarget();
   const isAndroid = Platform.OS === 'android';
   const ready = blurCtx?.ready ?? false;
 
+  const palette = useMemo(() => getTrackColorPalette(currentTrack), [currentTrack]);
+
   return (
     <View style={StyleSheet.absoluteFill}>
-      {/* Base vibrant gradient */}
+      {/* Dynamic ambient mesh gradient matching the current song */}
       <LinearGradient
-        colors={['#8DE91D', '#0D9488', '#03070E']}
-        locations={[0, 0.45, 1]}
+        colors={palette.backgroundGradColors}
+        locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
       />
-      
-      {/* Glowing orbs */}
+
+      {/* Dynamic glowing orbs in matching colors */}
       <View style={StyleSheet.absoluteFill}>
-        {/* Top-right vibrant lime green orb */}
+        {/* Top-right vibrant matching orb */}
         <View style={[
           styles.playerOrb,
           {
-            width: 360,
-            height: 360,
-            borderRadius: 180,
-            backgroundColor: 'rgba(190, 255, 108, 0.65)',
+            width: 380,
+            height: 380,
+            borderRadius: 190,
+            backgroundColor: palette.glow,
             top: -60,
             right: -60,
           }
         ]} />
-        
-        {/* Center-left vibrant mint/emerald orb */}
-        <View style={[
-          styles.playerOrb,
-          {
-            width: 400,
-            height: 400,
-            borderRadius: 200,
-            backgroundColor: 'rgba(52, 211, 153, 0.5)',
-            top: '15%',
-            left: -100,
-          }
-        ]} />
 
-        {/* Center-right vibrant blue/cyan orb */}
+        {/* Bottom-left vibrant matching orb */}
         <View style={[
           styles.playerOrb,
           {
             width: 320,
             height: 320,
             borderRadius: 160,
-            backgroundColor: 'rgba(6, 182, 212, 0.45)',
-            top: '40%',
-            right: -80,
-          }
-        ]} />
-
-        {/* Bottom-left vibrant green orb */}
-        <View style={[
-          styles.playerOrb,
-          {
-            width: 340,
-            height: 340,
-            borderRadius: 170,
-            backgroundColor: 'rgba(16, 185, 129, 0.4)',
+            backgroundColor: `hsla(${(parseFloat(palette.glow.match(/\d+/)?.[0] ?? '0') + 120) % 360}, 75%, 50%, 0.35)`,
             bottom: -90,
             left: -30,
           }
         ]} />
       </View>
 
-      {/* Full screen Blur */}
+      {/* Full screen Blur — slightly lower intensity so colors are extremely visible */}
       {Platform.OS === 'ios' ? (
         <BlurView
-          intensity={95}
+          intensity={85}
           tint="dark"
           style={StyleSheet.absoluteFill}
         />
       ) : ready ? (
         <BlurView
-          intensity={50}
+          intensity={45}
           tint="dark"
           blurMethod="dimezisBlurView"
           blurReductionFactor={2}
@@ -140,8 +201,8 @@ const PlayerBackground = React.memo(() => {
         <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(10, 20, 15, 0.85)' }]} />
       )}
 
-      {/* Semi-transparent overlay to ensure readability and contrast */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(3, 7, 14, 0.35)' }]} />
+      {/* Semi-transparent overlay */}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(3, 7, 14, 0.18)' }]} />
     </View>
   );
 });
@@ -169,18 +230,38 @@ const VisualizerBar = React.memo(({
   const height = useSharedValue(baseHeight);
 
   useEffect(() => {
-    if (isPlaying) {
-      height.value = withRepeat(
-        withTiming(baseHeight * (0.3 + Math.random() * 0.9), {
-          duration: 350 + Math.random() * 300,
-          easing: Easing.inOut(Easing.ease),
-        }),
-        -1,
-        true
+    let active = true;
+
+    const animate = () => {
+      if (!isPlaying || !active) return;
+      // Actual music visualizer bounce target (30% to 120% of base height)
+      const targetHeight = baseHeight * (0.3 + Math.random() * 0.9);
+      // Slower bounce duration (400ms to 700ms) to eliminate high-frequency noise
+      const duration = 400 + Math.random() * 300;
+
+      height.value = withTiming(
+        targetHeight,
+        {
+          duration,
+          easing: Easing.inOut(Easing.quad),
+        },
+        (finished) => {
+          if (finished && active && isPlaying) {
+            runOnJS(animate)();
+          }
+        }
       );
+    };
+
+    if (isPlaying) {
+      animate();
     } else {
       height.value = withTiming(baseHeight, { duration: 300 });
     }
+
+    return () => {
+      active = false;
+    };
   }, [isPlaying, baseHeight, height]);
 
   const animatedStyle = useAnimatedStyle(() => {
@@ -229,10 +310,11 @@ const TrackItem = React.memo(({
       intensity="subtle"
       padding="none"
       style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
+      disablePressAnimation
     >
       <View style={styles.trackItemInner}>
         <MusicCover cover={track.cover} style={styles.trackCover} iconSize={14} borderRadius={20} />
-        
+
         <View style={styles.trackDetails}>
           <Text numberOfLines={1} style={[styles.trackName, isCurrent && styles.activeTrackText]}>
             {track.title}
@@ -323,17 +405,55 @@ const getCategoryIcon = (slug: string) => {
 const CategoriesView = React.memo(({
   onCategoryPress,
   onSettingsPress,
+  onTrackPress,
 }: {
   onCategoryPress: (slug: string, label: string) => void;
   onSettingsPress: () => void;
+  onTrackPress: (track: Track, tracks: Track[]) => void;
 }) => {
+  const isVIP = useTierStore((s) => s.isVIP);
+  const { isConnected: spotifyConnected } = useSpotify();
+  const todayMood = useAppStore((s) => s.todayMood);
+  const user = useAppStore((s) => s.user);
+
+  const moodRecs = useMemo(() => {
+    if (!todayMood) return [];
+    try {
+      return getSmartRecommendations(
+        todayMood.moodType as any,
+        TRACKS_LIBRARY,
+        user?.id ?? null,
+        6
+      );
+    } catch {
+      return [];
+    }
+  }, [todayMood, user?.id]);
+
+  const categories = useMemo(() => {
+    const list = [...CATEGORIES_LIST];
+    if (isVIP && spotifyConnected) {
+      list.splice(1, 0, {
+        slug: 'spotify',
+        label: 'Spotify Library',
+        subtitle: 'Connected',
+        cover: 'spotify',
+        height: 180,
+      });
+    }
+    return list;
+  }, [isVIP, spotifyConnected]);
+
+  const leftCol = useMemo(() => categories.filter((_, i) => i % 2 === 0), [categories]);
+  const rightCol = useMemo(() => categories.filter((_, i) => i % 2 === 1), [categories]);
+
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
       {/* Header section with heading "Music" and settings gear button */}
       <View style={styles.categoriesHeader}>
         <Text style={styles.categoriesTitle}>Music</Text>
-        <Pressable 
-          style={styles.iconBtn} 
+        <Pressable
+          style={styles.iconBtn}
           onPress={onSettingsPress}
         >
           <Feather name="settings" size={20} color={Colors.text.primary} />
@@ -355,13 +475,69 @@ const CategoriesView = React.memo(({
         ))}
       </ScrollView>
 
+      {/* FOR YOUR MOOD SECTION */}
+      {todayMood && moodRecs.length > 0 && (
+        <View style={styles.musicRecsSection}>
+          <View style={styles.musicRecsHeader}>
+            <Feather
+              name={(MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') as any}
+              size={14}
+              color={Colors.mood[todayMood.moodType] ?? Colors.accent.primary}
+            />
+            <Text style={styles.musicRecsTitle}>
+              {MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood'}
+            </Text>
+            <View style={[styles.musicRecsMoodBadge, { backgroundColor: (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) + '15' }]}>
+              <Text style={[styles.musicRecsMoodText, { color: Colors.mood[todayMood.moodType] ?? Colors.accent.primary }]}>
+                {todayMood.moodType.toUpperCase()}
+              </Text>
+            </View>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.md }}>
+            {moodRecs.map((rec) => (
+              <Pressable
+                key={rec.track.id}
+                style={styles.musicRecCard}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  onTrackPress(rec.track, [rec.track]);
+                }}
+              >
+                <View style={[
+                  styles.musicRecCoverWrap,
+                  { borderColor: (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) + '30' }
+                ]}>
+                  <MusicCover
+                    cover={rec.track.cover}
+                    style={styles.musicRecCoverImg}
+                    iconSize={16}
+                    borderRadius={10}
+                  />
+                </View>
+                <Text style={styles.musicRecTrackTitle} numberOfLines={1}>
+                  {rec.track.title}
+                </Text>
+                <Text style={styles.musicRecTrackArtist} numberOfLines={1}>
+                  {rec.track.artist}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Bento Grid */}
       <View style={styles.bentoGridRow}>
         <View style={styles.bentoColumn}>
-          {CATEGORIES_LEFT_COL.map((cat) => (
+          {leftCol.map((cat) => (
             <AnimatedPressable
               key={cat.slug}
-              style={[styles.bentoCard, { height: cat.height }]}
+              style={[
+                styles.bentoCard,
+                { height: cat.height },
+                cat.slug === 'spotify' && styles.spotifyPremiumCard
+              ]}
               onPress={() => onCategoryPress(cat.slug, cat.label)}
             >
               <MusicCover cover={cat.slug} style={StyleSheet.absoluteFill} showIcon={false} borderRadius={Radius.lg} />
@@ -369,25 +545,34 @@ const CategoriesView = React.memo(({
                 <Feather name={getCategoryIcon(cat.slug)} size={80} color="rgba(255, 255, 255, 0.05)" />
               </View>
               <View style={styles.bentoGradient}>
-                {cat.badge && (
+                {cat.slug === 'spotify' ? (
+                  <View style={styles.spotifyPremiumBadge}>
+                    <Feather name="award" size={10} color="#FFD166" />
+                    <Text style={styles.spotifyPremiumBadgeText}>VIP Premium</Text>
+                  </View>
+                ) : cat.badge ? (
                   <View style={styles.bentoBadge}>
                     <Text style={styles.bentoBadgeText}>{cat.badge}</Text>
                   </View>
-                )}
+                ) : null}
                 <View style={{ flex: 1 }} />
                 <View style={styles.bentoFooter}>
                   <Text numberOfLines={1} style={styles.bentoTitle}>{cat.label}</Text>
-                  <Text style={styles.bentoSubtitle}>{cat.subtitle}</Text>
+                  <Text style={[styles.bentoSubtitle, cat.slug === 'spotify' && { color: '#FFD166' }]}>{cat.subtitle}</Text>
                 </View>
               </View>
             </AnimatedPressable>
           ))}
         </View>
         <View style={styles.bentoColumn}>
-          {CATEGORIES_RIGHT_COL.map((cat) => (
+          {rightCol.map((cat) => (
             <AnimatedPressable
               key={cat.slug}
-              style={[styles.bentoCard, { height: cat.height }]}
+              style={[
+                styles.bentoCard,
+                { height: cat.height },
+                cat.slug === 'spotify' && styles.spotifyPremiumCard
+              ]}
               onPress={() => onCategoryPress(cat.slug, cat.label)}
             >
               <MusicCover cover={cat.slug} style={StyleSheet.absoluteFill} showIcon={false} borderRadius={Radius.lg} />
@@ -395,15 +580,20 @@ const CategoriesView = React.memo(({
                 <Feather name={getCategoryIcon(cat.slug)} size={80} color="rgba(255, 255, 255, 0.05)" />
               </View>
               <View style={styles.bentoGradient}>
-                {cat.badge && (
+                {cat.slug === 'spotify' ? (
+                  <View style={styles.spotifyPremiumBadge}>
+                    <Feather name="award" size={10} color="#FFD166" />
+                    <Text style={styles.spotifyPremiumBadgeText}>VIP Premium</Text>
+                  </View>
+                ) : cat.badge ? (
                   <View style={styles.bentoBadge}>
                     <Text style={styles.bentoBadgeText}>{cat.badge}</Text>
                   </View>
-                )}
+                ) : null}
                 <View style={{ flex: 1 }} />
                 <View style={styles.bentoFooter}>
                   <Text numberOfLines={1} style={styles.bentoTitle}>{cat.label}</Text>
-                  <Text style={styles.bentoSubtitle}>{cat.subtitle}</Text>
+                  <Text style={[styles.bentoSubtitle, cat.slug === 'spotify' && { color: '#FFD166' }]}>{cat.subtitle}</Text>
                 </View>
               </View>
             </AnimatedPressable>
@@ -448,6 +638,616 @@ const ListViewSearchBar = React.memo(({ onSearchChange }: { onSearchChange: (q: 
 });
 ListViewSearchBar.displayName = 'ListViewSearchBar';
 
+const SPOTIFY_CACHE_FILE = new File(Paths.document, 'spotify_playlist_cache.json');
+let spotifyPlaylistCache: Record<string, any[]> = {};
+
+const SpotifyListView = React.memo(({
+  onGoBack,
+  onTrackPress,
+  onSettingsPress,
+  onShowQueue,
+}: {
+  onGoBack: () => void;
+  onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string) => void;
+  onSettingsPress: () => void;
+  onShowQueue: () => void;
+}) => {
+  const {
+    playlists: spotifyPlaylists,
+    loadPlaylists: loadSpotifyPlaylists,
+    search: searchSpotify,
+    isConnected,
+  } = useSpotify();
+  const { currentTrack, isPlaying } = useMusic();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<any | null>(null);
+  const [playlistTracks, setPlaylistTracks] = useState<any[]>([]);
+  const [loadingPlaylist, setLoadingPlaylist] = useState(false);
+  const [recentPlaylists, setRecentPlaylists] = useState<Record<string, number>>({});
+  const [refreshingPlaylists, setRefreshingPlaylists] = useState(false);
+
+  const sortedPlaylists = useMemo(() => {
+    return [...spotifyPlaylists].sort((a, b) => {
+      const timeA = recentPlaylists[a.id] || 0;
+      const timeB = recentPlaylists[b.id] || 0;
+      return timeB - timeA;
+    });
+  }, [spotifyPlaylists, recentPlaylists]);
+
+  const isPlaylistActive = useCallback((playlistId: string) => {
+    if (!currentTrack || !currentTrack.id.startsWith('spotify_')) {
+      return false;
+    }
+    const cachedTracks = spotifyPlaylistCache[playlistId];
+    if (!cachedTracks) return false;
+
+    const rawCurrentTrackId = currentTrack.id.replace('spotify_', '');
+    return cachedTracks.some((t: any) => t.id === rawCurrentTrackId);
+  }, [currentTrack]);
+
+  // Load cache on mount
+  useEffect(() => {
+    const loadCache = async () => {
+      try {
+        if (SPOTIFY_CACHE_FILE.exists) {
+          const content = await SPOTIFY_CACHE_FILE.text();
+          if (content) {
+            spotifyPlaylistCache = JSON.parse(content);
+          }
+        }
+      } catch (err) {
+        console.warn('[SpotifyListView] Failed to load Spotify playlist cache:', err);
+      }
+    };
+    const loadRecents = async () => {
+      try {
+        const SecureStore = require('expo-secure-store');
+        const saved = await SecureStore.getItemAsync('moodmap_recent_playlists');
+        if (saved) {
+          setRecentPlaylists(JSON.parse(saved));
+        }
+      } catch (e) {
+        console.warn('[SpotifyListView] Failed to load recent playlists:', e);
+      }
+    };
+    loadCache();
+    loadRecents();
+  }, []);
+
+  // Indicator helper states & refs
+  const scrollYShared = useSharedValue(0);
+  const isScrollingShared = useSharedValue(false);
+  const [listHeight, setListHeight] = useState(0);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleScroll = useCallback((event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    scrollYShared.value = y;
+
+    isScrollingShared.value = true;
+
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+
+    scrollTimeoutRef.current = setTimeout(() => {
+      isScrollingShared.value = false;
+    }, 400);
+  }, [scrollYShared, isScrollingShared]);
+
+  const handleLayout = useCallback((event: any) => {
+    setListHeight(event.nativeEvent.layout.height);
+  }, []);
+
+  const currentPlayingIndex = useMemo(() => {
+    if (!currentTrack) return -1;
+    return playlistTracks.findIndex(t => 'spotify_' + t.id === currentTrack.id);
+  }, [currentTrack, playlistTracks]);
+
+  const getItemLayout = useCallback((data: any, index: number) => ({
+    length: 68 + 8, // item height (68) + gap (8)
+    offset: (68 + 8) * index,
+    index,
+  }), []);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
+  const handleRefreshPlaylists = useCallback(async () => {
+    setRefreshingPlaylists(true);
+    try {
+      await loadSpotifyPlaylists();
+    } catch (e) {
+      console.warn('[SpotifyListView] Refresh playlists failed:', e);
+    } finally {
+      setRefreshingPlaylists(false);
+    }
+  }, [loadSpotifyPlaylists]);
+
+  useEffect(() => {
+    if (isConnected) {
+      loadSpotifyPlaylists();
+    }
+  }, [isConnected]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 450);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!debouncedQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setLoading(true);
+    searchSpotify(debouncedQuery)
+      .then((res) => {
+        setSearchResults(res || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [debouncedQuery, searchSpotify]);
+
+  const handlePlaylistSelect = useCallback(async (playlist: any) => {
+    setSelectedPlaylist(playlist);
+
+    // Check in-memory cache
+    const cachedTracks = spotifyPlaylistCache[playlist.id];
+    if (cachedTracks && cachedTracks.length > 0) {
+      setPlaylistTracks(cachedTracks);
+      setLoadingPlaylist(false);
+      return;
+    }
+
+    setLoadingPlaylist(true);
+    try {
+      const { useTierStore } = require('../stores/tierStore');
+      const token = await useTierStore.getState().getValidAccessToken();
+      if (token) {
+        const { getPlaylistTracks } = require('../services/spotify');
+        const tracks = await getPlaylistTracks(token, playlist.id);
+        const tracksList = tracks || [];
+
+        // Cache the results permanently
+        spotifyPlaylistCache[playlist.id] = tracksList;
+        try {
+          await SPOTIFY_CACHE_FILE.write(JSON.stringify(spotifyPlaylistCache));
+        } catch (saveErr) {
+          console.warn('[SpotifyListView] Failed to write Spotify cache file:', saveErr);
+        }
+
+        setPlaylistTracks(tracksList);
+      }
+    } catch (e) {
+      console.warn('[SpotifyListView] Failed to load playlist tracks:', e);
+    } finally {
+      setLoadingPlaylist(false);
+    }
+  }, []);
+
+  const handleRefreshPlaylist = useCallback(async (playlist: any) => {
+    if (!playlist) return;
+    setLoadingPlaylist(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const { useTierStore } = require('../stores/tierStore');
+      const token = await useTierStore.getState().getValidAccessToken();
+      if (token) {
+        const { getPlaylistTracks } = require('../services/spotify');
+        // Fetch fresh tracks (limit defaults to 500 now in getPlaylistTracks)
+        const tracks = await getPlaylistTracks(token, playlist.id);
+        const tracksList = tracks || [];
+
+        // Overwrite local cache with the new, fully paginated list
+        spotifyPlaylistCache[playlist.id] = tracksList;
+        try {
+          await SPOTIFY_CACHE_FILE.write(JSON.stringify(spotifyPlaylistCache));
+        } catch (saveErr) {
+          console.warn('[SpotifyListView] Failed to write Spotify cache file:', saveErr);
+        }
+
+        setPlaylistTracks(tracksList);
+      }
+    } catch (e) {
+      console.warn('[SpotifyListView] Failed to refresh playlist tracks:', e);
+    } finally {
+      setLoadingPlaylist(false);
+    }
+  }, []);
+
+  const convertSpotifyTrackToTrack = useCallback((st: any): Track => {
+    return {
+      id: 'spotify_' + st.id,
+      title: st.name,
+      artist: st.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
+      url: st.uri,
+      cover: spotifyGetBestImage(st.album?.images || [], 300) ?? '',
+      duration: spotifyFormatDur(st.duration_ms),
+      durationSec: Math.floor(st.duration_ms / 1000),
+      category: 'spotify',
+    };
+  }, []);
+
+  const handleTrackPressItem = useCallback((track: any, list: any[], isShuffle?: boolean, contextUri?: string, offsetUri?: string) => {
+    const convertedTrack = convertSpotifyTrackToTrack(track);
+    const convertedList = list.map(convertSpotifyTrackToTrack);
+    onTrackPress(convertedTrack, convertedList, isShuffle, contextUri, offsetUri);
+
+    // Save to recents map only when a track is actually played from a playlist
+    if (selectedPlaylist) {
+      try {
+        const now = Date.now();
+        setRecentPlaylists((prev) => {
+          const updated = { ...prev, [selectedPlaylist.id]: now };
+          const SecureStore = require('expo-secure-store');
+          SecureStore.setItemAsync('moodmap_recent_playlists', JSON.stringify(updated)).catch((err: any) => {
+            console.warn('[SpotifyListView] Failed to save recent playlist interaction:', err);
+          });
+          return updated;
+        });
+      } catch (e) {
+        console.warn('[SpotifyListView] Failed to save recent playlist interaction:', e);
+      }
+    }
+  }, [convertSpotifyTrackToTrack, onTrackPress, selectedPlaylist]);
+
+  const handleShufflePlay = useCallback(() => {
+    if (playlistTracks.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // Create a copy and shuffle using Fisher-Yates algorithm
+    const shuffled = [...playlistTracks];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    // Play native Spotify playlist context with shuffle enabled, starting with the first track as offset
+    const contextUri = selectedPlaylist ? `spotify:playlist:${selectedPlaylist.id}` : undefined;
+    handleTrackPressItem(shuffled[0], shuffled, true, contextUri, shuffled[0].uri);
+  }, [playlistTracks, handleTrackPressItem, selectedPlaylist]);
+
+  const renderSpotifyTrackItem = useCallback(({ item, index }: { item: any; index: number }) => {
+    const isCurrent = currentTrack?.id === 'spotify_' + item.id;
+    return (
+      <GlassCard
+        intensity="subtle"
+        padding="none"
+        style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
+        onPress={() => {
+          const contextUri = selectedPlaylist ? `spotify:playlist:${selectedPlaylist.id}` : undefined;
+          handleTrackPressItem(item, playlistTracks, false, contextUri, item.uri);
+        }}
+      >
+        <View style={styles.trackItemInner}>
+          <Image
+            source={item.album?.images?.[0]?.url ? { uri: item.album.images[0].url } : undefined}
+            style={[styles.trackCover, { borderRadius: 20 }]}
+          />
+          <View style={styles.trackDetails}>
+            <Text numberOfLines={1} style={[styles.trackName, isCurrent && styles.activeTrackText]}>
+              {item.name}
+            </Text>
+            <Text numberOfLines={1} style={styles.trackArtist}>
+              {item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist'}
+            </Text>
+          </View>
+          <View style={styles.trackActions}>
+            <Text style={styles.trackDuration}>
+              {Math.floor(item.duration_ms / 60000)}:
+              {String(Math.floor((item.duration_ms % 60000) / 1000)).padStart(2, '0')}
+            </Text>
+          </View>
+        </View>
+      </GlassCard>
+    );
+  }, [currentTrack?.id, playlistTracks, handleTrackPressItem]);
+
+  return (
+    <View style={{ flex: 1 }}>
+      {/* Navigation Header */}
+      <View style={styles.navigationHeader}>
+        <View style={styles.absoluteTitleContainer} pointerEvents="none">
+          <Text style={styles.navigationTitleText} numberOfLines={1}>
+            {selectedPlaylist ? selectedPlaylist.name : "Spotify Library"}
+          </Text>
+        </View>
+
+        <View style={{ width: 96, alignItems: 'flex-start' }}>
+          <Pressable
+            style={styles.closeBtn}
+            onPress={selectedPlaylist ? () => setSelectedPlaylist(null) : onGoBack}
+          >
+            <Feather name="chevron-left" size={24} color={Colors.text.primary} />
+          </Pressable>
+        </View>
+
+        <View style={{ width: 96, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: Spacing.sm }}>
+          {selectedPlaylist && (
+            <Pressable
+              style={styles.closeBtn}
+              onPress={() => handleRefreshPlaylist(selectedPlaylist)}
+              disabled={loadingPlaylist}
+            >
+              {loadingPlaylist ? (
+                <ActivityIndicator size="small" color="#1DB954" />
+              ) : (
+                <Feather name="refresh-cw" size={18} color="#1DB954" />
+              )}
+            </Pressable>
+          )}
+          <Pressable style={styles.closeBtn} onPress={onSettingsPress}>
+            <Feather name="settings" size={20} color="#1DB954" />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Spotify Custom Search Bar */}
+      <View style={[styles.searchBar, { borderColor: 'rgba(30, 215, 96, 0.2)', borderWidth: 1 }]}>
+        <Feather name="search" size={16} color="rgba(255,255,255,0.4)" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search Spotify tracks..."
+          placeholderTextColor="rgba(255,255,255,0.4)"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+            <Feather name="x" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
+          </Pressable>
+        )}
+      </View>
+
+      {selectedPlaylist ? (
+        /* Playlist detail list view */
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-between', gap: 8, paddingHorizontal: Spacing.sm, marginBottom: Spacing.md }}>
+            {/* Playlists Back Button */}
+            <View style={{ flex: 1 }}>
+              <Pressable
+                style={{
+                  width: '100%',
+                  height: 38,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: Radius.md,
+                  gap: 6,
+                }}
+                onPress={() => setSelectedPlaylist(null)}
+              >
+                <Feather name="arrow-left" size={14} color="#000000" />
+                <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+                  Playlists
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* Current Queue List Button */}
+            <View style={{ flex: 1 }}>
+              <Pressable
+                style={{
+                  width: '100%',
+                  height: 38,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#A3E635',
+                  borderRadius: Radius.md,
+                  gap: 6,
+                }}
+                onPress={onShowQueue}
+              >
+                <Feather name="list" size={14} color="#000000" />
+                <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+                  Queue
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* Shuffle Play Button */}
+            <View style={{ flex: 1 }}>
+              <Pressable
+                style={{
+                  width: '100%',
+                  height: 38,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#1DB954',
+                  borderRadius: Radius.md,
+                  gap: 6,
+                  opacity: playlistTracks.length > 0 ? 1 : 0.5,
+                }}
+                onPress={handleShufflePlay}
+                disabled={playlistTracks.length === 0}
+              >
+                <Feather name="shuffle" size={14} color="#000000" />
+                <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+                  Shuffle
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {loadingPlaylist ? (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator size="large" color="#1DB954" />
+            </View>
+          ) : playlistTracks.length === 0 ? (
+            <View style={styles.centerContainer}>
+              <Feather name="music" size={48} color={Colors.text.secondary} />
+              <Text style={styles.emptyTracksTitle}>Empty Playlist</Text>
+              <Text style={styles.emptyTracksDesc}>No songs found in this Spotify playlist.</Text>
+            </View>
+          ) : (
+            <View style={{ flex: 1, position: 'relative' }} onLayout={handleLayout}>
+              <FlatList
+                data={playlistTracks}
+                keyExtractor={(item, index) => `${item.id}-${index}`}
+                renderItem={renderSpotifyTrackItem}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.listScroll}
+                initialNumToRender={15}
+                maxToRenderPerBatch={15}
+                windowSize={10}
+                getItemLayout={getItemLayout}
+                removeClippedSubviews={true}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+              />
+              <PlayingSongIndicator
+                scrollY={scrollYShared}
+                currentPlayingIndex={currentPlayingIndex}
+                isScrolling={isScrollingShared}
+                listHeight={listHeight}
+              />
+            </View>
+          )}
+        </View>
+      ) : searchQuery.trim() ? (
+        /* Spotify Search Results list view */
+        <View style={{ flex: 1 }}>
+          {loading ? (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator size="large" color="#1DB954" />
+            </View>
+          ) : searchResults.length === 0 ? (
+            <View style={styles.centerContainer}>
+              <Feather name="search" size={48} color={Colors.text.secondary} />
+              <Text style={styles.emptyTracksTitle}>No tracks found</Text>
+              <Text style={styles.emptyTracksDesc}>Try searching for another song name.</Text>
+            </View>
+          ) : (
+            <ScrollView contentContainerStyle={styles.listScroll} showsVerticalScrollIndicator={false}>
+              {searchResults.map((item, idx) => {
+                const isCurrent = currentTrack?.id === 'spotify_' + item.id;
+                return (
+                  <GlassCard
+                    key={`${item.id}-${idx}`}
+                    intensity="subtle"
+                    padding="none"
+                    style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
+                    onPress={() => handleTrackPressItem(item, searchResults, false, undefined, item.uri)}
+                    disablePressAnimation
+                  >
+                    <View style={styles.trackItemInner}>
+                      <Image
+                        source={item.album?.images?.[0]?.url ? { uri: item.album.images[0].url } : undefined}
+                        style={[styles.trackCover, { borderRadius: 20 }]}
+                      />
+                      <View style={styles.trackDetails}>
+                        <Text numberOfLines={1} style={[styles.trackName, isCurrent && styles.activeTrackText]}>
+                          {item.name}
+                        </Text>
+                        <Text numberOfLines={1} style={styles.trackArtist}>
+                          {item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown'}
+                        </Text>
+                      </View>
+                      <View style={styles.trackActions}>
+                        <Text style={styles.trackDuration}>
+                          {Math.floor(item.duration_ms / 60000)}:
+                          {String(Math.floor((item.duration_ms % 60000) / 1000)).padStart(2, '0')}
+                        </Text>
+                      </View>
+                    </View>
+                  </GlassCard>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+      ) : (
+        /* Playlists Grid View */
+        <ScrollView
+          contentContainerStyle={styles.listScroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshingPlaylists}
+              onRefresh={handleRefreshPlaylists}
+              tintColor="#1DB954"
+              colors={['#1DB954']}
+            />
+          }
+        >
+          <Text style={[styles.cardTitleSm, { marginBottom: Spacing.md, marginLeft: Spacing.xs }]}>
+            Your Playlists
+          </Text>
+          {sortedPlaylists.length === 0 ? (
+            <View style={[styles.centerContainer, { paddingVertical: Spacing.section }]}>
+              <Feather name="folder" size={40} color={Colors.text.secondary} />
+              <Text style={styles.emptyTracksTitle}>No Playlists Found</Text>
+              <Text style={styles.emptyTracksDesc}>Check back after creating playlists on Spotify.</Text>
+            </View>
+          ) : (
+            sortedPlaylists.map(pl => {
+              const isActive = isPlaylistActive(pl.id);
+              const hasImage = pl.images?.[0]?.url;
+              return (
+                <GlassCard
+                  key={pl.id}
+                  onPress={() => handlePlaylistSelect(pl)}
+                  intensity={isActive ? "strong" : "subtle"}
+                  padding="none"
+                  style={[
+                    styles.playlistItemCard,
+                    isActive && styles.activePlaylistItemCard
+                  ]}
+                >
+                  <View style={styles.playlistItemInner}>
+                    {hasImage ? (
+                      <Image
+                        source={{ uri: hasImage }}
+                        style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                      />
+                    ) : (
+                      <View style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
+                        <Feather name="music" size={20} color="rgba(255,255,255,0.3)" />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.playlistItemName, isActive && styles.activePlaylistItemName]}>{pl.name}</Text>
+                      <Text style={[styles.playlistItemCount, isActive && styles.activePlaylistItemCount]}>
+                        {isActive ? (isPlaying ? 'Playing • ' : 'Paused • ') : ''}
+                        {(pl.tracks?.total ?? pl.items?.total ?? 0)} tracks
+                      </Text>
+                    </View>
+                    {isActive ? (
+                      <Feather
+                        name={isPlaying ? "volume-2" : "pause"}
+                        size={16}
+                        color="#1DB954"
+                      />
+                    ) : (
+                      <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.4)" />
+                    )}
+                  </View>
+                </GlassCard>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
+    </View>
+  );
+});
+SpotifyListView.displayName = 'SpotifyListView';
+
 const PlayingSongIndicator = React.memo(({
   scrollY,
   currentPlayingIndex,
@@ -477,31 +1277,31 @@ const PlayingSongIndicator = React.memo(({
 
     const currentScrollY = scrollY.value;
     const isScrollActive = isScrolling.value;
-    
+
     const hasMiniPlayer = !!currentTrack;
     // Calculate the actual visible viewport height, taking the mini player into account
     // miniPlayer is at bottom: Math.max(insets.bottom, 16), has height ~60, plus 16px safe buffer
-    const miniPlayerHeight = hasMiniPlayer 
+    const miniPlayerHeight = hasMiniPlayer
       ? Math.max(insets.bottom, 16) + 60 + 16
       : 0;
     const visibleViewportHeight = listHeight - miniPlayerHeight;
-    
+
     // Check if the playing track is above or below the visible viewport
     const isAbove = itemBottomY < currentScrollY;
     const isBelow = itemY > currentScrollY + visibleViewportHeight;
     const isOutOfView = isAbove || isBelow;
-    
+
     // Determine target opacity: show only when scrolling and track is out of view
     const targetOpacity = (isScrollActive && isOutOfView) ? 1 : 0;
-    
+
     // Position the arrow: top of list if track is above, bottom of list if track is below
-    const targetTranslateY = isAbove 
-      ? 12 
+    const targetTranslateY = isAbove
+      ? 12
       : (isBelow ? visibleViewportHeight - 76 : listHeight / 2);
-      
+
     // Rotation: 0 deg (pointing UP) if above, 180 deg (pointing DOWN) if below
     const targetRotation = isAbove ? '0deg' : '180deg';
-    
+
     return {
       opacity: withTiming(targetOpacity, { duration: 150 }),
       transform: [
@@ -532,6 +1332,7 @@ const ListView = React.memo(({
   onMorePress,
   sortBy,
   setShowSortMenu,
+  onShowQueue,
 }: {
   category: string;
   categoryLabel: string;
@@ -540,6 +1341,7 @@ const ListView = React.memo(({
   onMorePress: (track: Track, fromPlaylistId?: string) => void;
   sortBy: 'default' | 'titleAsc' | 'titleDesc' | 'dateNewest' | 'dateOldest';
   setShowSortMenu: (show: boolean) => void;
+  onShowQueue: () => void;
 }) => {
   const {
     currentTrack,
@@ -561,6 +1363,21 @@ const ListView = React.memo(({
   const [createPlaylistText, setCreatePlaylistText] = useState('');
   const [showCreatePrompt, setShowCreatePrompt] = useState(false);
 
+  const [localRefreshing, setLocalRefreshing] = useState(false);
+  const handleRefreshLocalPlaylist = useCallback(async () => {
+    setLocalRefreshing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      await scanLocalMusic();
+    } catch (e) {
+      console.warn('[ListView] Failed to scan local music on refresh:', e);
+    } finally {
+      setTimeout(() => {
+        setLocalRefreshing(false);
+      }, 700);
+    }
+  }, [scanLocalMusic]);
+
   // Indicator helper states & refs
   const scrollYShared = useSharedValue(0);
   const isScrollingShared = useSharedValue(false);
@@ -570,13 +1387,13 @@ const ListView = React.memo(({
   const handleScroll = useCallback((event: any) => {
     const y = event.nativeEvent.contentOffset.y;
     scrollYShared.value = y;
-    
+
     isScrollingShared.value = true;
-    
+
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
     }
-    
+
     scrollTimeoutRef.current = setTimeout(() => {
       isScrollingShared.value = false;
     }, 400);
@@ -659,15 +1476,15 @@ const ListView = React.memo(({
     }
 
     let tracks = [...getCategoryTracks(category)];
-    
+
     if (activeFilter === 'liked') {
       tracks = tracks.filter(t => favoritesSet.has(t.id));
     }
 
     if (debouncedSearchQuery.trim() !== '') {
       const q = debouncedSearchQuery.toLowerCase();
-      tracks = tracks.filter(t => 
-        t.title.toLowerCase().includes(q) || 
+      tracks = tracks.filter(t =>
+        t.title.toLowerCase().includes(q) ||
         t.artist.toLowerCase().includes(q)
       );
     }
@@ -682,7 +1499,7 @@ const ListView = React.memo(({
     } else if (sortBy === 'dateOldest') {
       tracks.sort((a, b) => (a.creationTime ?? 0) - (b.creationTime ?? 0));
     }
-    
+
     return tracks;
   }, [category, activeFilter, selectedPlaylist, playlists, favoritesSet, debouncedSearchQuery, getCategoryTracks, sortBy]);
 
@@ -728,18 +1545,33 @@ const ListView = React.memo(({
         {/* Absolute Centered Title */}
         <View style={styles.absoluteTitleContainer} pointerEvents="none">
           <Text style={styles.navigationTitleText} numberOfLines={1}>
-            {categoryLabel}
+            {activeFilter === 'playlist' && selectedPlaylist ? selectedPlaylist.name : categoryLabel}
           </Text>
         </View>
 
         <View style={{ width: 96, alignItems: 'flex-start' }}>
-          <Pressable style={styles.closeBtn} onPress={onGoBack}>
+          <Pressable
+            style={styles.closeBtn}
+            onPress={activeFilter === 'playlist' && selectedPlaylist ? () => setSelectedPlaylist(null) : onGoBack}
+          >
             <Feather name="chevron-left" size={24} color={Colors.text.primary} />
           </Pressable>
         </View>
-        
-        <View style={{ width: 96, alignItems: 'flex-end' }}>
-          {category === 'local' ? (
+
+        <View style={{ width: 96, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: Spacing.sm }}>
+          {activeFilter === 'playlist' && selectedPlaylist ? (
+            <Pressable
+              style={styles.closeBtn}
+              onPress={handleRefreshLocalPlaylist}
+              disabled={localRefreshing}
+            >
+              {localRefreshing ? (
+                <ActivityIndicator size="small" color={Colors.text.primary} />
+              ) : (
+                <Feather name="refresh-cw" size={18} color={Colors.text.primary} />
+              )}
+            </Pressable>
+          ) : category === 'local' ? (
             <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
               <Pressable
                 style={styles.closeBtn}
@@ -800,8 +1632,8 @@ const ListView = React.memo(({
       {activeFilter === 'playlist' && !selectedPlaylist ? (
         /* Playlists list view */
         <ScrollView contentContainerStyle={styles.listScroll} showsVerticalScrollIndicator={false}>
-          <Pressable 
-            style={styles.createPlaylistRowBtn} 
+          <Pressable
+            style={styles.createPlaylistRowBtn}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setShowCreatePrompt(true);
@@ -826,8 +1658,8 @@ const ListView = React.memo(({
                 autoFocus
               />
               <View style={styles.createPlaylistButtons}>
-                <Pressable 
-                  style={styles.createBtnCancel} 
+                <Pressable
+                  style={styles.createBtnCancel}
                   onPress={() => {
                     setShowCreatePrompt(false);
                     setCreatePlaylistText('');
@@ -835,7 +1667,7 @@ const ListView = React.memo(({
                 >
                   <Text style={{ color: 'rgba(255,255,255,0.6)', fontFamily: Fonts.bodySemiBold }}>Cancel</Text>
                 </Pressable>
-                <Pressable 
+                <Pressable
                   style={styles.createBtnConfirm}
                   onPress={async () => {
                     if (createPlaylistText.trim()) {
@@ -859,14 +1691,14 @@ const ListView = React.memo(({
             </View>
           ) : (
             playlists.map(pl => (
-              <GlassCard 
-                key={pl.id} 
+              <GlassCard
+                key={pl.id}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setSelectedPlaylist(pl);
-                }} 
-                intensity="subtle" 
-                padding="none" 
+                }}
+                intensity="subtle"
+                padding="none"
                 style={styles.playlistItemCard}
               >
                 <View style={styles.playlistItemInner}>
@@ -877,12 +1709,12 @@ const ListView = React.memo(({
                     <Text style={styles.playlistItemName}>{pl.name}</Text>
                     <Text style={styles.playlistItemCount}>{pl.tracks.length} tracks</Text>
                   </View>
-                  <Pressable 
+                  <Pressable
                     onPress={(e) => {
                       e.stopPropagation();
                       deletePlaylist(pl.id);
-                    }} 
-                    hitSlop={12} 
+                    }}
+                    hitSlop={12}
                     style={styles.playlistDeleteBtn}
                   >
                     <Feather name="trash-2" size={16} color="rgba(255,255,255,0.4)" />
@@ -896,26 +1728,79 @@ const ListView = React.memo(({
         /* Standard Track list view or Playlist details view */
         <View style={{ flex: 1 }}>
           {activeFilter === 'playlist' && selectedPlaylist && (
-            <View style={styles.playlistHeaderRow}>
-              <Pressable style={styles.playlistBackBtn} onPress={() => setSelectedPlaylist(null)}>
-                <Feather name="arrow-left" size={16} color={Colors.text.primary} />
-                <Text style={styles.playlistBackText}>Playlists</Text>
-              </Pressable>
-              
-              <Text style={styles.playlistTitleLabel} numberOfLines={1}>{selectedPlaylist.name}</Text>
-              
-              {tracksListToRender.length > 0 && (
-                <Pressable 
-                  style={styles.playlistPlayAllBtn} 
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    onTrackPress(tracksListToRender[0], tracksListToRender);
+            <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-between', gap: 8, paddingHorizontal: Spacing.sm, marginBottom: Spacing.md }}>
+              {/* Playlists Back Button */}
+              <View style={{ flex: 1 }}>
+                <Pressable
+                  style={{
+                    width: '100%',
+                    height: 38,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: Radius.md,
+                    gap: 6,
                   }}
+                  onPress={() => setSelectedPlaylist(null)}
                 >
-                  <Feather name="play" size={12} color="#0A0A0C" />
-                  <Text style={styles.playlistPlayAllText}>Play All</Text>
+                  <Feather name="arrow-left" size={14} color="#000000" />
+                  <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+                    Playlists
+                  </Text>
                 </Pressable>
-              )}
+              </View>
+
+              {/* Current Queue List Button */}
+              <View style={{ flex: 1 }}>
+                <Pressable
+                  style={{
+                    width: '100%',
+                    height: 38,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: '#A3E635',
+                    borderRadius: Radius.md,
+                    gap: 6,
+                  }}
+                  onPress={onShowQueue}
+                >
+                  <Feather name="list" size={14} color="#000000" />
+                  <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+                    Queue
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Play All Button */}
+              <View style={{ flex: 1 }}>
+                <Pressable
+                  style={{
+                    width: '100%',
+                    height: 38,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: Colors.accent.primary,
+                    borderRadius: Radius.md,
+                    gap: 6,
+                    opacity: tracksListToRender.length > 0 ? 1 : 0.5,
+                  }}
+                  onPress={() => {
+                    if (tracksListToRender.length > 0) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      onTrackPress(tracksListToRender[0], tracksListToRender);
+                    }
+                  }}
+                  disabled={tracksListToRender.length === 0}
+                >
+                  <Feather name="play" size={14} color="#000000" />
+                  <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+                    Play All
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
@@ -996,10 +1881,8 @@ const ListView = React.memo(({
 });
 ListView.displayName = 'ListView';
 
-// Waveform heights pattern matching the beautiful UI
-const WAVEFORM_PATTERN = [
-  6, 8, 12, 16, 20, 14, 10, 12, 18, 24, 30, 26, 18, 14, 18, 24, 32, 40, 44, 38, 28, 20, 14, 18, 26, 36, 46, 52, 44, 32, 22, 16, 12, 16, 22, 28, 34, 28, 20, 14, 10, 8, 12, 16, 10, 6
-];
+// Waveform heights pattern
+const WAVEFORM_PATTERN = [6, 8, 12, 16, 20, 24, 20, 16, 12, 8, 6];
 
 const WaveformTimeline = React.memo(({
   isPlaying,
@@ -1013,9 +1896,12 @@ const WaveformTimeline = React.memo(({
   seekTo: (seconds: number) => void;
 }) => {
   const { currentTime, duration } = usePlaybackTime();
+
   const [barWidth, setBarWidth] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubPercent, setScrubPercent] = useState<number | null>(null);
+
+
 
   // We use refs to avoid stale PanResponder closures:
   const seekStateRef = useRef({
@@ -1119,20 +2005,20 @@ const WaveformTimeline = React.memo(({
       <View style={styles.timeLabelRowContainer}>
         <View style={styles.timeLabelRow}>
           <Text style={[styles.timeLabel, { textAlign: 'left' }]}>{formatTime(displayTime)}</Text>
-          
+
           {/* Tappable, Scrubbable Progress Bar */}
-          <View 
-            style={styles.progressBarWrapper} 
+          <View
+            style={styles.progressBarWrapper}
             onLayout={onBarLayout}
             {...panResponder.panHandlers}
           >
             <View style={styles.progressBarTrack}>
               <View style={[styles.progressBarFill, { width: `${activePercent * 100}%` }]} />
               {isScrubbing && (
-                <View 
+                <View
                   style={[
-                    styles.progressBarThumb, 
-                    { 
+                    styles.progressBarThumb,
+                    {
                       left: `${activePercent * 100}%`,
                       transform: [{ translateX: -6 }]
                     }
@@ -1179,28 +2065,72 @@ const PlayerView = React.memo(({
     cyclePlaybackMode,
   } = useMusic();
 
+  const { nowPlaying, refreshNowPlaying } = useSpotify();
+  const isSpotify = currentTrack?.category === 'spotify';
+  const isTrackPlaying = isPlaying;
+
+  // Sync / Refresh Spotify state immediately when the track ID changes
+  useEffect(() => {
+    if (isSpotify && currentTrack?.id) {
+      refreshNowPlaying();
+      const timer = setTimeout(() => {
+        refreshNowPlaying();
+      }, 750);
+      return () => clearTimeout(timer);
+    }
+  }, [isSpotify, currentTrack?.id, refreshNowPlaying]);
+
+  // Fast-responding button press handlers
+  const handlePlayPausePress = useCallback(async () => {
+    if (isTrackPlaying) {
+      await pause();
+    } else {
+      await resume();
+    }
+    // Perform a fast refresh after 500ms
+    setTimeout(() => {
+      refreshNowPlaying();
+    }, 500);
+  }, [isTrackPlaying, pause, resume, refreshNowPlaying]);
+
+  const handleNextPress = useCallback(async () => {
+    await next();
+    // Perform a fast refresh after 500ms
+    setTimeout(() => {
+      refreshNowPlaying();
+    }, 500);
+  }, [next, refreshNowPlaying]);
+
+  const handlePrevPress = useCallback(async () => {
+    await prev();
+    // Perform a fast refresh after 500ms
+    setTimeout(() => {
+      refreshNowPlaying();
+    }, 500);
+  }, [prev, refreshNowPlaying]);
+
   const insets = useSafeAreaInsets();
 
 
   // Artwork rotation animation
   const rotation = useSharedValue(0);
   useEffect(() => {
-    if (isPlaying && isPlayerActive) {
+    if (isTrackPlaying && isPlayerActive) {
       rotation.value = rotation.value % 360;
       rotation.value = withRepeat(
-        withTiming(rotation.value + 360, { duration: 15000, easing: Easing.linear }),
+        withTiming(rotation.value + 360, { duration: 35000, easing: Easing.linear }),
         -1,
         false
       );
     } else {
       cancelAnimation(rotation);
     }
-  }, [isPlaying, isPlayerActive, rotation]);
+  }, [isTrackPlaying, isPlayerActive, rotation]);
 
   const rotatedArtworkStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
-
+  const palette = useMemo(() => getTrackColorPalette(currentTrack), [currentTrack]);
   if (!currentTrack) return null;
 
   const isCurrentFav = favorites.includes(currentTrack.id);
@@ -1229,38 +2159,89 @@ const PlayerView = React.memo(({
         </Pressable>
       </View>
 
-      {/* Large Centered Rotating Artwork circle */}
+      {/* Large Centered Rotating Vinyl Disc with Center Sticker Cover */}
       <View style={styles.playerArtworkSection}>
         <View style={styles.playerArtworkWrapper}>
-          {/* Smooth SVG rings to prevent Android jagged polygon bug */}
-          <Svg width={260} height={260} style={StyleSheet.absoluteFill}>
-            {/* Outer ring */}
-            <Circle
-              cx={130}
-              cy={130}
-              r={128}
-              stroke="rgba(255, 255, 255, 0.08)"
-              strokeWidth={1}
-              fill="rgba(255, 255, 255, 0.03)"
-            />
-            {/* Inner ring */}
-            <Circle
-              cx={130}
-              cy={130}
-              r={118}
-              stroke="rgba(255, 255, 255, 0.16)"
-              strokeWidth={1}
-              fill="rgba(255, 255, 255, 0.02)"
-            />
-          </Svg>
+          {/* Rotating Vinyl Disc Frame */}
+          <Animated.View style={[{ width: 240, height: 240, position: 'relative' }, rotatedArtworkStyle]} renderToHardwareTextureAndroid={true}>
+            {/* The Svg Vinyl Disc */}
+            <Svg viewBox="0 0 400 400" width="100%" height="100%">
+              <Defs>
+                {/* Cutout mask to create standard vinyl grooves */}
+                <Mask id="grooves">
+                  <Rect width="400" height="400" fill="white" />
+                  <Circle cx={200} cy={200} r={170} fill="black" />
+                  <Circle cx={200} cy={200} r={150} fill="white" />
+                  <Circle cx={200} cy={200} r={145} fill="black" />
+                  <Circle cx={200} cy={200} r={130} fill="white" />
+                  <Circle cx={200} cy={200} r={125} fill="black" />
+                  <Circle cx={200} cy={200} r={110} fill="white" />
+                  <Circle cx={200} cy={200} r={105} fill="black" />
+                  <Circle cx={200} cy={200} r={90} fill="white" />
+                  <Circle cx={200} cy={200} r={85} fill="black" />
+                  <Circle cx={200} cy={200} r={70} fill="white" />
+                </Mask>
+              </Defs>
 
-          <Animated.View style={[styles.playerArtworkImage, rotatedArtworkStyle, { overflow: 'hidden' }]}>
-            <MusicCover
-              cover={currentTrack.cover}
-              style={styles.playerArtworkImageStyle}
-              iconSize={64}
-              borderRadius={110}
-            />
+              {/* Outer Vinyl Body */}
+              <G>
+                {/* Outer shiny edge */}
+                <Circle cx={200} cy={200} r={200} fill="#111111" />
+                <Circle cx={200} cy={200} r={190} fill="#0A0A0A" />
+
+                {/* Thin lime ring on the outer record body */}
+                <Circle cx={200} cy={200} r={186} fill="none" stroke="#8DE91D" strokeWidth={1} opacity={0.35} />
+
+                {/* Grooves (Applied via Mask) */}
+                <Circle cx={200} cy={200} r={180} fill="#2c2c2c" mask="url(#grooves)" />
+
+                {/* Record Label Accent Rings (App themed Lime green rings around the sticker) */}
+                <Circle cx={200} cy={200} r={114} fill="none" stroke="#8DE91D" strokeWidth={2} opacity={0.8} />
+                <Circle cx={200} cy={200} r={108} fill="none" stroke="#8DE91D" strokeWidth={1} opacity={0.5} strokeDasharray="4,4" />
+
+                {/* Record Sticker Base Paper */}
+                <Circle cx={200} cy={200} r={100} fill="#1E1E24" />
+              </G>
+            </Svg>
+
+            {/* Circular Cover Art Sticker pasted on top of the Vinyl center */}
+            <View style={{
+              position: 'absolute',
+              width: 120,
+              height: 120,
+              borderRadius: 60,
+              top: 60,
+              left: 60,
+              overflow: 'hidden',
+              backgroundColor: '#1E1E24',
+            }}>
+              <MusicCover
+                cover={currentTrack.cover}
+                style={{ width: '100%', height: '100%' }}
+                iconSize={36}
+                borderRadius={60}
+              />
+            </View>
+
+            {/* Center Spindle Hole punched through the sticker */}
+            <View style={{
+              position: 'absolute',
+              width: 24,
+              height: 24,
+              borderRadius: 12,
+              top: 108,
+              left: 108,
+              backgroundColor: 'transparent',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }} pointerEvents="none">
+              <Svg width={24} height={24} viewBox="0 0 24 24">
+                {/* Center hole details */}
+                <Path d="M9 12 Q 12 9 15 12 Q 12 15 9 12" fill="#ffffff" opacity={0.25} />
+                <Circle cx={12} cy={12} r={6} fill="#111111" stroke="#FFFFFF" strokeWidth={1} />
+                <Circle cx={12} cy={12} r={2} fill="#000000" />
+              </Svg>
+            </View>
           </Animated.View>
         </View>
       </View>
@@ -1279,7 +2260,7 @@ const PlayerView = React.memo(({
 
         {/* Custom Interactive Waveform Timeline Progress & Timestamps */}
         <WaveformTimeline
-          isPlaying={isPlaying}
+          isPlaying={isTrackPlaying}
           isPlayerActive={isPlayerActive}
           currentTrack={currentTrack}
           seekTo={seekTo}
@@ -1324,13 +2305,13 @@ const PlayerView = React.memo(({
           </Pressable>
 
           {/* Previous */}
-          <Pressable onPress={prev} style={styles.playerSkipBtn} hitSlop={12}>
+          <Pressable onPress={handlePrevPress} style={styles.playerSkipBtn} hitSlop={12}>
             <Feather name="skip-back" size={24} color="#FFFFFF" />
           </Pressable>
 
           {/* Play/Pause */}
           <Pressable
-            onPress={isPlaying ? pause : resume}
+            onPress={handlePlayPausePress}
             style={styles.playerPlayBtn}
           >
             {/* Smooth SVG circle to prevent Android jagged polygon play button bug */}
@@ -1345,21 +2326,21 @@ const PlayerView = React.memo(({
               />
             </Svg>
             <Feather
-              name={isPlaying ? 'pause' : 'play'}
+              name={isTrackPlaying ? 'pause' : 'play'}
               size={28}
               color="#FFFFFF"
-              style={isPlaying ? undefined : { marginLeft: 3 }}
+              style={isTrackPlaying ? undefined : { marginLeft: 3 }}
             />
           </Pressable>
 
           {/* Next */}
-          <Pressable onPress={next} style={styles.playerSkipBtn} hitSlop={12}>
+          <Pressable onPress={handleNextPress} style={styles.playerSkipBtn} hitSlop={12}>
             <Feather name="skip-forward" size={24} color="#FFFFFF" />
           </Pressable>
 
           {/* Queue List (Navigates to Track List) */}
-          <Pressable 
-            onPress={onShowQueue} 
+          <Pressable
+            onPress={onShowQueue}
             style={styles.playerUtilityBtn}
             hitSlop={12}
           >
@@ -1395,7 +2376,7 @@ const QueueItem = React.memo(({
   onDragMove,
   onDragEnd,
 }: QueueItemProps) => {
-  // Use a ref to capture the latest props and index dynamically to prevent PanResponder stale closure bugs
+  // Ref to capture latest props for PanResponder closure safety
   const callbacksRef = useRef({ onDragStart, onDragMove, onDragEnd, index });
   callbacksRef.current = { onDragStart, onDragMove, onDragEnd, index };
 
@@ -1425,21 +2406,23 @@ const QueueItem = React.memo(({
       style={[
         styles.queueItemRow,
         isCurrent && styles.activeQueueItemRow,
+        {
+          // Only translateY for the dragged item
+          transform: isDragging
+            ? [{ translateY: dragY }]
+            : [],
+          zIndex: isDragging ? 999 : 1,
+          opacity: isDragging ? 0.92 : 1,
+        },
         isDragging && {
-          transform: [{ translateY: dragY }],
-          zIndex: 999,
-          backgroundColor: 'rgba(141, 233, 29, 0.12)',
+          backgroundColor: 'rgba(141, 233, 29, 0.10)',
           borderColor: 'rgba(141, 233, 29, 0.25)',
-          shadowColor: '#000000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.25,
-          shadowRadius: 8,
-          elevation: 6,
+          borderWidth: 1,
         },
       ]}
     >
       <MusicCover cover={track.cover} style={styles.queueItemCover} iconSize={12} borderRadius={6} />
-      
+
       <View style={{ flex: 1 }}>
         <Text numberOfLines={1} style={[styles.queueItemTitle, isCurrent && styles.activeQueueItemText]}>
           {track.title}
@@ -1459,11 +2442,79 @@ const QueueItem = React.memo(({
 QueueItem.displayName = 'QueueItem';
 
 const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
-  const { queue, currentTrack, currentIndex, setQueue } = useMusic();
-  
+  const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue } = useMusic();
+
+  const SCREEN_HEIGHT = Dimensions.get('window').height;
+  const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.5;
+  const MIN_SHEET_HEIGHT = 280;
+
+  // Reanimated shared value for height layout resizing on native UI thread
+  const sheetHeight = useSharedValue(340);
+  const startHeightRef = useRef(340);
+
+  const animatedCardStyle = useAnimatedStyle(() => {
+    return {
+      height: sheetHeight.value,
+    };
+  });
+
+  // Entrance and Exit Slide and Opacity anims
+  const slideAnim = useRef(new RNAnimated.Value(MAX_SHEET_HEIGHT + 40)).current;
+  const opacityAnim = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    RNAnimated.parallel([
+      RNAnimated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+      RNAnimated.spring(slideAnim, {
+        toValue: 0,
+        tension: 70,
+        friction: 12,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  const handleClose = useCallback(() => {
+    RNAnimated.parallel([
+      RNAnimated.timing(opacityAnim, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      RNAnimated.timing(slideAnim, {
+        toValue: MAX_SHEET_HEIGHT + 40,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      onClose();
+    });
+  }, [onClose]);
+
+  const dragBarPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 2,
+      onPanResponderGrant: () => {
+        startHeightRef.current = sheetHeight.value;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const newHeight = startHeightRef.current - gestureState.dy;
+        const clampedHeight = Math.max(MIN_SHEET_HEIGHT, Math.min(MAX_SHEET_HEIGHT, newHeight));
+        sheetHeight.value = clampedHeight; // Update shared value (runs on UI thread)
+      },
+      onPanResponderRelease: () => { },
+      onPanResponderTerminate: () => { },
+    })
+  ).current;
+
   const [localQueue, setLocalQueue] = useState<{ track: Track; key: string }[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  
+
   const flatListRef = useRef<FlatList>(null);
   const listContainerRef = useRef<View>(null);
   const scrollOffsetRef = useRef(0);
@@ -1471,19 +2522,25 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   const dragParamsRef = useRef({ dy: 0, moveY: 0 });
   const listMeasureRef = useRef({ pageY: 0, height: 400 });
   const autoScrollTimerRef = useRef<any>(null);
-  
+
   const stateRef = useRef({ localQueue, draggedIndex, currentIndex, currentTrack });
   stateRef.current = { localQueue, draggedIndex, currentIndex, currentTrack };
 
-  // Sync queue to local state (only when not dragging)
+  const isInternalChangeRef = useRef(false);
+
+  // Sync queue to local state (only on external queue changes, skip during drag)
   useEffect(() => {
-    if (draggedIndex === null) {
-      setLocalQueue(queue.map((track, idx) => ({
-        track,
-        key: `${track.id}_${idx}`
-      })));
+    if (isInternalChangeRef.current) {
+      isInternalChangeRef.current = false;
+      return;
     }
-  }, [queue, draggedIndex]);
+    // Skip syncing during an active drag to prevent data array replacement mid-gesture
+    if (stateRef.current.draggedIndex !== null) return;
+    setLocalQueue(queue.map((track, idx) => ({
+      track,
+      key: `${track.id}_${idx}`
+    })));
+  }, [queue]);
 
   const measureList = useCallback(() => {
     listContainerRef.current?.measure((x, y, width, height, pageX, pageY) => {
@@ -1551,34 +2608,42 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
 
     const { draggedIndex: activeIdx, localQueue: activeQueue } = stateRef.current;
     if (activeIdx === null) return;
-    
+
     const itemHeight = 64;
-    const swapThreshold = itemHeight * 0.55;
-    
+    const swapThreshold = itemHeight * 0.5;
     const scrollDelta = scrollOffsetRef.current - initialScrollOffsetRef.current;
     const relativeDy = dy + scrollDelta;
     const currentDisplacement = relativeDy - dragOffsetRef.current;
+
+    // Update the dragged item's visual position
     dragYVal.setValue(currentDisplacement);
 
+    // Check if we should swap with the neighbor below
     if (currentDisplacement > swapThreshold && activeIdx < activeQueue.length - 1) {
       const nextIdx = activeIdx + 1;
       const updated = [...activeQueue];
       [updated[activeIdx], updated[nextIdx]] = [updated[nextIdx], updated[activeIdx]];
 
+      // Update refs synchronously BEFORE React render so next move event reads correct state
       stateRef.current.localQueue = updated;
       stateRef.current.draggedIndex = nextIdx;
 
+      // LayoutAnimation affects ONLY non-dragged items
       LayoutAnimation.configureNext({
-        duration: 180,
+        duration: 200,
         update: { type: LayoutAnimation.Types.easeInEaseOut },
       });
 
       setLocalQueue(updated);
       setDraggedIndex(nextIdx);
+
+      // Adjust offset so the dragged item doesn't jump when its index changes
       dragOffsetRef.current += itemHeight;
-      dragYVal.setValue(currentDisplacement - itemHeight);
+
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } else if (currentDisplacement < -swapThreshold && activeIdx > 0) {
+    }
+    // Check if we should swap with the neighbor above
+    else if (currentDisplacement < -swapThreshold && activeIdx > 0) {
       const prevIdx = activeIdx - 1;
       const updated = [...activeQueue];
       [updated[activeIdx], updated[prevIdx]] = [updated[prevIdx], updated[activeIdx]];
@@ -1587,14 +2652,15 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
       stateRef.current.draggedIndex = prevIdx;
 
       LayoutAnimation.configureNext({
-        duration: 180,
+        duration: 200,
         update: { type: LayoutAnimation.Types.easeInEaseOut },
       });
 
       setLocalQueue(updated);
       setDraggedIndex(prevIdx);
+
       dragOffsetRef.current -= itemHeight;
-      dragYVal.setValue(currentDisplacement + itemHeight);
+
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
@@ -1608,7 +2674,7 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
         autoScrollTimerRef.current = true;
         const runScroll = () => {
           if (!autoScrollTimerRef.current) return;
-          
+
           const currentSpeed = calculateSpeed();
           if (currentSpeed === 0) {
             autoScrollTimerRef.current = null;
@@ -1617,7 +2683,7 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
 
           const newOffset = Math.max(0, scrollOffsetRef.current + currentSpeed);
           flatListRef.current?.scrollToOffset({ offset: newOffset, animated: false });
-          
+
           const { dy, moveY: currentMoveY } = dragParamsRef.current;
           handleDragMove(dy, currentMoveY);
 
@@ -1632,30 +2698,38 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
 
   const handleDragEnd = useCallback(() => {
     autoScrollTimerRef.current = null;
-    setDraggedIndex(null);
-    
-    // Smooth spring settle
-    RNAnimated.spring(dragYVal, {
-      toValue: 0,
-      tension: 80,
-      friction: 10,
-      useNativeDriver: true,
-    }).start();
-    
+
+    // Instant drop — item is already at the correct index from live swaps
+    dragYVal.setValue(0);
     dragOffsetRef.current = 0;
-    
-    const syncedTracks = stateRef.current.localQueue.map(item => item.track);
-    let newIndex = 0;
-    if (currentTrack) {
-      newIndex = syncedTracks.findIndex(t => t.id === currentTrack.id);
-    }
-    setQueue(syncedTracks, newIndex === -1 ? 0 : newIndex);
+
+    // Cancel any pending LayoutAnimation from the last swap so the release layout change is instant
+    LayoutAnimation.configureNext({
+      duration: 0,
+      update: { type: LayoutAnimation.Types.linear, property: LayoutAnimation.Properties.opacity },
+    });
+
+    // Clear drag state immediately
+    const updated = stateRef.current.localQueue;
+    setDraggedIndex(null);
+
+    // Defer heavy global context sync so the drag styling clears first
+    setTimeout(() => {
+      isInternalChangeRef.current = true;
+      const syncedTracks = updated.map(i => i.track);
+      let newIndex = 0;
+      if (currentTrack) {
+        newIndex = syncedTracks.findIndex(t => t.id === currentTrack.id);
+      }
+      setQueue(syncedTracks, newIndex === -1 ? 0 : newIndex);
+      syncReorderedQueue();
+    }, 0);
   }, [dragYVal, currentTrack, setQueue]);
 
   const renderItem = useCallback(({ item, index: idx }: { item: { track: Track; key: string }; index: number }) => {
     const isCurrent = currentTrack?.id === item.track.id;
     const isDragging = idx === draggedIndex;
-    
+
     return (
       <QueueItem
         track={item.track}
@@ -1678,58 +2752,84 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
 
   return (
     <View style={styles.queuePopupBackdropOverlay}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
-        <View style={styles.queueBackdropBg} />
-      </Pressable>
+      {/* Backdrop with Fade In/Out */}
+      <RNAnimated.View style={[StyleSheet.absoluteFill, { opacity: opacityAnim }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose}>
+          <View style={styles.queueBackdropBg} />
+        </Pressable>
+      </RNAnimated.View>
+      {/* Slide-up / Draggable Sheet Container */}
+      <RNAnimated.View
+        style={[
+          styles.queueSheetContainer,
+          {
+            transform: [{ translateY: slideAnim }]
+          }
+        ]}
+        pointerEvents="box-none"
+      >
+        <Animated.View style={[styles.queuePopupContent, animatedCardStyle, { borderRadius: Radius.card, overflow: 'hidden' }]}>
+          <GlassCard
+            intensity="strong"
+            padding="none"
+            style={{
+              height: '100%',
+              flex: 1,
+              borderRadius: Radius.card
+            }}
+          >
+            {/* Drag Handle Bar */}
+            <View {...dragBarPanResponder.panHandlers} style={styles.modalDragHandleContainer}>
+              <View style={styles.modalDragHandleLine} />
+            </View>
 
-      <View style={styles.queueSheetContainer} pointerEvents="box-none">
-        <GlassCard intensity="strong" padding="none" style={styles.queuePopupContent}>
-          <View style={styles.menuSelectorHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-              <Feather name="list" size={18} color={Colors.accent.primary} />
-              <Text style={styles.menuTitleText}>Play Queue</Text>
+            <View style={styles.menuSelectorHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                <Feather name="list" size={18} color={Colors.accent.primary} />
+                <Text style={styles.menuTitleText}>Play Queue</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                <Text style={{ fontFamily: Fonts.body, fontSize: FontSizes.tiny + 1, color: 'rgba(255,255,255,0.4)' }}>
+                  {localQueue.length} {localQueue.length === 1 ? 'track' : 'tracks'}
+                </Text>
+                <Pressable onPress={handleClose} hitSlop={8} style={styles.menuSelectorCloseBtn}>
+                  <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
+                </Pressable>
+              </View>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-              <Text style={{ fontFamily: Fonts.body, fontSize: FontSizes.tiny + 1, color: 'rgba(255,255,255,0.4)' }}>
-                {localQueue.length} {localQueue.length === 1 ? 'track' : 'tracks'}
-              </Text>
-              <Pressable onPress={onClose} hitSlop={8} style={styles.menuSelectorCloseBtn}>
-                <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
-              </Pressable>
-            </View>
-          </View>
-          
-          <View style={styles.menuDivider} />
 
-          {localQueue.length === 0 ? (
-            <View style={styles.queueEmptyContainer}>
-              <Feather name="music" size={32} color="rgba(255, 255, 255, 0.2)" style={{ marginBottom: Spacing.sm }} />
-              <Text style={styles.queueEmptyText}>Queue is empty</Text>
-              <Text style={[styles.queueEmptyText, { fontSize: FontSizes.tiny, marginTop: 4 }]}>Play a song to build your queue</Text>
-            </View>
-          ) : (
-            <View ref={listContainerRef} style={{ flex: 1 }} collapsable={false}>
-              <FlatList
-                ref={flatListRef}
-                data={localQueue}
-                keyExtractor={(item) => item.key}
-                renderItem={renderItem}
-                getItemLayout={getItemLayout}
-                style={styles.queueList}
-                showsVerticalScrollIndicator={false}
-                scrollEnabled={draggedIndex === null}
-                contentContainerStyle={styles.queueListContent}
-                initialNumToRender={15}
-                maxToRenderPerBatch={15}
-                windowSize={5}
-                onScroll={handleScroll}
-                scrollEventThrottle={16}
-                onScrollToIndexFailed={() => {}}
-              />
-            </View>
-          )}
-        </GlassCard>
-      </View>
+            <View style={styles.menuDivider} />
+
+            {localQueue.length === 0 ? (
+              <View style={styles.queueEmptyContainer}>
+                <Feather name="music" size={32} color="rgba(255, 255, 255, 0.2)" style={{ marginBottom: Spacing.sm }} />
+                <Text style={styles.queueEmptyText}>Queue is empty</Text>
+                <Text style={[styles.queueEmptyText, { fontSize: FontSizes.tiny, marginTop: 4 }]}>Play a song to build your queue</Text>
+              </View>
+            ) : (
+              <View ref={listContainerRef} style={{ flex: 1 }} collapsable={false}>
+                <FlatList
+                  ref={flatListRef}
+                  data={localQueue}
+                  keyExtractor={(item) => item.key}
+                  renderItem={renderItem}
+                  getItemLayout={getItemLayout}
+                  style={[styles.queueList, { maxHeight: undefined }]}
+                  showsVerticalScrollIndicator={false}
+                  scrollEnabled={draggedIndex === null}
+                  contentContainerStyle={styles.queueListContent}
+                  initialNumToRender={15}
+                  maxToRenderPerBatch={15}
+                  windowSize={5}
+                  onScroll={handleScroll}
+                  scrollEventThrottle={16}
+                  onScrollToIndexFailed={() => { }}
+                />
+              </View>
+            )}
+          </GlassCard>
+        </Animated.View>
+      </RNAnimated.View>
     </View>
   );
 });
@@ -1766,7 +2866,7 @@ const SettingsPopup = React.memo(({
               <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
             </Pressable>
           </View>
-          
+
           <View style={styles.menuDivider} />
 
           <View style={styles.settingsBody}>
@@ -1796,6 +2896,65 @@ const SettingsPopup = React.memo(({
 
 SettingsPopup.displayName = 'SettingsPopup';
 
+const SpotifySettingsPopup = React.memo(({
+  onClose,
+  cacheSize,
+  clearCache,
+}: {
+  onClose: () => void;
+  cacheSize: string;
+  clearCache: () => void;
+}) => {
+  const handleClearCache = useCallback(() => {
+    clearCache();
+  }, [clearCache]);
+
+  return (
+    <View style={styles.queuePopupBackdropOverlay}>
+      {/* Sibling Backdrop */}
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
+        <View style={styles.queueBackdropBg} />
+      </Pressable>
+
+      {/* Sheet Container */}
+      <View style={styles.queueSheetContainer} pointerEvents="box-none">
+        <GlassCard intensity="strong" padding="none" style={styles.queuePopupContent}>
+          <View style={styles.menuSelectorHeader}>
+            <Text style={styles.menuTitleText}>Spotify Settings</Text>
+            <Pressable onPress={onClose} hitSlop={8} style={styles.menuSelectorCloseBtn}>
+              <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
+            </Pressable>
+          </View>
+
+          <View style={styles.menuDivider} />
+
+          <View style={styles.settingsBody}>
+            {/* Cache row */}
+            <View style={styles.settingsRow}>
+              <View style={styles.settingsRowLeft}>
+                <Feather name="database" size={18} color="rgba(255,255,255,0.7)" />
+                <View style={styles.settingsLabelWrapper}>
+                  <Text style={styles.settingsLabel}>Cache Size</Text>
+                  <Text style={styles.settingsDesc}>Stored playlists cache size: {cacheSize}</Text>
+                </View>
+              </View>
+              {cacheSize !== '0 KB' && cacheSize !== '0.0 KB' ? (
+                <Pressable style={styles.settingsBtn} onPress={handleClearCache}>
+                  <Text style={styles.settingsBtnText}>Clean</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.settingsMutedText}>Clean</Text>
+              )}
+            </View>
+          </View>
+        </GlassCard>
+      </View>
+    </View>
+  );
+});
+
+SpotifySettingsPopup.displayName = 'SpotifySettingsPopup';
+
 
 export default function MusicScreen() {
   const insets = useSafeAreaInsets();
@@ -1803,7 +2962,10 @@ export default function MusicScreen() {
 
   const {
     currentTrack,
+    isPlaying,
     play,
+    pause,
+    resume,
     setQueue,
     addToQueue,
     favorites,
@@ -1815,7 +2977,7 @@ export default function MusicScreen() {
     cacheSize,
     clearCache,
   } = useMusic();
-  
+
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'warning' | 'error'>('success');
@@ -1859,6 +3021,45 @@ export default function MusicScreen() {
   // New states for popup modals
   const [showQueuePopup, setShowQueuePopup] = useState(false);
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
+
+  // Spotify Cache Settings states
+  const [showSpotifySettings, setShowSpotifySettings] = useState(false);
+  const [spotifyCacheSize, setSpotifyCacheSize] = useState('0 KB');
+
+  const updateSpotifyCacheSize = useCallback(async () => {
+    try {
+      if (SPOTIFY_CACHE_FILE.exists) {
+        const size = SPOTIFY_CACHE_FILE.size;
+        const kb = size / 1024;
+        if (kb === 0) setSpotifyCacheSize('0 KB');
+        else if (kb < 1024) setSpotifyCacheSize(`${kb.toFixed(1)} KB`);
+        else setSpotifyCacheSize(`${(kb / 1024).toFixed(1)} MB`);
+      } else {
+        setSpotifyCacheSize('0 KB');
+      }
+    } catch (e) {
+      setSpotifyCacheSize('0 KB');
+    }
+  }, []);
+
+  const handleOpenSpotifySettings = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    updateSpotifyCacheSize();
+    setShowSpotifySettings(true);
+  }, [updateSpotifyCacheSize]);
+
+  const handleClearSpotifyCache = useCallback(async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    try {
+      if (SPOTIFY_CACHE_FILE.exists) {
+        await SPOTIFY_CACHE_FILE.delete();
+      }
+      spotifyPlaylistCache = {};
+    } catch (e) {
+      console.warn('[MusicScreen] Failed to delete Spotify cache:', e);
+    }
+    updateSpotifyCacheSize();
+  }, [updateSpotifyCacheSize]);
 
   // Sorting state
   const [sortBy, setSortBy] = useState<'default' | 'titleAsc' | 'titleDesc' | 'dateNewest' | 'dateOldest'>('default');
@@ -1981,13 +3182,22 @@ export default function MusicScreen() {
     setView('list');
   }, []);
 
-  const handleTrackPress = useCallback((track: Track, tracksInCat: Track[]) => {
+  const handleTrackPress = useCallback((track: Track, tracksInCat: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string) => {
+    if (!isShuffle && currentTrack?.id === track.id) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (isPlaying) {
+        pause();
+      } else {
+        resume();
+      }
+      return;
+    }
     const idx = tracksInCat.findIndex(t => t.id === track.id);
     const slicedTracks = idx !== -1 ? tracksInCat.slice(idx) : [track];
     setQueue(slicedTracks, 0);
-    play(track);
+    play(track, contextUri, offsetUri, isShuffle);
     setView('player');
-  }, [play, setQueue]);
+  }, [play, setQueue, currentTrack?.id, isPlaying, pause, resume]);
 
   const handleGoBack = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2015,25 +3225,36 @@ export default function MusicScreen() {
   return (
     <GradientBackground variant="glow">
       <Animated.View style={[StyleSheet.absoluteFill, playerBgStyle]} pointerEvents="none">
-        <PlayerBackground />
+        <PlayerBackground currentTrack={currentTrack} />
       </Animated.View>
       <View style={[styles.mainContainer, { paddingTop }]}>
         <Animated.View style={categoriesStyle} pointerEvents={view === 'categories' ? 'auto' : 'none'}>
           <CategoriesView
             onCategoryPress={handleCategoryPress}
             onSettingsPress={handleShowSettings}
+            onTrackPress={handleTrackPress}
           />
         </Animated.View>
         <Animated.View style={listStyle} pointerEvents={view === 'list' ? 'auto' : 'none'}>
-          <ListView
-            category={selectedCategory}
-            categoryLabel={activeCategoryLabel}
-            onGoBack={handleGoBack}
-            onTrackPress={handleTrackPress}
-            onMorePress={handleMorePress}
-            sortBy={sortBy}
-            setShowSortMenu={setShowSortMenu}
-          />
+          {selectedCategory === 'spotify' ? (
+            <SpotifyListView
+              onGoBack={handleGoBack}
+              onTrackPress={handleTrackPress}
+              onSettingsPress={handleOpenSpotifySettings}
+              onShowQueue={handleShowQueue}
+            />
+          ) : (
+            <ListView
+              category={selectedCategory}
+              categoryLabel={activeCategoryLabel}
+              onGoBack={handleGoBack}
+              onTrackPress={handleTrackPress}
+              onMorePress={handleMorePress}
+              sortBy={sortBy}
+              setShowSortMenu={setShowSortMenu}
+              onShowQueue={handleShowQueue}
+            />
+          )}
         </Animated.View>
         <Animated.View style={playerStyle} pointerEvents={view === 'player' ? 'auto' : 'none'}>
           <PlayerView
@@ -2044,7 +3265,7 @@ export default function MusicScreen() {
         </Animated.View>
       </View>
       {currentTrack && (
-        <Animated.View 
+        <Animated.View
           pointerEvents={view === 'player' ? 'none' : 'auto'}
           style={[
             {
@@ -2069,7 +3290,7 @@ export default function MusicScreen() {
         <View style={styles.menuBackdrop}>
           {/* Backdrop touch area */}
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowMenu(false)} />
-          
+
           {/* Menu content */}
           <View style={styles.menuContainer} pointerEvents="box-none">
             <GlassCard intensity="strong" padding="none" style={styles.menuContent}>
@@ -2081,12 +3302,12 @@ export default function MusicScreen() {
                   <Text numberOfLines={1} style={styles.menuTrackArtist}>{menuTrack.artist}</Text>
                 </View>
               </View>
-              
+
               <View style={styles.menuDivider} />
 
               {/* Add to Queue */}
-              <Pressable 
-                style={styles.menuOption} 
+              <Pressable
+                style={styles.menuOption}
                 onPress={() => {
                   if (currentTrack && currentTrack.category !== menuTrack.category) {
                     setShowMenu(false);
@@ -2103,8 +3324,8 @@ export default function MusicScreen() {
               </Pressable>
 
               {/* Add/Remove Favorite */}
-              <Pressable 
-                style={styles.menuOption} 
+              <Pressable
+                style={styles.menuOption}
                 onPress={() => {
                   toggleFavorite(menuTrack.id);
                   setShowMenu(false);
@@ -2112,10 +3333,10 @@ export default function MusicScreen() {
                   showToast(wasFav ? 'Removed from Favourites' : 'Added to Favourites');
                 }}
               >
-                <Feather 
-                  name="heart" 
-                  size={18} 
-                  color={favorites.includes(menuTrack.id) ? Colors.error : "#FFF"} 
+                <Feather
+                  name="heart"
+                  size={18}
+                  color={favorites.includes(menuTrack.id) ? Colors.error : "#FFF"}
                   fill={favorites.includes(menuTrack.id) ? Colors.error : "transparent"}
                 />
                 <Text style={styles.menuOptionText}>
@@ -2124,8 +3345,8 @@ export default function MusicScreen() {
               </Pressable>
 
               {/* Add to Playlist */}
-              <Pressable 
-                style={styles.menuOption} 
+              <Pressable
+                style={styles.menuOption}
                 onPress={() => {
                   setShowPlaylistSelector(true);
                 }}
@@ -2136,8 +3357,8 @@ export default function MusicScreen() {
 
               {/* Conditional: Remove from Playlist (only if opened from inside a playlist) */}
               {activePlaylistId !== undefined && (
-                <Pressable 
-                  style={[styles.menuOption, { borderTopWidth: 0.5, borderTopColor: 'rgba(255,255,255,0.06)' }]} 
+                <Pressable
+                  style={[styles.menuOption, { borderTopWidth: 0.5, borderTopColor: 'rgba(255,255,255,0.06)' }]}
                   onPress={async () => {
                     await removeTrackFromPlaylist(activePlaylistId, menuTrack.id);
                     setShowMenu(false);
@@ -2165,7 +3386,7 @@ export default function MusicScreen() {
                   <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
                 </Pressable>
               </View>
-              
+
               <View style={styles.menuDivider} />
 
               <ScrollView style={{ maxHeight: 200 }} showsVerticalScrollIndicator={false}>
@@ -2196,8 +3417,8 @@ export default function MusicScreen() {
               <View style={styles.menuDivider} />
 
               {/* Create New Playlist option */}
-              <Pressable 
-                style={styles.menuOption} 
+              <Pressable
+                style={styles.menuOption}
                 onPress={() => {
                   setShowCreatePlaylistModal(true);
                 }}
@@ -2217,7 +3438,7 @@ export default function MusicScreen() {
           <View style={styles.menuContainer} pointerEvents="box-none">
             <GlassCard intensity="strong" padding="md" style={styles.playlistCreateContent}>
               <Text style={styles.createPlaylistTitle}>Create Playlist</Text>
-              
+
               <TextInput
                 style={styles.createPlaylistInput}
                 placeholder="Playlist name..."
@@ -2229,8 +3450,8 @@ export default function MusicScreen() {
               />
 
               <View style={styles.createPlaylistButtons}>
-                <Pressable 
-                  style={styles.createBtnCancel} 
+                <Pressable
+                  style={styles.createBtnCancel}
                   onPress={() => {
                     setShowCreatePlaylistModal(false);
                     setNewPlaylistName('');
@@ -2238,9 +3459,9 @@ export default function MusicScreen() {
                 >
                   <Text style={{ color: 'rgba(255,255,255,0.6)', fontFamily: Fonts.bodySemiBold }}>Cancel</Text>
                 </Pressable>
-                
-                <Pressable 
-                  style={styles.createBtnConfirm} 
+
+                <Pressable
+                  style={styles.createBtnConfirm}
                   onPress={async () => {
                     if (newPlaylistName.trim()) {
                       await createPlaylist(newPlaylistName.trim());
@@ -2269,6 +3490,13 @@ export default function MusicScreen() {
           clearCache={clearCache}
         />
       )}
+      {showSpotifySettings && (
+        <SpotifySettingsPopup
+          onClose={() => setShowSpotifySettings(false)}
+          cacheSize={spotifyCacheSize}
+          clearCache={handleClearSpotifyCache}
+        />
+      )}
       {/* 6. Sort Overlay Bottom Sheet */}
       {showSortMenu && (
         <View style={styles.menuBackdrop}>
@@ -2281,11 +3509,11 @@ export default function MusicScreen() {
                   <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
                 </Pressable>
               </View>
-              
+
               <View style={styles.menuDivider} />
 
-              <Pressable 
-                style={[styles.menuOption, sortBy === 'default' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]} 
+              <Pressable
+                style={[styles.menuOption, sortBy === 'default' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]}
                 onPress={() => {
                   setSortBy('default');
                   setShowSortMenu(false);
@@ -2296,8 +3524,8 @@ export default function MusicScreen() {
                 <Text style={[styles.menuOptionText, sortBy === 'default' && { color: Colors.accent.primary }]}>Default Order</Text>
               </Pressable>
 
-              <Pressable 
-                style={[styles.menuOption, sortBy === 'titleAsc' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]} 
+              <Pressable
+                style={[styles.menuOption, sortBy === 'titleAsc' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]}
                 onPress={() => {
                   setSortBy('titleAsc');
                   setShowSortMenu(false);
@@ -2308,8 +3536,8 @@ export default function MusicScreen() {
                 <Text style={[styles.menuOptionText, sortBy === 'titleAsc' && { color: Colors.accent.primary }]}>Alphabetical (A - Z)</Text>
               </Pressable>
 
-              <Pressable 
-                style={[styles.menuOption, sortBy === 'titleDesc' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]} 
+              <Pressable
+                style={[styles.menuOption, sortBy === 'titleDesc' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]}
                 onPress={() => {
                   setSortBy('titleDesc');
                   setShowSortMenu(false);
@@ -2320,8 +3548,8 @@ export default function MusicScreen() {
                 <Text style={[styles.menuOptionText, sortBy === 'titleDesc' && { color: Colors.accent.primary }]}>Alphabetical (Z - A)</Text>
               </Pressable>
 
-              <Pressable 
-                style={[styles.menuOption, sortBy === 'dateNewest' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]} 
+              <Pressable
+                style={[styles.menuOption, sortBy === 'dateNewest' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]}
                 onPress={() => {
                   setSortBy('dateNewest');
                   setShowSortMenu(false);
@@ -2332,8 +3560,8 @@ export default function MusicScreen() {
                 <Text style={[styles.menuOptionText, sortBy === 'dateNewest' && { color: Colors.accent.primary }]}>Date Added (Newest First)</Text>
               </Pressable>
 
-              <Pressable 
-                style={[styles.menuOption, sortBy === 'dateOldest' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]} 
+              <Pressable
+                style={[styles.menuOption, sortBy === 'dateOldest' && { backgroundColor: 'rgba(141, 233, 29, 0.08)' }]}
                 onPress={() => {
                   setSortBy('dateOldest');
                   setShowSortMenu(false);
@@ -2367,11 +3595,11 @@ export default function MusicScreen() {
             paddingHorizontal: 20,
             borderRadius: 9999,
             borderWidth: 1,
-            borderColor: toastType === 'error' 
-              ? 'rgba(255, 107, 107, 0.25)' 
-              : toastType === 'warning' 
-              ? 'rgba(255, 190, 106, 0.25)' 
-              : 'rgba(141, 233, 29, 0.25)',
+            borderColor: toastType === 'error'
+              ? 'rgba(255, 107, 107, 0.25)'
+              : toastType === 'warning'
+                ? 'rgba(255, 190, 106, 0.25)'
+                : 'rgba(141, 233, 29, 0.25)',
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
@@ -2381,14 +3609,14 @@ export default function MusicScreen() {
             shadowRadius: 8,
             elevation: 6,
           }}>
-            <Feather 
-              name={toastType === 'success' ? "check-circle" : "alert-circle"} 
-              size={14} 
-              color={toastType === 'error' 
-                ? Colors.error 
-                : toastType === 'warning' 
-                ? Colors.warning 
-                : Colors.accent.primary} 
+            <Feather
+              name={toastType === 'success' ? "check-circle" : "alert-circle"}
+              size={14}
+              color={toastType === 'error'
+                ? Colors.error
+                : toastType === 'warning'
+                  ? Colors.warning
+                  : Colors.accent.primary}
             />
             <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption }}>
               {toastMessage}
@@ -2553,6 +3781,34 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: Radius.lg,
     overflow: 'hidden',
+  },
+  spotifyPremiumCard: {
+    borderWidth: 1.5,
+    borderColor: '#FFD166',
+    shadowColor: '#FFD166',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  spotifyPremiumBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 209, 102, 0.25)',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD166',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  spotifyPremiumBadgeText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.tiny - 1,
+    color: '#FFD166',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   bentoImage: {
     width: '100%',
@@ -2799,7 +4055,7 @@ const styles = StyleSheet.create({
 
   // Waveform Visualizer
   waveformContainer: {
-    height: 60,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.sm,
@@ -2807,11 +4063,11 @@ const styles = StyleSheet.create({
   waveformRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2.5,
+    gap: 4.5,
   },
   waveformBar: {
-    width: 3,
-    borderRadius: 1.5,
+    width: 4.5,
+    borderRadius: 2.25,
   },
 
   // Timeline
@@ -3079,6 +4335,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.05)',
     marginBottom: Spacing.sm,
   },
+  activePlaylistItemCard: {
+    borderColor: 'rgba(29, 185, 84, 0.35)',
+    borderWidth: 1,
+    backgroundColor: 'rgba(29, 185, 84, 0.05)',
+  },
+  activePlaylistItemName: {
+    color: '#1DB954',
+  },
+  activePlaylistItemCount: {
+    color: 'rgba(29, 185, 84, 0.7)',
+  },
   playlistItemInner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3157,6 +4424,19 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.12)',
     overflow: 'hidden',
     width: '100%',
+  },
+  modalDragHandleContainer: {
+    width: '100%',
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  modalDragHandleLine: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
   },
   queueItemRow: {
     flexDirection: 'row',
@@ -3249,7 +4529,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body,
   },
   queueList: {
-    maxHeight: 400,
+    flex: 1,
   },
   queueListContent: {
     padding: Spacing.md,
@@ -3388,5 +4668,70 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(190, 255, 108, 0.25)',
     borderRadius: 22,
     overflow: 'hidden',
+  },
+
+  // Music Recs Styles
+  musicRecsSection: {
+    marginBottom: Spacing.xl,
+    paddingHorizontal: Spacing.xs,
+  },
+  musicRecsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  musicRecsTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+  },
+  musicRecsMoodBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+    marginLeft: 'auto',
+  },
+  musicRecsMoodText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.tiny - 1,
+    letterSpacing: 1,
+  },
+  musicRecCard: {
+    width: 90,
+    alignItems: 'center',
+  },
+  musicRecCoverWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    marginBottom: Spacing.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  musicRecCoverImg: {
+    width: '100%',
+    height: '100%',
+  },
+  musicRecTrackTitle: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.text.primary,
+    textAlign: 'center',
+    width: '100%',
+  },
+  musicRecTrackArtist: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    width: '100%',
+    marginTop: 1,
+  },
+  cardTitleSm: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
   },
 });
