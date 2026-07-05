@@ -97,6 +97,46 @@ export interface MusicTimeContextType {
 const MusicContext = createContext<MusicContextType | undefined>(undefined);
 const MusicTimeContext = createContext<MusicTimeContextType | undefined>(undefined);
 
+export const parseSpotifyQueueHelper = (queueData: any): Track[] => {
+  if (!queueData) return [];
+
+  const getBestImage = (images: any[], targetSize: number) => {
+    if (!images || images.length === 0) return '';
+    return images.reduce((p, c) => Math.abs((c.width || 0) - targetSize) < Math.abs((p.width || 0) - targetSize) ? c : p).url || '';
+  };
+
+  const formatDur = (ms: number) => {
+    const totalSecs = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const convertSpotifyTrackToTrack = (st: any): Track => {
+    if (!st) return {} as Track;
+    const t = st.track || st;
+    return {
+      id: 'spotify_' + t.id,
+      title: t.name || 'Unknown Track',
+      artist: t.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
+      url: t.uri || '',
+      cover: getBestImage(t.album?.images || [], 300),
+      duration: formatDur(t.duration_ms || 0),
+      durationSec: Math.floor((t.duration_ms || 0) / 1000),
+      category: 'spotify',
+    };
+  };
+
+  const results: Track[] = [];
+  if (queueData.currently_playing) {
+    results.push(convertSpotifyTrackToTrack(queueData.currently_playing));
+  }
+  if (Array.isArray(queueData.queue)) {
+    results.push(...queueData.queue.map(convertSpotifyTrackToTrack));
+  }
+  return results;
+};
+
 // Core tracks library
 export const TRACKS_LIBRARY: Track[] = [
   // Category: Midnight Vibes
@@ -482,54 +522,75 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const q = queueRef.current;
           const ci = currentIndexRef.current;
           const sh = shuffleRef.current;
-          let nextIdx = ci + 1;
-          if (sh) {
-            nextIdx = Math.floor(Math.random() * q.length);
-          } else if (nextIdx >= q.length) {
-            nextIdx = 0;
-          }
 
-          const isNextQueueTrack = q[nextIdx] && q[nextIdx].id === trackInfo.id;
+          // Check if the track played exists in our queue
+          const queueIdx = q.findIndex(t => t.id === trackInfo.id);
 
-          if (isNextQueueTrack) {
-            console.log('[MusicContext] Spotify successfully transitioned to our next queue track:', trackInfo.title);
-            currentIndexRef.current = nextIdx;
-            setCurrentIndex(nextIdx);
-            setCurrentTrack(q[nextIdx]);
-          } else {
-            // If the queue is custom/manually reordered, intercept wrong track transitions!
+          if (queueIdx !== -1) {
+            // The track is in our queue!
+            
+            // If the queue is custom/manually reordered, enforce the custom sequence
             if (isQueueCustomRef.current && q.length > 1) {
-              const hasTrackInQueue = q.some(t => t.id === trackInfo.id);
-              if (hasTrackInQueue) {
-                console.log('[MusicContext] Custom queue mismatch intercepted. Forcing correct next track:', q[nextIdx]?.title);
-                currentIndexRef.current = nextIdx;
-                setCurrentIndex(nextIdx);
-                if (playRef.current && q[nextIdx]) {
-                  playRef.current(q[nextIdx]);
+              let expectedNextIdx = ci + 1;
+              if (sh) {
+                expectedNextIdx = Math.floor(Math.random() * q.length);
+              } else if (expectedNextIdx >= q.length) {
+                expectedNextIdx = 0;
+              }
+
+              if (queueIdx !== expectedNextIdx) {
+                console.log('[MusicContext] Custom queue mismatch intercepted. Forcing correct next track:', q[expectedNextIdx]?.title);
+                currentIndexRef.current = expectedNextIdx;
+                setCurrentIndex(expectedNextIdx);
+                if (playRef.current && q[expectedNextIdx]) {
+                  playRef.current(q[expectedNextIdx]);
                 }
                 return; // Prevent syncing to the wrong track
-              } else {
-                // The song played is from outside our custom queue. De-customize and align natively.
-                isQueueCustomRef.current = false;
               }
             }
 
-            // Check if it was an auto-play takeover by Spotify near end
+            // Otherwise, let Spotify play whatever track in the queue it wants (native shuffle or sequence)
+            // and just sync our UI index to match.
+            console.log('[MusicContext] Syncing to queue track played by Spotify:', trackInfo.title, 'at index:', queueIdx);
+            currentIndexRef.current = queueIdx;
+            setCurrentIndex(queueIdx);
+            setCurrentTrack(q[queueIdx]);
+          } else {
+            // The track is NOT in our queue (external song played, or Spotify auto-play recommendations radio)
+            
+            // Check if it was an auto-play takeover by Spotify near end of our queue
             const wasNearEnd = currentTrackRef.current !== null && currentTimeRef.current >= (currentTrackRef.current?.durationSec || 0) - 5;
-            const hasNextTrack = ci < q.length - 1 || repeatModeRef.current === 'all';
+            const isAtQueueEnd = ci >= q.length - 1;
 
-            if (wasNearEnd && hasNextTrack) {
-              console.log('[MusicContext] Spotify auto-played external track near end. Forcing our next queue track!');
-              currentIndexRef.current = nextIdx;
-              setCurrentIndex(nextIdx);
-              if (playRef.current && q[nextIdx]) {
-                playRef.current(q[nextIdx]);
+            if (wasNearEnd && isAtQueueEnd) {
+              if (repeatModeRef.current === 'all') {
+                console.log('[MusicContext] Queue finished. Wrap around repeat enabled. Forcing first track.');
+                currentIndexRef.current = 0;
+                setCurrentIndex(0);
+                if (playRef.current && q[0]) {
+                  playRef.current(q[0]);
+                }
+                return;
+              } else {
+                console.log('[MusicContext] Queue finished. Stopping auto-play recommendations.');
+                setPlaying(false);
+                if (playerRef.current) {
+                  try { playerRef.current.pause(); } catch (e) {}
+                }
+                const { useTierStore } = require('../stores/tierStore');
+                useTierStore.getState().getValidAccessToken().then((token: string | null) => {
+                  if (token) {
+                    const { pause: spotifyPauseAPI } = require('../services/spotify');
+                    spotifyPauseAPI(token).catch((err: any) => console.warn(err));
+                  }
+                });
+                return;
               }
-              return; // Do not sync to the external track
             }
 
             // Otherwise, it's a manual external track change inside the Spotify app. Sync to it.
             console.log('[MusicContext] Syncing external Spotify track change:', trackInfo.title);
+            isQueueCustomRef.current = false;
 
             const newTrack: Track = {
               id: trackInfo.id,
@@ -542,28 +603,20 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               category: 'spotify',
             };
 
-            const queueIdx = q.findIndex(t => t.id === trackInfo.id);
-            if (queueIdx !== -1) {
-              currentIndexRef.current = queueIdx;
-              setCurrentIndex(queueIdx);
-              setCurrentTrack(q[queueIdx]);
+            if (q.length > 1 && q.some(t => t.category === 'spotify')) {
+              const filteredQ = q.filter(t => t.id !== newTrack.id);
+              const newQueue = [newTrack, ...filteredQ];
+              queueRef.current = newQueue;
+              setQueueState(newQueue);
+              currentIndexRef.current = 0;
+              setCurrentIndex(0);
             } else {
-              isQueueCustomRef.current = false;
-              setCurrentTrack(newTrack);
-              if (q.length > 1 && q.some(t => t.category === 'spotify')) {
-                const filteredQ = q.filter(t => t.id !== newTrack.id);
-                const newQueue = [newTrack, ...filteredQ];
-                queueRef.current = newQueue;
-                setQueueState(newQueue);
-                currentIndexRef.current = 0;
-                setCurrentIndex(0);
-              } else {
-                queueRef.current = [newTrack];
-                setQueueState([newTrack]);
-                currentIndexRef.current = 0;
-                setCurrentIndex(0);
-              }
+              queueRef.current = [newTrack];
+              setQueueState([newTrack]);
+              currentIndexRef.current = 0;
+              setCurrentIndex(0);
             }
+            setCurrentTrack(newTrack);
           }
         }
         setDuration(trackInfo.durationSec || durationSec);
@@ -628,34 +681,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const { getQueue } = require('../services/spotify');
               const queueData = await getQueue(token);
               if (queueData) {
-                const getBestImage = (images: any[], targetSize: number) => {
-                  if (images.length === 0) return '';
-                  return images.reduce((p, c) => Math.abs((c.width || 0) - targetSize) < Math.abs((p.width || 0) - targetSize) ? c : p).url || '';
-                };
-                const formatDur = (ms: number) => {
-                  const totalSecs = Math.floor(ms / 1000);
-                  const mins = Math.floor(totalSecs / 60);
-                  const secs = totalSecs % 60;
-                  return `${mins}:${secs.toString().padStart(2, '0')}`;
-                };
-                const convertSpotifyTrackToTrack = (st: any): Track => {
-                  const t = st.track || st;
-                  return {
-                    id: 'spotify_' + t.id,
-                    title: t.name,
-                    artist: t.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
-                    url: t.uri,
-                    cover: getBestImage(t.album?.images || [], 300),
-                    duration: formatDur(t.duration_ms),
-                    durationSec: Math.floor(t.duration_ms / 1000),
-                    category: 'spotify',
-                  };
-                };
-
-                const currentTrackConverted = convertSpotifyTrackToTrack(queueData.currently_playing);
-                const queueConverted = queueData.queue.map(convertSpotifyTrackToTrack);
-                const combinedQueue = [currentTrackConverted, ...queueConverted];
-
+                const combinedQueue = parseSpotifyQueueHelper(queueData);
                 queueRef.current = combinedQueue;
                 setQueueState(combinedQueue);
               }
@@ -773,36 +799,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (token) {
             const { play: spotifyPlayAPI, setShuffle: spotifySetShuffleAPI } = require('../services/spotify');
 
-            const parseSpotifyQueue = (queueData: any): Track[] => {
-              const getBestImage = (images: any[], targetSize: number) => {
-                if (images.length === 0) return '';
-                return images.reduce((p, c) => Math.abs((c.width || 0) - targetSize) < Math.abs((p.width || 0) - targetSize) ? c : p).url || '';
-              };
-              const formatDur = (ms: number) => {
-                const totalSecs = Math.floor(ms / 1000);
-                const mins = Math.floor(totalSecs / 60);
-                const secs = totalSecs % 60;
-                return `${mins}:${secs.toString().padStart(2, '0')}`;
-              };
-              const convertSpotifyTrackToTrack = (st: any): Track => {
-                const t = st.track || st;
-                return {
-                  id: 'spotify_' + t.id,
-                  title: t.name,
-                  artist: t.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
-                  url: t.uri,
-                  cover: getBestImage(t.album?.images || [], 300),
-                  duration: formatDur(t.duration_ms),
-                  durationSec: Math.floor(t.duration_ms / 1000),
-                  category: 'spotify',
-                };
-              };
-              
-              const currentTrackConverted = convertSpotifyTrackToTrack(queueData.currently_playing);
-              const queueConverted = queueData.queue.map(convertSpotifyTrackToTrack);
-              return [currentTrackConverted, ...queueConverted];
-            };
-
             // Play native Spotify context if contextUri is provided
             if (contextUri) {
               if (isShuffle) {
@@ -826,7 +822,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     const { getQueue } = require('../services/spotify');
                     const queueData = await getQueue(token);
                     if (queueData) {
-                      const combinedQueue = parseSpotifyQueue(queueData);
+                      const combinedQueue = parseSpotifyQueueHelper(queueData);
                       queueRef.current = combinedQueue;
                       setQueueState(combinedQueue);
                       currentIndexRef.current = 0;
@@ -849,7 +845,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     const { getQueue } = require('../services/spotify');
                     const queueData = await getQueue(token);
                     if (queueData) {
-                      const combinedQueue = parseSpotifyQueue(queueData);
+                      const combinedQueue = parseSpotifyQueueHelper(queueData);
                       queueRef.current = combinedQueue;
                       setQueueState(combinedQueue);
                       currentIndexRef.current = 0;
@@ -875,7 +871,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   const { getQueue } = require('../services/spotify');
                   const queueData = await getQueue(token);
                   if (queueData) {
-                    const combinedQueue = parseSpotifyQueue(queueData);
+                    const combinedQueue = parseSpotifyQueueHelper(queueData);
                     queueRef.current = combinedQueue;
                     setQueueState(combinedQueue);
                     currentIndexRef.current = 0;
@@ -1077,6 +1073,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const ci = currentIndexRef.current;
     const sh = shuffleRef.current;
     const rm = repeatModeRef.current;
+    const isSpotify = currentTrackRef.current?.category === 'spotify';
 
     // If we have a local queue with tracks, manage the skip locally!
     if (q.length > 1) {
@@ -1084,34 +1081,41 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (sh) {
         prevIndex = Math.floor(Math.random() * q.length);
       } else if (prevIndex < 0) {
-        if (rm === 'all') {
+        if (isSpotify) {
+          // local queue only has tracks from the clicked track onwards
+          // Fall through to native Spotify prev which has full playlist context.
+          prevIndex = -1; // Signal to fall through
+        } else if (rm === 'all') {
           prevIndex = q.length - 1;
         } else {
           prevIndex = 0; // Clamp
         }
       }
 
-      currentIndexRef.current = prevIndex;
-      setCurrentIndex(prevIndex);
-      await playRef.current?.(q[prevIndex]);
-      return;
+      if (prevIndex >= 0) {
+        currentIndexRef.current = prevIndex;
+        setCurrentIndex(prevIndex);
+        await playRef.current?.(q[prevIndex]);
+        return;
+      }
+      // If prevIndex is -1 (Spotify at start), fall through to native prev below
     }
 
-    // Fallback: If single track in queue, call Spotify's endpoint
-    if (currentTrackRef.current?.category === 'spotify') {
+    // Use Spotify's native previousTrack API — it has full playlist context
+    if (isSpotify) {
       try {
         const { useTierStore } = require('../stores/tierStore');
         const token = await useTierStore.getState().getValidAccessToken();
         if (token) {
           const { previousTrack: spotifyPrevAPI } = require('../services/spotify');
           await spotifyPrevAPI(token);
-          // Schedule a refresh after Spotify skips back
+          // Schedule a refresh to sync the new track state
           setTimeout(() => {
             triggerPlaybackRefresh();
           }, 2000);
         }
       } catch (err) {
-        console.warn('[MusicContext] Spotify prev fallback error:', err);
+        console.warn('[MusicContext] Spotify prev error:', err);
       }
     }
   }, []);
@@ -1166,6 +1170,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const sh = shuffleRef.current;
 
         if (rm === 'one') {
+          // Repeat-one: must force replay via API
           seekTo(0);
           if (currentTrackRef.current) {
             playRef.current?.(currentTrackRef.current);
@@ -1177,12 +1182,33 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           } else if (nextIdx >= q.length) {
             nextIdx = 0;
           }
+
+          // Let Spotify's native player advance and sync state once the poll updates.
+          const isSpotify = currentTrackRef.current?.category === 'spotify';
+          if (isSpotify && !isQueueCustomRef.current) {
+            console.log('[MusicContext] Spotify auto-advancing: waiting for native sync to prevent UI flicker');
+            // Trigger an immediate sync request so the poll catches it quickly
+            triggerPlaybackRefresh();
+            return;
+          }
+
+          // Update local state immediately for instant UI feedback (for local audio or custom queues)
           currentIndexRef.current = nextIdx;
           setCurrentIndex(nextIdx);
-          if (playRef.current && q[nextIdx]) {
-            playRef.current(q[nextIdx]);
+          const nextTrack = q[nextIdx];
+          if (nextTrack) {
+            setCurrentTrack(nextTrack);
+            setCurrentTime(0);
+            setDuration(nextTrack.durationSec || 0);
+
+            // Only force play via API if the queue is custom-reordered
+            if (isQueueCustomRef.current) {
+              console.log('[MusicContext] Custom queue active — forcing correct next track via API');
+              playRef.current?.(nextTrack);
+            }
           }
         } else {
+          // End of queue — stop playback
           setPlaying(false);
           if (playerRef.current) {
             try {
@@ -1198,7 +1224,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         }
 
-        // Schedule a refresh to sync after the track starts playing
+        // Schedule a refresh to confirm Spotify is in sync
         setTimeout(() => {
           triggerPlaybackRefresh();
         }, 2000);
@@ -1242,22 +1268,89 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const sh = shuffleRef.current;
     const rm = repeatModeRef.current;
+    const isSpotify = currentTrackRef.current?.category === 'spotify';
+
+    // Determine next mode in the cycle:
+    // Sequence (sh=false, rm=none) -> Shuffle (sh=true, rm=none) ->
+    // Repeat All (sh=false, rm=all) -> Repeat One (sh=false, rm=one) -> Sequence
+    let nextShuffle = false;
+    let nextRepeat: RepeatMode = 'none';
+
     if (!sh && rm === 'none') {
       // Sequence -> Shuffle
-      setShuffle(true);
-      setRepeatMode('none');
+      nextShuffle = true;
+      nextRepeat = 'none';
     } else if (sh) {
       // Shuffle -> Repeat All
-      setShuffle(false);
-      setRepeatMode('all');
+      nextShuffle = false;
+      nextRepeat = 'all';
     } else if (rm === 'all') {
       // Repeat All -> Repeat One
-      setShuffle(false);
-      setRepeatMode('one');
+      nextShuffle = false;
+      nextRepeat = 'one';
     } else {
       // Repeat One -> Sequence
-      setShuffle(false);
-      setRepeatMode('none');
+      nextShuffle = false;
+      nextRepeat = 'none';
+    }
+
+    // Update local state
+    setShuffle(nextShuffle);
+    setRepeatMode(nextRepeat);
+
+    // Sync with Spotify API if playing a Spotify track
+    if (isSpotify) {
+      (async () => {
+        try {
+          const { useTierStore } = require('../stores/tierStore');
+          const token = await useTierStore.getState().getValidAccessToken();
+          if (!token) return;
+
+          const { setShuffle: spotifySetShuffle, setRepeat: spotifySetRepeat, getQueue } = require('../services/spotify');
+
+          // Sync shuffle state
+          await spotifySetShuffle(token, nextShuffle).catch((e: any) =>
+            console.warn('[MusicContext] Spotify setShuffle error:', e)
+          );
+
+          // Map our repeat mode to Spotify's repeat state:
+          //   'none' -> 'off'       (no repeat)
+          //   'all'  -> 'context'   (repeat playlist/album)
+          //   'one'  -> 'track'     (repeat single track)
+          const spotifyRepeatState = nextRepeat === 'one' ? 'track' : nextRepeat === 'all' ? 'context' : 'off';
+          await spotifySetRepeat(token, spotifyRepeatState).catch((e: any) =>
+            console.warn('[MusicContext] Spotify setRepeat error:', e)
+          );
+
+          // Fetch the updated queue from Spotify to sync our UI queue list
+          setTimeout(async () => {
+            try {
+              const queueData = await getQueue(token);
+              if (queueData) {
+                const combinedQueue = parseSpotifyQueueHelper(queueData);
+                queueRef.current = combinedQueue;
+                setQueueState(combinedQueue);
+
+                // Align local indices
+                if (queueData.currently_playing) {
+                  const currentId = 'spotify_' + queueData.currently_playing.id;
+                  const idx = combinedQueue.findIndex(t => t.id === currentId);
+                  if (idx !== -1) {
+                    currentIndexRef.current = idx;
+                    setCurrentIndex(idx);
+                    setCurrentTrack(combinedQueue[idx]);
+                  }
+                }
+                console.log('[MusicContext] Shuffled Spotify queue imported and synced successfully.');
+              }
+            } catch (queueErr) {
+              console.warn('[MusicContext] Failed to fetch updated Spotify queue after mode change:', queueErr);
+            }
+          }, 800); // 800ms delay to let Spotify backend update the queue sequence
+        } catch (err) {
+          console.warn('[MusicContext] Failed to sync playback mode with Spotify:', err);
+        }
+      })();
     }
   }, []);
 

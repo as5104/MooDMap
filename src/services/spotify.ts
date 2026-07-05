@@ -563,5 +563,13 @@ export async function setShuffle(accessToken: string, state: boolean): Promise<v
   );
 }
 
+export async function setRepeat(accessToken: string, state: 'off' | 'context' | 'track'): Promise<void> {
+  await spotifyFetch(
+    accessToken,
+    `/me/player/repeat?state=${state}`,
+    'PUT'
+  );
+}
+
 // Ensure WebBrowser completes auth session
 WebBrowser.maybeCompleteAuthSession();
