@@ -666,6 +666,19 @@ const SpotifyListView = React.memo(({
   const [loading, setLoading] = useState(false);
   const [selectedPlaylist, setSelectedPlaylist] = useState<any | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<any[]>([]);
+
+  // Local playlist search filter
+  const filteredPlaylistTracks = useMemo(() => {
+    if (!selectedPlaylist) return [];
+    if (!searchQuery.trim()) return playlistTracks;
+
+    const query = searchQuery.toLowerCase().trim();
+    return playlistTracks.filter(item => {
+      const title = (item.name || '').toLowerCase();
+      const artist = (item.artists?.map((a: any) => a.name).join(', ') ?? '').toLowerCase();
+      return title.includes(query) || artist.includes(query);
+    });
+  }, [playlistTracks, selectedPlaylist, searchQuery]);
   const [loadingPlaylist, setLoadingPlaylist] = useState(false);
   const [recentPlaylists, setRecentPlaylists] = useState<Record<string, number>>({});
   const [refreshingPlaylists, setRefreshingPlaylists] = useState(false);
@@ -785,6 +798,10 @@ const SpotifyListView = React.memo(({
   }, [searchQuery]);
 
   useEffect(() => {
+    if (selectedPlaylist) {
+      // Search is local to the playlist when open; skip global API querying
+      return;
+    }
     if (!debouncedQuery.trim()) {
       setSearchResults([]);
       return;
@@ -796,10 +813,11 @@ const SpotifyListView = React.memo(({
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [debouncedQuery, searchSpotify]);
+  }, [debouncedQuery, searchSpotify, selectedPlaylist]);
 
   const handlePlaylistSelect = useCallback(async (playlist: any) => {
     setSelectedPlaylist(playlist);
+    setSearchQuery(''); // Reset search input on playlist enter
 
     // Check in-memory cache
     const cachedTracks = spotifyPlaylistCache[playlist.id];
@@ -926,7 +944,7 @@ const SpotifyListView = React.memo(({
         style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
         onPress={() => {
           const contextUri = selectedPlaylist ? `spotify:playlist:${selectedPlaylist.id}` : undefined;
-          handleTrackPressItem(item, playlistTracks, false, contextUri, item.uri);
+          handleTrackPressItem(item, filteredPlaylistTracks, false, contextUri, item.uri);
         }}
       >
         <View style={styles.trackItemInner}>
@@ -951,7 +969,7 @@ const SpotifyListView = React.memo(({
         </View>
       </GlassCard>
     );
-  }, [currentTrack?.id, playlistTracks, handleTrackPressItem]);
+  }, [currentTrack?.id, filteredPlaylistTracks, handleTrackPressItem, selectedPlaylist]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -997,7 +1015,7 @@ const SpotifyListView = React.memo(({
         <Feather name="search" size={16} color="rgba(255,255,255,0.4)" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search Spotify tracks..."
+          placeholder={selectedPlaylist ? `Search inside ${selectedPlaylist.name}...` : "Search Spotify tracks..."}
           placeholderTextColor="rgba(255,255,255,0.4)"
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -1028,7 +1046,10 @@ const SpotifyListView = React.memo(({
                   borderRadius: Radius.md,
                   gap: 6,
                 }}
-                onPress={() => setSelectedPlaylist(null)}
+                onPress={() => {
+                  setSelectedPlaylist(null);
+                  setSearchQuery('');
+                }}
               >
                 <Feather name="arrow-left" size={14} color="#000000" />
                 <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
@@ -1094,10 +1115,16 @@ const SpotifyListView = React.memo(({
               <Text style={styles.emptyTracksTitle}>Empty Playlist</Text>
               <Text style={styles.emptyTracksDesc}>No songs found in this Spotify playlist.</Text>
             </View>
+          ) : filteredPlaylistTracks.length === 0 ? (
+            <View style={styles.centerContainer}>
+              <Feather name="search" size={48} color={Colors.text.secondary} />
+              <Text style={styles.emptyTracksTitle}>No Matches Found</Text>
+              <Text style={styles.emptyTracksDesc}>No tracks match "{searchQuery}" inside this playlist.</Text>
+            </View>
           ) : (
             <View style={{ flex: 1, position: 'relative' }} onLayout={handleLayout}>
               <FlatList
-                data={playlistTracks}
+                data={filteredPlaylistTracks}
                 keyExtractor={(item, index) => `${item.id}-${index}`}
                 renderItem={renderSpotifyTrackItem}
                 showsVerticalScrollIndicator={false}
@@ -1142,7 +1169,7 @@ const SpotifyListView = React.memo(({
                     intensity="subtle"
                     padding="none"
                     style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
-                    onPress={() => handleTrackPressItem(item, searchResults, false, undefined, item.uri)}
+                    onPress={() => handleTrackPressItem(item, [item], false, undefined, item.uri)}
                     disablePressAnimation
                   >
                     <View style={styles.trackItemInner}>
@@ -2442,7 +2469,7 @@ const QueueItem = React.memo(({
 QueueItem.displayName = 'QueueItem';
 
 const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
-  const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue } = useMusic();
+  const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue, isQueueRecommended } = useMusic();
 
   const SCREEN_HEIGHT = Dimensions.get('window').height;
   const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.5;
@@ -2787,6 +2814,27 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
                 <Feather name="list" size={18} color={Colors.accent.primary} />
                 <Text style={styles.menuTitleText}>Play Queue</Text>
+                {isQueueRecommended && (
+                  <View style={{
+                    backgroundColor: 'rgba(30, 215, 96, 0.12)',
+                    borderColor: 'rgba(30, 215, 96, 0.3)',
+                    borderWidth: 1,
+                    borderRadius: 999,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2.5,
+                    marginLeft: 4,
+                  }}>
+                    <Text style={{
+                      fontFamily: Fonts.bodyBold,
+                      fontSize: FontSizes.tiny,
+                      color: '#1DB954',
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.5,
+                    }}>
+                      Recommended
+                    </Text>
+                  </View>
+                )}
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
                 <Text style={{ fontFamily: Fonts.body, fontSize: FontSizes.tiny + 1, color: 'rgba(255,255,255,0.4)' }}>

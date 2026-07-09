@@ -75,6 +75,8 @@ export interface SpotifyAlbum {
   id: string;
   name: string;
   images: SpotifyImage[];
+  release_date?: string; // "YYYY" or "YYYY-MM-DD"
+  album_type?: string; // "album" | "single" | "compilation"
 }
 
 export interface SpotifyTrack {
@@ -86,6 +88,8 @@ export interface SpotifyTrack {
   uri: string;
   preview_url: string | null;
   external_urls: { spotify: string };
+  type?: string; // "track" | "episode"
+  is_local?: boolean;
 }
 
 export interface SpotifyPlaylist {
@@ -569,6 +573,10 @@ export async function setRepeat(accessToken: string, state: 'off' | 'context' | 
     `/me/player/repeat?state=${state}`,
     'PUT'
   );
+}
+
+export async function getTrack(accessToken: string, trackId: string): Promise<SpotifyTrack | null> {
+  return spotifyFetch<SpotifyTrack>(accessToken, `/tracks/${trackId}`);
 }
 
 // Ensure WebBrowser completes auth session

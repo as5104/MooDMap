@@ -49,6 +49,7 @@ interface MusicContextType {
   downloadProgress: number;
   localTracks: Track[];
   playlists: Playlist[];
+  isQueueRecommended: boolean;
 
   // Controls
   play: (track: Track, contextUri?: string, offsetUri?: string, isShuffle?: boolean) => Promise<void>;
@@ -342,9 +343,17 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Ref to track if the next track has been silently queued on Spotify
   const nextTrackQueuedRef = useRef<string | null>(null);
-  
+
   // Track if the queue is custom/manually reordered
   const isQueueCustomRef = useRef(false);
+
+  const [isQueueRecommended, setIsQueueRecommended] = useState(false);
+  const isQueueRecommendedRef = useRef(false);
+  useEffect(() => { isQueueRecommendedRef.current = isQueueRecommended; }, [isQueueRecommended]);
+
+  // Request locks for Spotify queue pagination
+  const isFetchingQueueRef = useRef(false);
+  const lastFetchedTrackIdRef = useRef<string | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
@@ -523,12 +532,28 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const ci = currentIndexRef.current;
           const sh = shuffleRef.current;
 
-          // Check if the track played exists in our queue
-          const queueIdx = q.findIndex(t => t.id === trackInfo.id);
+          // Check if the track played exists in our queue (by ID first, then fuzzy title+artist)
+          let queueIdx = q.findIndex(t => t.id === trackInfo.id);
+
+          // Fuzzy fallback: Spotify may relink tracks to different market IDs
+          if (queueIdx === -1) {
+            const infoTitle = trackInfo.title.toLowerCase().trim();
+            const infoArtist = trackInfo.artist.toLowerCase().split(',')[0].trim();
+            queueIdx = q.findIndex(t => {
+              const tTitle = t.title.toLowerCase().trim();
+              const tArtist = t.artist.toLowerCase().split(',')[0].trim();
+              return tTitle === infoTitle && tArtist === infoArtist;
+            });
+            if (queueIdx !== -1) {
+              console.log('[MusicContext] Fuzzy-matched relinked track:', trackInfo.title, 'at index:', queueIdx);
+              // Update the stored ID to prevent future mismatches
+              q[queueIdx] = { ...q[queueIdx], id: trackInfo.id };
+            }
+          }
 
           if (queueIdx !== -1) {
             // The track is in our queue!
-            
+
             // If the queue is custom/manually reordered, enforce the custom sequence
             if (isQueueCustomRef.current && q.length > 1) {
               let expectedNextIdx = ci + 1;
@@ -555,9 +580,42 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             currentIndexRef.current = queueIdx;
             setCurrentIndex(queueIdx);
             setCurrentTrack(q[queueIdx]);
+
+            // Proactively fetch more tracks if near end — but NOT for recommended queues (they're self-contained)
+            if (!isQueueRecommendedRef.current && queueIdx >= q.length - 3 && lastFetchedTrackIdRef.current !== trackInfo.id) {
+              lastFetchedTrackIdRef.current = trackInfo.id;
+              proactivelyFetchSpotifyQueue();
+            }
           } else {
-            // The track is NOT in our queue (external song played, or Spotify auto-play recommendations radio)
-            
+            // The track is NOT in our queue (external song played, or Spotify auto-play)
+
+            // If the queue is a Spotify recommended queue, append the new track and keep playing
+            if (isQueueRecommendedRef.current) {
+              console.log('[MusicContext] Recommended queue: appending auto-advanced track:', trackInfo.title);
+
+              const recommendedTrack: Track = {
+                id: trackInfo.id,
+                title: trackInfo.title,
+                artist: trackInfo.artist,
+                url: trackInfo.url,
+                cover: trackInfo.cover,
+                duration: trackInfo.duration,
+                durationSec: trackInfo.durationSec,
+                category: 'spotify',
+              };
+
+              const newQueue = [...q, recommendedTrack];
+              queueRef.current = newQueue;
+              setQueueState(newQueue);
+
+              const nextIdx = q.length;
+              currentIndexRef.current = nextIdx;
+              setCurrentIndex(nextIdx);
+              setCurrentTrack(recommendedTrack);
+              // Do NOT call proactivelyFetchSpotifyQueue — keep our curated queue stable
+              return;
+            }
+
             // Check if it was an auto-play takeover by Spotify near end of our queue
             const wasNearEnd = currentTrackRef.current !== null && currentTimeRef.current >= (currentTrackRef.current?.durationSec || 0) - 5;
             const isAtQueueEnd = ci >= q.length - 1;
@@ -575,7 +633,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 console.log('[MusicContext] Queue finished. Stopping auto-play recommendations.');
                 setPlaying(false);
                 if (playerRef.current) {
-                  try { playerRef.current.pause(); } catch (e) {}
+                  try { playerRef.current.pause(); } catch (e) { }
                 }
                 const { useTierStore } = require('../stores/tierStore');
                 useTierStore.getState().getValidAccessToken().then((token: string | null) => {
@@ -742,8 +800,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Mark reordered queue as custom and turn off shuffle state gaplessly
   const syncReorderedQueue = useCallback(async () => {
     isQueueCustomRef.current = true;
+    setIsQueueRecommended(false); // No longer recommended if manually modified
     console.log('[MusicContext] Queue manually adjusted. Disabling native queue overwriting.');
-    
+
     if (currentTrackRef.current?.category !== 'spotify') return;
     try {
       const { useTierStore } = require('../stores/tierStore');
@@ -753,7 +812,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Disable native Spotify shuffle gaplessly so it respects sequence
         try {
           await spotifySetShuffleAPI(token, false);
-        } catch (e) {}
+        } catch (e) { }
         setShuffle(false);
       }
     } catch (err) {
@@ -761,8 +820,54 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
+  const proactivelyFetchSpotifyQueue = useCallback(async () => {
+    if (currentTrackRef.current?.category !== 'spotify' || isQueueCustomRef.current || isFetchingQueueRef.current) return;
+
+    isFetchingQueueRef.current = true;
+    console.log('[MusicContext] Proactively fetching next batch of Spotify queue...');
+    try {
+      const { useTierStore } = require('../stores/tierStore');
+      const token = await useTierStore.getState().getValidAccessToken();
+      if (token) {
+        const { getQueue } = require('../services/spotify');
+        const queueData = await getQueue(token);
+        if (queueData && queueData.queue && queueData.queue.length > 0) {
+          const combinedQueue = parseSpotifyQueueHelper(queueData);
+
+          // Only update if Spotify's queue contains new tracks or order changed
+          if (combinedQueue.length > queueRef.current.length ||
+            combinedQueue.some((t, i) => queueRef.current[i] && queueRef.current[i].id !== t.id)) {
+            console.log('[MusicContext] Proactively imported new queue batch from Spotify. Tracks count:', combinedQueue.length);
+            queueRef.current = combinedQueue;
+            setQueueState(combinedQueue);
+
+            // Align current index based on what is currently playing
+            if (queueData.currently_playing) {
+              const currentId = 'spotify_' + queueData.currently_playing.id;
+              const idx = combinedQueue.findIndex(t => t.id === currentId);
+              if (idx !== -1) {
+                currentIndexRef.current = idx;
+                setCurrentIndex(idx);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[MusicContext] Proactive queue fetch failed:', e);
+    } finally {
+      isFetchingQueueRef.current = false;
+    }
+  }, []);
+
   const play = useCallback(async (track: Track, contextUri?: string, offsetUri?: string, isShuffle?: boolean) => {
     isQueueCustomRef.current = false;
+
+    // Set recommended queue flag: true only if playing Spotify track without context (e.g. from search)
+    const isRec = track.category === 'spotify' && !contextUri;
+    setIsQueueRecommended(isRec);
+    isQueueRecommendedRef.current = isRec;
+
     addedCountRef.current = 0;
     lastInsertIndexRef.current = currentIndexRef.current;
     try {
@@ -818,7 +923,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   try {
                     await spotifySetShuffleAPI(token, true);
                     console.log('[MusicContext] Enabled native shuffle after starting playback');
-                    
+
                     const { getQueue } = require('../services/spotify');
                     const queueData = await getQueue(token);
                     if (queueData) {
@@ -836,7 +941,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // Sequential playback (isShuffle = false)
                 try {
                   await spotifySetShuffleAPI(token, false);
-                } catch (shuffleErr) {}
+                } catch (shuffleErr) { }
 
                 await spotifyPlayAPI(token, undefined, undefined, contextUri, offsetUri ? { uri: offsetUri } : undefined);
 
@@ -851,34 +956,206 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                       currentIndexRef.current = 0;
                       setCurrentIndex(0);
                     }
-                  } catch (err) {}
+                  } catch (err) { }
                 }, 1500);
               }
             } else {
-              // Fall back to playing via URIs
+              // Playing from search or single track — build recommended queue first, then play all URIs together
+              let finalQueue: Track[] = [track];
+              try {
+                const { searchTracks: spotifySearchTracks, getTrack: spotifyGetTrack } = require('../services/spotify');
+                const primaryArtist = track.artist.split(',')[0].trim();
+                const secondaryArtist = track.artist.split(',')[1]?.trim() || '';
+                const rawTrackId = track.id.replace('spotify_', '');
+
+                // 1. Fetch Track Metadata for Timeline/Era Detection
+                let releaseYear: number | null = null;
+                try {
+                  const fullTrack = await spotifyGetTrack(token, rawTrackId);
+                  if (fullTrack?.album?.release_date) {
+                    const yearMatch = fullTrack.album.release_date.match(/^(\d{4})/);
+                    if (yearMatch) {
+                      releaseYear = parseInt(yearMatch[1], 10);
+                    }
+                  }
+                } catch (trackErr) {
+                  console.warn('[MusicContext] Failed to fetch track release date:', trackErr);
+                }
+
+                let yearFilter = '';
+                if (releaseYear) {
+                  // Match timeline of +/- 5 years to keep similar era vibe
+                  const startYear = Math.max(1950, releaseYear - 5);
+                  const endYear = Math.min(new Date().getFullYear(), releaseYear + 5);
+                  yearFilter = ` year:${startYear}-${endYear}`;
+                }
+
+                // 2. Language Detection
+                const combined = `${track.title} ${track.artist}`;
+                let langTag = '';
+
+                // Unicode script detection
+                if (/[\u0900-\u097F]/.test(combined)) { langTag = 'hindi'; }
+                else if (/[\u0980-\u09FF]/.test(combined)) { langTag = 'bengali'; }
+                else if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(combined)) { langTag = 'japanese'; }
+                else if (/[\uAC00-\uD7AF\u1100-\u11FF]/.test(combined)) { langTag = 'korean'; }
+                else if (/[\u0B80-\u0BFF]/.test(combined)) { langTag = 'tamil'; }
+                else if (/[\u0C00-\u0C7F]/.test(combined)) { langTag = 'telugu'; }
+                else if (/[\u0600-\u06FF]/.test(combined)) { langTag = 'arabic'; }
+
+                // Romanized artist name detection
+                if (!langTag) {
+                  const lowerArtist = primaryArtist.toLowerCase();
+                  const hindiArtists = ['arijit', 'shreya', 'atif', 'neha kakkar', 'badshah', 'honey singh', 'jubin', 'darshan raval', 'kumar sanu', 'udit narayan', 'sonu nigam', 'lata', 'kishore', 'mohit chauhan', 'pritam', 'vishal', 'shankar', 'armaan malik', 'tulsi kumar', 'b praak', 'sachet', 'tanishk', 'guru randhawa', 'diljit', 'ap dhillon', 'harrdy', 'sidhu', 'karan aujla', 'raftaar', 'divine', 'mc stan'];
+                  const spanishArtists = ['bad bunny', 'daddy yankee', 'ozuna', 'j balvin', 'maluma', 'shakira', 'rosalia', 'anuel', 'karol g', 'rauw alejandro', 'nicky jam', 'becky g', 'farruko', 'sech', 'pitbull', 'enrique', 'luis fonsi', 'natti natasha', 'aventura', 'romeo santos'];
+                  const bengaliArtists = ['anupam roy', 'rupam islam', 'nachiketa', 'iman chakraborty', 'babul supriyo', 'jeet gannguli', 'praktan'];
+                  const japaneseArtists = ['yoasobi', 'ado', 'lisa', 'kenshi yonezu', 'aimer', 'radwimps', 'eve', 'yorushika', 'vaundy', 'fujii kaze', 'king gnu', 'mrs. green apple', 'back number'];
+                  const koreanArtists = ['bts', 'blackpink', 'stray kids', 'twice', 'iu', 'aespa', 'newjeans', 'seventeen', 'txt', 'le sserafim', 'nct', 'enhypen', 'itzy', 'red velvet', 'exo', 'bigbang', 'g-dragon'];
+
+                  if (hindiArtists.some(a => lowerArtist.includes(a))) { langTag = 'hindi'; }
+                  else if (bengaliArtists.some(a => lowerArtist.includes(a))) { langTag = 'bengali'; }
+                  else if (spanishArtists.some(a => lowerArtist.includes(a))) { langTag = 'spanish'; }
+                  else if (japaneseArtists.some(a => lowerArtist.includes(a))) { langTag = 'japanese'; }
+                  else if (koreanArtists.some(a => lowerArtist.includes(a))) { langTag = 'korean'; }
+                }
+
+                if (!langTag) { langTag = 'english'; }
+
+                console.log(`[MusicContext] Smart recommendations — language: ${langTag}, artist: ${primaryArtist}, year range: ${yearFilter || 'any'}`);
+
+                // 3. Build targeted, artist-anchored, era-appropriate search queries
+                const searchQueries: { q: string; limit: number; tag: string }[] = [
+                  { q: `artist:"${primaryArtist}"${yearFilter}`, limit: 5, tag: 'same-artist' },
+                  { q: `"${track.title}"`, limit: 4, tag: 'title-match' },
+                ];
+
+                const isOldEra = releaseYear && releaseYear < 2015;
+                if (langTag === 'hindi') {
+                  searchQueries.push(
+                    { q: `Bollywood romantic ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `Bollywood ${isOldEra ? 'hits' : 'latest hits'}${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `filmi gaane ${isOldEra ? '' : 'new'}${yearFilter}`.trim(), limit: 3, tag: 'genre-3' },
+                  );
+                } else if (langTag === 'bengali') {
+                  searchQueries.push(
+                    { q: `Bengali modern songs ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `adhunik bangla gaan${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `Bengali romantic hits${yearFilter}`, limit: 3, tag: 'genre-3' },
+                  );
+                } else if (langTag === 'spanish') {
+                  searchQueries.push(
+                    { q: `reggaeton ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `Latin pop hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `musica latina ${isOldEra ? '' : 'nueva'}${yearFilter}`.trim(), limit: 3, tag: 'genre-3' },
+                  );
+                } else if (langTag === 'japanese') {
+                  searchQueries.push(
+                    { q: `J-Pop ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `Japanese pop hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `anime opening songs${yearFilter}`, limit: 3, tag: 'genre-3' },
+                  );
+                } else if (langTag === 'korean') {
+                  searchQueries.push(
+                    { q: `K-Pop ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `Korean pop hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `K-Pop ${isOldEra ? 'releases' : 'new releases'}${yearFilter}`, limit: 3, tag: 'genre-3' },
+                  );
+                } else if (langTag === 'tamil') {
+                  searchQueries.push(
+                    { q: `Tamil movie songs ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `Kollywood romantic hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `Tamil melody songs${yearFilter}`, limit: 3, tag: 'genre-3' },
+                  );
+                } else if (langTag === 'telugu') {
+                  searchQueries.push(
+                    { q: `Telugu movie songs ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `Tollywood romantic hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `Telugu melody songs${yearFilter}`, limit: 3, tag: 'genre-3' },
+                  );
+                } else {
+                  searchQueries.push(
+                    { q: `${primaryArtist} similar artists${yearFilter}`, limit: 5, tag: 'genre-1' },
+                    { q: `top hits popular songs${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `trending music ${isOldEra ? 'releases' : 'new releases'}${yearFilter}`, limit: 3, tag: 'genre-3' },
+                  );
+                }
+
+                searchQueries.push({ q: `${primaryArtist}${yearFilter}`, limit: 4, tag: 'artist-related' });
+                if (secondaryArtist) {
+                  searchQueries.push({ q: `artist:"${secondaryArtist}"${yearFilter}`, limit: 3, tag: 'feat-artist' });
+                }
+
+                // Execute all searches in parallel
+                const searchResults = await Promise.all(
+                  searchQueries.map(sq =>
+                    spotifySearchTracks(token, sq.q, sq.limit)
+                      .then((res: any[]) => ({ tag: sq.tag, tracks: res || [] }))
+                      .catch(() => ({ tag: sq.tag, tracks: [] as any[] }))
+                  )
+                );
+
+                // 4. Interleave & Filter Out Podcasts / Regional Misalignments
+                const seenIds = new Set<string>([rawTrackId]);
+                const buckets: any[][] = searchResults.map(r => r.tracks);
+                const interleaved: any[] = [];
+                let maxLen = Math.max(...buckets.map(b => b.length));
+
+                for (let i = 0; i < maxLen && interleaved.length < 25; i++) {
+                  for (const bucket of buckets) {
+                    if (i < bucket.length) {
+                      const st = bucket[i];
+                      if (st && st.id && !seenIds.has(st.id)) {
+                        if (st.type && st.type !== 'track') continue;
+                        if (st.uri && (st.uri.includes(':episode:') || st.uri.includes(':show:'))) continue;
+                        if (st.duration_ms && st.duration_ms > 900000) continue;
+                        seenIds.add(st.id);
+                        interleaved.push(st);
+                      }
+                    }
+                  }
+                }
+
+                if (interleaved.length > 0) {
+                  const convertedRecs: Track[] = interleaved.map((st: any) => {
+                    const bestImg = st.album?.images?.reduce((p: any, c: any) =>
+                      Math.abs((c.width || 0) - 300) < Math.abs((p.width || 0) - 300) ? c : p,
+                      st.album?.images?.[0] || {}
+                    );
+                    const totalSecs = Math.floor((st.duration_ms || 0) / 1000);
+                    const mins = Math.floor(totalSecs / 60);
+                    const secs = totalSecs % 60;
+                    return {
+                      id: 'spotify_' + st.id,
+                      title: st.name || 'Unknown Track',
+                      artist: st.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
+                      url: st.uri || '',
+                      cover: bestImg?.url || '',
+                      duration: `${mins}:${secs.toString().padStart(2, '0')}`,
+                      durationSec: totalSecs,
+                      category: 'spotify' as const,
+                    };
+                  });
+                  finalQueue = [track, ...convertedRecs];
+                }
+              } catch (err) {
+                console.warn('[MusicContext] Failed to build recommended queue:', err);
+              }
+
+              // Update local queue state
+              queueRef.current = finalQueue;
+              setQueueState(finalQueue);
+              currentIndexRef.current = 0;
+              setCurrentIndex(0);
+
+              // Play all URIs in the queue together
               try {
                 await spotifySetShuffleAPI(token, !!isShuffle);
-              } catch (shuffleErr) {}
+              } catch (shuffleErr) { }
 
-              const q = queueRef.current;
-              const ci = currentIndexRef.current;
-              const remaining = q.slice(ci);
-              const uris = remaining.slice(0, 100).map(t => t.url);
+              const uris = finalQueue.map(t => t.url);
               await spotifyPlayAPI(token, uris);
 
-              setTimeout(async () => {
-                try {
-                  const { getQueue } = require('../services/spotify');
-                  const queueData = await getQueue(token);
-                  if (queueData) {
-                    const combinedQueue = parseSpotifyQueueHelper(queueData);
-                    queueRef.current = combinedQueue;
-                    setQueueState(combinedQueue);
-                    currentIndexRef.current = 0;
-                    setCurrentIndex(0);
-                  }
-                } catch (err) {}
-              }, 1500);
+              console.log('[MusicContext] Playback started with recommended queue of size:', finalQueue.length);
             }
 
             // Schedule a refresh to sync after the track starts playing
@@ -1208,7 +1485,17 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
           }
         } else {
-          // End of queue — stop playback
+          // End of queue
+          const isSpotify = currentTrackRef.current?.category === 'spotify';
+          if (isSpotify && !isQueueCustomRef.current) {
+            // For Spotify tracks, don't force-pause — let Spotify's native queue auto-advance
+            console.log('[MusicContext] Spotify queue end reached: letting native queue continue');
+            triggerPlaybackRefresh();
+            return;
+          }
+
+          // Non-Spotify: stop playback
+          console.log('[MusicContext] Queue finished. Stopping playback.');
           setPlaying(false);
           if (playerRef.current) {
             try {
@@ -1563,6 +1850,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     downloadProgress,
     localTracks,
     playlists,
+    isQueueRecommended,
     play,
     pause,
     resume,
@@ -1590,6 +1878,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     currentTrack, isPlaying, shouldPlay, queue, currentIndex,
     shuffle, repeatMode, favorites, isHeadphonesConnected,
     cacheSize, isDownloading, downloadProgress, localTracks, playlists,
+    isQueueRecommended,
     play, pause, resume, next, prev, seekTo, toggleFavorite,
     toggleShuffle, toggleRepeatMode, cyclePlaybackMode,
     scanLocalMusic, clearCache, refreshCacheSize, setQueue, addToQueue, syncReorderedQueue,
