@@ -2472,12 +2472,11 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue, isQueueRecommended } = useMusic();
 
   const SCREEN_HEIGHT = Dimensions.get('window').height;
-  const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.5;
-  const MIN_SHEET_HEIGHT = 280;
+
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // Reanimated shared value for height layout resizing on native UI thread
   const sheetHeight = useSharedValue(340);
-  const startHeightRef = useRef(340);
 
   const animatedCardStyle = useAnimatedStyle(() => {
     return {
@@ -2485,8 +2484,8 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
     };
   });
 
-  // Entrance and Exit Slide and Opacity anims
-  const slideAnim = useRef(new RNAnimated.Value(MAX_SHEET_HEIGHT + 40)).current;
+  // Entrance and Exit Slide and Opacity anims (using SCREEN_HEIGHT to ensure complete slide out)
+  const slideAnim = useRef(new RNAnimated.Value(SCREEN_HEIGHT + 100)).current;
   const opacityAnim = useRef(new RNAnimated.Value(0)).current;
 
   useEffect(() => {
@@ -2513,31 +2512,25 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
         useNativeDriver: true,
       }),
       RNAnimated.timing(slideAnim, {
-        toValue: MAX_SHEET_HEIGHT + 40,
+        toValue: SCREEN_HEIGHT + 100,
         duration: 200,
         useNativeDriver: true,
       }),
     ]).start(() => {
       onClose();
     });
-  }, [onClose]);
+  }, [onClose, SCREEN_HEIGHT]);
 
-  const dragBarPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 2,
-      onPanResponderGrant: () => {
-        startHeightRef.current = sheetHeight.value;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const newHeight = startHeightRef.current - gestureState.dy;
-        const clampedHeight = Math.max(MIN_SHEET_HEIGHT, Math.min(MAX_SHEET_HEIGHT, newHeight));
-        sheetHeight.value = clampedHeight; // Update shared value (runs on UI thread)
-      },
-      onPanResponderRelease: () => { },
-      onPanResponderTerminate: () => { },
-    })
-  ).current;
+  const toggleHeight = useCallback(() => {
+    const nextState = !isExpanded;
+    const target = nextState ? SCREEN_HEIGHT * 0.72 : 340;
+    sheetHeight.value = withSpring(target, {
+      damping: 24,
+      stiffness: 150,
+    });
+    setIsExpanded(nextState);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, [isExpanded, SCREEN_HEIGHT]);
 
   const [localQueue, setLocalQueue] = useState<{ track: Track; key: string }[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -2805,10 +2798,14 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
               borderRadius: Radius.card
             }}
           >
-            {/* Drag Handle Bar */}
-            <View {...dragBarPanResponder.panHandlers} style={styles.modalDragHandleContainer}>
-              <View style={styles.modalDragHandleLine} />
-            </View>
+            {/* Tap to Resize Handle Bar */}
+            <Pressable onPress={toggleHeight} style={styles.modalDragHandleContainer}>
+              <Feather
+                name={isExpanded ? "chevron-down" : "chevron-up"}
+                size={22}
+                color={Colors.accent.primary}
+              />
+            </Pressable>
 
             <View style={styles.menuSelectorHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
@@ -4563,10 +4560,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
   },
   queueSheetContainer: {
-    width: '100%',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     paddingHorizontal: Spacing.md,
     paddingBottom: 40,
-    maxHeight: '80%',
   },
   queueEmptyContainer: {
     paddingVertical: 40,

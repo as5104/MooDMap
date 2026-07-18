@@ -15,16 +15,17 @@ import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { StyleSheet, View, Text, AppState, AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Feather } from '@expo/vector-icons';
 
 import { Colors } from '@/constants/colors';
 import { initializeDatabase } from '@/db/client';
 import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/stores/appStore';
 import { useTierStore } from '@/stores/tierStore';
-import { CustomAlert } from '@/components/ui';
+import { CustomAlert, Button, GradientBackground } from '@/components/ui';
 
 import { MusicProvider } from '@/context/MusicContext';
 
@@ -79,6 +80,50 @@ export default function RootLayout() {
     Sora_700Bold,
   });
 
+  const [isLocked, setIsLocked] = useState(false);
+  const isLockedRef = useRef(false);
+  const isAuthenticatingRef = useRef(false);
+
+  useEffect(() => {
+    isLockedRef.current = isLocked;
+  }, [isLocked]);
+
+  const triggerBiometricAuth = useCallback(async () => {
+    if (isAuthenticatingRef.current) return;
+    isAuthenticatingRef.current = true;
+
+    try {
+      const LocalAuthentication = require('expo-local-authentication');
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+      if (hasHardware && isEnrolled) {
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Unlock MoodMap',
+          fallbackLabel: 'Use passcode',
+          disableDeviceFallback: false,
+        });
+
+        if (result.success) {
+          setIsLocked(false);
+        }
+      } else {
+        // Safety bypass: if biometric hardware is missing or no credentials are enrolled,
+        // we disable lock so the user isn't permanently locked out of their app.
+        setIsLocked(false);
+      }
+    } catch (err) {
+      console.error('[AppLock] Biometric auth failed:', err);
+      setIsLocked(false);
+    } finally {
+      // Small timeout to allow AppState change listener (which fires on prompt completion)
+      // to execute before resetting the flag.
+      setTimeout(() => {
+        isAuthenticatingRef.current = false;
+      }, 600);
+    }
+  }, []);
+
   // Initialize app: DB + Auth
   useEffect(() => {
     const init = async () => {
@@ -94,6 +139,15 @@ export default function RootLayout() {
           const { getSetting } = require('@/services/settingsService');
           const savedViewMode = getSetting('journal_view_mode', 'list');
           useAppStore.getState().setJournalViewMode(savedViewMode as any);
+
+          // Check biometric lock setting on startup
+          const isBioEnabled = getSetting('biometric_lock_enabled', 'disabled') === 'enabled';
+          if (isBioEnabled) {
+            setIsLocked(true);
+            setTimeout(() => {
+              triggerBiometricAuth();
+            }, 300);
+          }
         } catch (settingsError) {
           console.error('[App] Failed to load settings:', settingsError);
         }
@@ -128,7 +182,44 @@ export default function RootLayout() {
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [triggerBiometricAuth]);
+
+  // Listen to AppState (foreground/background) to re-lock the app
+  useEffect(() => {
+    let appStateSubscription: any = null;
+
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        if (isAuthenticatingRef.current) {
+          console.log('[AppLock] AppState active transition caused by biometric modal dismissal. Skipping lock.');
+          return;
+        }
+
+        if (isLockedRef.current) {
+          console.log('[AppLock] AppState active transition while already locked. Skipping trigger.');
+          return;
+        }
+
+        try {
+          const { getSetting } = require('@/services/settingsService');
+          const isBioEnabled = getSetting('biometric_lock_enabled', 'disabled') === 'enabled';
+          if (isBioEnabled) {
+            setIsLocked(true);
+            setTimeout(() => {
+              triggerBiometricAuth();
+            }, 100);
+          }
+        } catch (err) {
+          console.error('[AppLock] AppState listener failed:', err);
+        }
+      }
+    };
+
+    appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      if (appStateSubscription) appStateSubscription.remove();
+    };
+  }, [triggerBiometricAuth]);
 
   // Activate the auth guard
   useProtectedRoute();
@@ -142,6 +233,37 @@ export default function RootLayout() {
 
   if (!fontsLoaded) {
     return null;
+  }
+
+  // App Lock screen overlay
+  if (isLocked) {
+    const { Fonts, FontSizes } = require('@/constants/typography');
+    const { Spacing } = require('@/constants/layout');
+
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <GradientBackground>
+          <View style={lockStyles.lockContainer}>
+            <View style={lockStyles.lockIconWrap}>
+              <Feather name="lock" size={36} color={Colors.accent.olive} />
+            </View>
+            <Text style={[lockStyles.lockTitle, { fontFamily: Fonts.heading, fontSize: FontSizes.xl }]}>
+              MoodMap is Locked
+            </Text>
+            <Text style={[lockStyles.lockSubtitle, { fontFamily: Fonts.body, fontSize: FontSizes.md }]}>
+              Please authenticate using biometrics to unlock your personal space.
+            </Text>
+            <Button
+              title="Unlock App"
+              variant="primary"
+              size="lg"
+              onPress={triggerBiometricAuth}
+              style={lockStyles.unlockBtn}
+            />
+          </View>
+        </GradientBackground>
+      </GestureHandlerRootView>
+    );
   }
 
   return (
@@ -197,5 +319,38 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: Colors.background.primary,
+  },
+});
+
+const lockStyles = StyleSheet.create({
+  lockContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  lockIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(190, 255, 108, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  lockTitle: {
+    color: Colors.text.primary,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  lockSubtitle: {
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: 32,
+    paddingHorizontal: 16,
+    lineHeight: 22,
+  },
+  unlockBtn: {
+    width: '60%',
   },
 });

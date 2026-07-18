@@ -11,6 +11,7 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import Animated, {
@@ -35,6 +36,7 @@ import { signOut } from '@/lib/auth';
 import { getMoodScoreForPeriod, getMoodCountForPeriod, getMoodStreak, getMoodCount } from '@/services/moodService';
 import { getJournalCount } from '@/services/journalService';
 import { exportUserData, importUserData } from '@/services/dataTransferService';
+import { getSetting, saveSetting } from '@/services/settingsService';
 
 // XP thresholds per level
 const XP_PER_LEVEL = 500;
@@ -52,6 +54,8 @@ export default function ProfileScreen() {
   const [moodCount, setMoodCount] = useState(0);
   const [streak, setStreak] = useState(0);
   const [score, setScore] = useState(0);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
 
   const refreshData = useAppStore((s) => s.refreshData);
 
@@ -130,6 +134,12 @@ export default function ProfileScreen() {
       setStreak(streakData.current);
       setScore(scoreVal);
 
+      // Load settings
+      const notifSetting = getSetting('notifications_enabled', 'disabled');
+      const bioSetting = getSetting('biometric_lock_enabled', 'disabled');
+      setNotificationsEnabled(notifSetting === 'enabled');
+      setBiometricLockEnabled(bioSetting === 'enabled');
+
       // Check VIP status asynchronously
       if (userId) {
         checkVIPStatus(userId);
@@ -187,13 +197,156 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const handleToggleNotifications = useCallback(async () => {
+    const Notifications = require('expo-notifications');
+    
+    if (notificationsEnabled) {
+      // Toggle OFF
+      try {
+        await Notifications.cancelAllScheduledNotificationsAsync();
+        saveSetting('notifications_enabled', 'disabled');
+        setNotificationsEnabled(false);
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        customAlert('Notifications Disabled', 'Daily mood tracking reminders have been turned off.');
+      } catch (err) {
+        console.error('[Profile] Cancel notifications error:', err);
+      }
+    } else {
+      // Toggle ON
+      try {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        
+        if (finalStatus !== 'granted') {
+          customAlert('Permission Denied', 'Please enable notification permissions in your device settings to receive daily reminders.');
+          return;
+        }
+
+        // Set channel for Android
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('reminders', {
+            name: 'Daily Reminders',
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#C1FF72',
+          });
+        }
+
+        // Schedule notification
+        // Schedule notification
+        await Notifications.cancelAllScheduledNotificationsAsync();
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: "Start your day with MooDMap 🗺️",
+            body: "Take a minute to log your morning mood and get your custom recommendations.",
+            sound: true,
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DAILY,
+            hour: 8,
+            minute: 0,
+            channelId: Platform.OS === 'android' ? 'reminders' : undefined,
+          },
+        });
+
+        saveSetting('notifications_enabled', 'enabled');
+        setNotificationsEnabled(true);
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        customAlert('Notifications Enabled', 'Daily reminders scheduled for 8:00 AM.');
+      } catch (err) {
+        console.error('[Profile] Enable notifications error:', err);
+        customAlert('Error', 'Failed to schedule daily reminders.');
+      }
+    }
+  }, [notificationsEnabled]);
+
+  const handleToggleBiometrics = useCallback(async () => {
+    const LocalAuthentication = require('expo-local-authentication');
+
+    if (biometricLockEnabled) {
+      // Prompt user to authenticate to disable it
+      try {
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Confirm identity to disable App Lock',
+          fallbackLabel: 'Use passcode',
+        });
+        if (result.success) {
+          saveSetting('biometric_lock_enabled', 'disabled');
+          setBiometricLockEnabled(false);
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          customAlert('App Lock Disabled', 'Biometric App Lock has been disabled.');
+        }
+      } catch (err) {
+        console.error('[Profile] Disable biometric error:', err);
+      }
+    } else {
+      // Toggle ON
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+        if (!hasHardware || !isEnrolled) {
+          customAlert(
+            'Biometrics Unavailable',
+            'Your device does not support biometrics or has no Face ID/fingerprint enrolled. Please set up security on your device first.'
+          );
+          return;
+        }
+
+        // Verify user can authenticate right now before turning it on
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Authenticate to enable App Lock',
+          fallbackLabel: 'Use passcode',
+        });
+
+        if (result.success) {
+          saveSetting('biometric_lock_enabled', 'enabled');
+          setBiometricLockEnabled(true);
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          customAlert('App Lock Enabled', 'The app will now require biometric authentication on startup.');
+        }
+      } catch (err) {
+        console.error('[Profile] Enable biometric error:', err);
+        customAlert('Error', 'Failed to set up biometric lock.');
+      }
+    }
+  }, [biometricLockEnabled]);
+
   const menuItems = [
-    { icon: 'bell' as const, label: 'Notifications', value: 'On', onPress: undefined as (() => void) | undefined },
-    { icon: 'shield' as const, label: 'Privacy', value: '', onPress: undefined as (() => void) | undefined },
-    { icon: 'download' as const, label: 'Export Data', value: '', onPress: handleExport },
-    { icon: 'upload' as const, label: 'Import Data', value: '', onPress: handleImport },
-    { icon: 'moon' as const, label: 'Theme', value: 'Dark', onPress: undefined as (() => void) | undefined },
-    { icon: 'info' as const, label: 'About', value: 'v1.0', onPress: undefined as (() => void) | undefined },
+    {
+      icon: 'bell' as const,
+      label: 'Notifications',
+      value: notificationsEnabled ? 'On' : 'Off',
+      onPress: handleToggleNotifications,
+    },
+    {
+      icon: 'shield' as const,
+      label: 'App Lock',
+      value: biometricLockEnabled ? 'Enabled' : 'Disabled',
+      onPress: handleToggleBiometrics,
+    },
+    {
+      icon: 'download' as const,
+      label: 'Export Data',
+      value: '',
+      onPress: handleExport,
+    },
+    {
+      icon: 'upload' as const,
+      label: 'Import Data',
+      value: '',
+      onPress: handleImport,
+    },
+    {
+      icon: 'info' as const,
+      label: 'About',
+      value: 'v1.0',
+      onPress: undefined as (() => void) | undefined,
+    },
   ];
 
   return (
