@@ -415,6 +415,27 @@ export function getMoodCount(userId?: string): number {
   return result?.cnt ?? 0;
 }
 
+/**
+ * Get mood entries count within a specific period (days).
+ * Useful for checking if data exists in a given time window.
+ */
+export function getMoodCountForPeriod(userId?: string, days: number = 7): number {
+  const startDate = getDateNDaysAgo(days);
+  const today = getTodayDate();
+
+  const result = userId
+    ? queryFirst<{ cnt: number }>(
+        'SELECT COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ? AND user_id = ?',
+        [startDate, today, userId]
+      )
+    : queryFirst<{ cnt: number }>(
+        'SELECT COUNT(*) as cnt FROM mood_entries WHERE date >= ? AND date <= ?',
+        [startDate, today]
+      );
+
+  return result?.cnt ?? 0;
+}
+
 export interface TrendBarItem {
   /** Mood score 1-10 */
   score: number;

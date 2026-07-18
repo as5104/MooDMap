@@ -52,7 +52,7 @@ interface MusicContextType {
   isQueueRecommended: boolean;
 
   // Controls
-  play: (track: Track, contextUri?: string, offsetUri?: string, isShuffle?: boolean) => Promise<void>;
+  play: (track: Track, contextUri?: string, offsetUri?: string, isShuffle?: boolean, _isInternalSkip?: boolean) => Promise<void>;
   pause: () => Promise<void> | void;
   resume: () => Promise<void> | void;
   next: () => Promise<void> | void;
@@ -333,7 +333,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const currentIndexRef = useRef(currentIndex);
   const shuffleRef = useRef(shuffle);
   const repeatModeRef = useRef<RepeatMode>(repeatMode);
-  const playRef = useRef<((track: Track) => Promise<void>) | null>(null);
+  const playRef = useRef<((track: Track, contextUri?: string, offsetUri?: string, isShuffle?: boolean, _isInternalSkip?: boolean) => Promise<void>) | null>(null);
   const nextRef = useRef<(() => void) | null>(null);
   const prevRef = useRef<(() => void) | null>(null);
   const addedCountRef = useRef(0);
@@ -568,7 +568,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 currentIndexRef.current = expectedNextIdx;
                 setCurrentIndex(expectedNextIdx);
                 if (playRef.current && q[expectedNextIdx]) {
-                  playRef.current(q[expectedNextIdx]);
+                  playRef.current(q[expectedNextIdx], undefined, undefined, undefined, true);
                 }
                 return; // Prevent syncing to the wrong track
               }
@@ -626,7 +626,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 currentIndexRef.current = 0;
                 setCurrentIndex(0);
                 if (playRef.current && q[0]) {
-                  playRef.current(q[0]);
+                  playRef.current(q[0], undefined, undefined, undefined, true);
                 }
                 return;
               } else {
@@ -860,13 +860,16 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  const play = useCallback(async (track: Track, contextUri?: string, offsetUri?: string, isShuffle?: boolean) => {
+  const play = useCallback(async (track: Track, contextUri?: string, offsetUri?: string, isShuffle?: boolean, _isInternalSkip?: boolean) => {
     isQueueCustomRef.current = false;
 
-    // Set recommended queue flag: true only if playing Spotify track without context (e.g. from search)
-    const isRec = track.category === 'spotify' && !contextUri;
-    setIsQueueRecommended(isRec);
-    isQueueRecommendedRef.current = isRec;
+    // Only recalculate the recommended flag on fresh user-initiated plays (not internal skips/syncs).
+    // Internal skips (next, prev, polling sync, auto-advance) preserve the existing flag.
+    if (!_isInternalSkip) {
+      const isRec = track.category === 'spotify' && !contextUri;
+      setIsQueueRecommended(isRec);
+      isQueueRecommendedRef.current = isRec;
+    }
 
     addedCountRef.current = 0;
     lastInsertIndexRef.current = currentIndexRef.current;
@@ -1319,7 +1322,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       currentIndexRef.current = nextIndex;
       setCurrentIndex(nextIndex);
-      await playRef.current?.(q[nextIndex]);
+      await playRef.current?.(q[nextIndex], undefined, undefined, undefined, true);
       return;
     }
 
@@ -1372,7 +1375,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (prevIndex >= 0) {
         currentIndexRef.current = prevIndex;
         setCurrentIndex(prevIndex);
-        await playRef.current?.(q[prevIndex]);
+        await playRef.current?.(q[prevIndex], undefined, undefined, undefined, true);
         return;
       }
       // If prevIndex is -1 (Spotify at start), fall through to native prev below
@@ -1450,7 +1453,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           // Repeat-one: must force replay via API
           seekTo(0);
           if (currentTrackRef.current) {
-            playRef.current?.(currentTrackRef.current);
+            playRef.current?.(currentTrackRef.current, undefined, undefined, undefined, true);
           }
         } else if (rm === 'all' || ci < q.length - 1) {
           let nextIdx = ci + 1;
@@ -1481,7 +1484,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // Only force play via API if the queue is custom-reordered
             if (isQueueCustomRef.current) {
               console.log('[MusicContext] Custom queue active — forcing correct next track via API');
-              playRef.current?.(nextTrack);
+              playRef.current?.(nextTrack, undefined, undefined, undefined, true);
             }
           }
         } else {
@@ -1820,7 +1823,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           currentIndexRef.current = nextIdx;
           setCurrentIndex(nextIdx);
           if (playRef.current && q[nextIdx]) {
-            playRef.current(q[nextIdx]);
+            playRef.current(q[nextIdx], undefined, undefined, undefined, true);
           }
         } else {
           setPlaying(prev => prev === false ? prev : false);

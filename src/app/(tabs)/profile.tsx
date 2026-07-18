@@ -32,7 +32,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useTierStore } from '@/stores/tierStore';
 import { useSpotify } from '@/hooks/useSpotify';
 import { signOut } from '@/lib/auth';
-import { getMoodScoreForPeriod, getMoodStreak, getMoodCount } from '@/services/moodService';
+import { getMoodScoreForPeriod, getMoodCountForPeriod, getMoodStreak, getMoodCount } from '@/services/moodService';
 import { getJournalCount } from '@/services/journalService';
 import { exportUserData, importUserData } from '@/services/dataTransferService';
 
@@ -114,7 +114,16 @@ export default function ProfileScreen() {
       const jCount = getJournalCount(userId);
       const mCount = getMoodCount(userId);
       const streakData = getMoodStreak(userId);
-      const scoreVal = getMoodScoreForPeriod(userId, 7);
+      // Auto-detect best period: prefer 7D, escalate if no data in that window
+      const PERIOD_OPTIONS = [7, 30, 90, 365];
+      let bestDays = 7;
+      for (const days of PERIOD_OPTIONS) {
+        if (getMoodCountForPeriod(userId, days) > 0) {
+          bestDays = days;
+          break;
+        }
+      }
+      const scoreVal = getMoodScoreForPeriod(userId, bestDays);
 
       setJournalCount(jCount);
       setMoodCount(mCount);

@@ -40,6 +40,7 @@ import {
   getDayOfWeekAnalysis,
   formatMoodNote,
   computeCompositeScorePercent,
+  getMoodCountForPeriod,
   type DayMoodData,
   type MoodEntryRow,
   type MoodStatsData,
@@ -259,11 +260,34 @@ export default function InsightsScreen() {
     loadDataForPeriod(activePeriodRef.current);
   }, [dataVersion, calYear, calMonth, isAppReady]);
 
-  // Load on focus
+  // Auto-detect the best period on first focus.
+  // If default 7D has no data but older entries exist, auto-escalate to a wider period.
+  const hasAutoDetectedRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      loadDataRef.current(activePeriodRef.current);
-    }, [])
+      if (!isAppReady) return;
+      const userId = user?.id;
+
+      // On first focus, auto-detect the best period
+      if (!hasAutoDetectedRef.current) {
+        hasAutoDetectedRef.current = true;
+        let bestPeriod = 0; // default 7D
+        for (let i = 0; i < PERIODS.length; i++) {
+          const count = getMoodCountForPeriod(userId, PERIODS[i].days);
+          if (count > 0) {
+            bestPeriod = i;
+            break;
+          }
+        }
+        if (bestPeriod !== activePeriodRef.current) {
+          setActivePeriod(bestPeriod);
+          activePeriodRef.current = bestPeriod;
+        }
+        loadDataRef.current(bestPeriod);
+      } else {
+        loadDataRef.current(activePeriodRef.current);
+      }
+    }, [isAppReady, user?.id])
   );
 
   const hasData = stats.total > 0;

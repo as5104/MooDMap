@@ -14,6 +14,7 @@ import { getJournalCount, getLatestJournal, type JournalEntryRow } from '@/servi
 import {
   computeCompositeScorePercent,
   getMoodCount,
+  getMoodCountForPeriod,
   getMoodScoreForPeriod,
   getMoodStreak,
   getMoodSummary,
@@ -94,13 +95,24 @@ export default function HomeScreen() {
       const userId = user?.id;
       const todayEntry = getTodayMood(userId);
       const weekly = getWeeklyMoods(userId);
-      const score = getMoodScoreForPeriod(userId, 7);
+
+      // Auto-detect the best period: prefer 7D, but escalate if no data exists in that window
+      const PERIOD_OPTIONS = [7, 30, 90, 365];
+      let bestDays = 7;
+      for (const days of PERIOD_OPTIONS) {
+        if (getMoodCountForPeriod(userId, days) > 0) {
+          bestDays = days;
+          break;
+        }
+      }
+
+      const score = getMoodScoreForPeriod(userId, bestDays);
       const streakData = getMoodStreak(userId);
       const journal = getLatestJournal(userId);
       const jCount = getJournalCount(userId);
       const mCount = getMoodCount(userId);
-      const summaryData = getMoodSummary(userId, 7);
-      const topMoodsData = getTopMoods(userId, 7, 3);
+      const summaryData = getMoodSummary(userId, bestDays);
+      const topMoodsData = getTopMoods(userId, bestDays, 3);
 
       if (todayEntry) {
         setTodayMood({
