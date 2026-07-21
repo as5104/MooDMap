@@ -54,12 +54,16 @@ function useProtectedRoute() {
 
     if (!session && !inAuthGroup) {
       // User is NOT authenticated but is outside the auth screens
-      // → Force them to the login screen
+      // Force them to the login screen
       router.replace('/(auth)/login');
     } else if (session && inAuthGroup) {
-      // User IS authenticated but still on an auth screen (e.g. just logged in)
-      // → Send them to the index which handles onboarding/home routing
-      router.replace('/');
+      // User IS authenticated but still on an auth screen
+      // Allow access to forgot-password for change-password mode
+      const onForgotPassword = segments[1] === 'forgot-password';
+      if (!onForgotPassword) {
+        // Send them to the index which handles onboarding/home routing
+        router.replace('/');
+      }
     }
   }, [session, isAuthLoading, isAppReady, segments]);
 }

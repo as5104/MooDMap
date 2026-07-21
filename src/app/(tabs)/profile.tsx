@@ -56,6 +56,7 @@ export default function ProfileScreen() {
   const [score, setScore] = useState(0);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
+  const [lastBackupDate, setLastBackupDate] = useState<string | null>(null);
 
   const refreshData = useAppStore((s) => s.refreshData);
 
@@ -137,8 +138,10 @@ export default function ProfileScreen() {
       // Load settings
       const notifSetting = getSetting('notifications_enabled', 'disabled');
       const bioSetting = getSetting('biometric_lock_enabled', 'disabled');
+      const backupDate = getSetting('last_backup_date', '');
       setNotificationsEnabled(notifSetting === 'enabled');
       setBiometricLockEnabled(bioSetting === 'enabled');
+      setLastBackupDate(backupDate || null);
 
       // Check VIP status asynchronously
       if (userId) {
@@ -155,7 +158,12 @@ export default function ProfileScreen() {
 
   const handleExport = async () => {
     if (!user?.id) return;
-    await exportUserData(user.id);
+    const success = await exportUserData(user.id);
+    if (success) {
+      const now = new Date().toISOString();
+      saveSetting('last_backup_date', now);
+      setLastBackupDate(now);
+    }
   };
 
   const handleImport = async () => {
@@ -165,6 +173,10 @@ export default function ProfileScreen() {
       refreshData(); // Trigger UI refresh across all screens
       loadData();     // Refresh profile stats
     }
+  };
+
+  const handleBackupToGDrive = async () => {
+    await handleExport();
   };
 
   useFocusEffect(
@@ -330,6 +342,12 @@ export default function ProfileScreen() {
       onPress: handleToggleBiometrics,
     },
     {
+      icon: 'key' as const,
+      label: 'Change Password',
+      value: '',
+      onPress: () => router.push('/(auth)/forgot-password?mode=change'),
+    },
+    {
       icon: 'download' as const,
       label: 'Export Data',
       value: '',
@@ -465,6 +483,34 @@ export default function ProfileScreen() {
             </View>
           </GlassCard>
         </View>
+
+        {/* Backup to Google Drive Card */}
+        <Pressable onPress={handleBackupToGDrive}>
+          <GlassCard intensity="medium" padding="lg" style={styles.backupCard}>
+            <View style={styles.backupRow}>
+              <View style={styles.backupIconWrap}>
+                <Feather name="hard-drive" size={22} color={Colors.accent.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={styles.backupTitleRow}>
+                  <Text style={styles.backupTitle}>Backup Data</Text>
+                  <View style={styles.recommendedBadge}>
+                    <Text style={styles.recommendedText}>Recommended</Text>
+                  </View>
+                </View>
+                <Text style={styles.backupDesc}>
+                  Save to Google Drive
+                </Text>
+                <Text style={styles.backupLastDate}>
+                  {lastBackupDate
+                    ? `Last backup: ${new Date(lastBackupDate).toLocaleDateString()}`
+                    : 'Never backed up'}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={Colors.text.tertiary} />
+            </View>
+          </GlassCard>
+        </Pressable>
 
         {/* Menu */}
         <GlassCard intensity="subtle" padding="none" style={styles.menuCard}>
@@ -809,6 +855,61 @@ const styles = StyleSheet.create({
     width: 1,
     height: 24,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+
+  // Backup Card
+  backupCard: {
+    marginBottom: Spacing.xl,
+    borderColor: 'rgba(190, 255, 108, 0.15)',
+    borderWidth: 1,
+  },
+  backupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  backupIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(190, 255, 108, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backupTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: 2,
+  },
+  backupTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+  },
+  recommendedBadge: {
+    backgroundColor: 'rgba(190, 255, 108, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+  },
+  recommendedText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: 9,
+    color: Colors.accent.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  backupDesc: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+    marginBottom: 2,
+  },
+  backupLastDate: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: 'rgba(255,255,255,0.3)',
   },
 
   menuCard: {

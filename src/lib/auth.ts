@@ -50,9 +50,34 @@ export const signInWithEmail = async (
   return { success: true };
 };
 
-/** Send password reset email */
+/** Send password reset email (Supabase sends OTP code via configured SMTP) */
 export const resetPassword = async (email: string): Promise<AuthResult> => {
   const { error } = await supabase.auth.resetPasswordForEmail(email);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+};
+
+/** Verify the 8-digit OTP code from the password reset email */
+export const verifyPasswordResetOTP = async (
+  email: string,
+  token: string
+): Promise<AuthResult> => {
+  const { error } = await supabase.auth.verifyOtp({
+    email,
+    token,
+    type: 'recovery',
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+};
+
+/** Update the current user's password */
+export const updatePassword = async (
+  newPassword: string
+): Promise<AuthResult> => {
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
   if (error) return { success: false, error: error.message };
   return { success: true };
 };
