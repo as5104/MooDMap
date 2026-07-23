@@ -648,7 +648,7 @@ const SpotifyListView = React.memo(({
   onShowQueue,
 }: {
   onGoBack: () => void;
-  onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string) => void;
+  onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => void;
   onSettingsPress: () => void;
   onShowQueue: () => void;
 }) => {
@@ -896,10 +896,10 @@ const SpotifyListView = React.memo(({
     };
   }, []);
 
-  const handleTrackPressItem = useCallback((track: any, list: any[], isShuffle?: boolean, contextUri?: string, offsetUri?: string) => {
+  const handleTrackPressItem = useCallback((track: any, list: any[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => {
     const convertedTrack = convertSpotifyTrackToTrack(track);
     const convertedList = list.map(convertSpotifyTrackToTrack);
-    onTrackPress(convertedTrack, convertedList, isShuffle, contextUri, offsetUri);
+    onTrackPress(convertedTrack, convertedList, isShuffle, contextUri, offsetUri, _isFromSearch);
 
     // Save to recents map only when a track is actually played from a playlist
     if (selectedPlaylist) {
@@ -1169,7 +1169,7 @@ const SpotifyListView = React.memo(({
                     intensity="subtle"
                     padding="none"
                     style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
-                    onPress={() => handleTrackPressItem(item, [item], false, undefined, item.uri)}
+                    onPress={() => handleTrackPressItem(item, [item], false, undefined, item.uri, true)}
                     disablePressAnimation
                   >
                     <View style={styles.trackItemInner}>
@@ -2391,6 +2391,7 @@ interface QueueItemProps {
   onDragStart: (idx: number) => void;
   onDragMove: (dy: number, moveY: number) => void;
   onDragEnd: () => void;
+  onTrackPress: (track: Track, index: number) => void;
 }
 
 const QueueItem = React.memo(({
@@ -2402,6 +2403,7 @@ const QueueItem = React.memo(({
   onDragStart,
   onDragMove,
   onDragEnd,
+  onTrackPress,
 }: QueueItemProps) => {
   // Ref to capture latest props for PanResponder closure safety
   const callbacksRef = useRef({ onDragStart, onDragMove, onDragEnd, index });
@@ -2448,16 +2450,21 @@ const QueueItem = React.memo(({
         },
       ]}
     >
-      <MusicCover cover={track.cover} style={styles.queueItemCover} iconSize={12} borderRadius={6} />
+      <Pressable
+        onPress={() => onTrackPress(track, index)}
+        style={({ pressed }) => [{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }, pressed && { opacity: 0.7 }]}
+      >
+        <MusicCover cover={track.cover} style={styles.queueItemCover} iconSize={12} borderRadius={6} />
 
-      <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={[styles.queueItemTitle, isCurrent && styles.activeQueueItemText]}>
-          {track.title}
-        </Text>
-        <Text numberOfLines={1} style={styles.queueItemArtist}>
-          {track.artist}
-        </Text>
-      </View>
+        <View style={{ flex: 1 }}>
+          <Text numberOfLines={1} style={[styles.queueItemTitle, isCurrent && styles.activeQueueItemText]}>
+            {track.title}
+          </Text>
+          <Text numberOfLines={1} style={styles.queueItemArtist}>
+            {track.artist}
+          </Text>
+        </View>
+      </Pressable>
 
       {/* Drag Handle */}
       <View {...panResponder.panHandlers} style={styles.queueItemDragHandle}>
@@ -2469,7 +2476,7 @@ const QueueItem = React.memo(({
 QueueItem.displayName = 'QueueItem';
 
 const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
-  const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue, isQueueRecommended } = useMusic();
+  const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue, isQueueRecommended, play, pause, resume, isPlaying } = useMusic();
 
   const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -2546,15 +2553,8 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   const stateRef = useRef({ localQueue, draggedIndex, currentIndex, currentTrack });
   stateRef.current = { localQueue, draggedIndex, currentIndex, currentTrack };
 
-  const isInternalChangeRef = useRef(false);
-
-  // Sync queue to local state (only on external queue changes, skip during drag)
+  // Sync queue to local state (only on external queue changes, skip during active drag)
   useEffect(() => {
-    if (isInternalChangeRef.current) {
-      isInternalChangeRef.current = false;
-      return;
-    }
-    // Skip syncing during an active drag to prevent data array replacement mid-gesture
     if (stateRef.current.draggedIndex !== null) return;
     setLocalQueue(queue.map((track, idx) => ({
       track,
@@ -2735,7 +2735,6 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
 
     // Defer heavy global context sync so the drag styling clears first
     setTimeout(() => {
-      isInternalChangeRef.current = true;
       const syncedTracks = updated.map(i => i.track);
       let newIndex = 0;
       if (currentTrack) {
@@ -2745,6 +2744,35 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
       syncReorderedQueue();
     }, 0);
   }, [dragYVal, currentTrack, setQueue]);
+
+  const handleQueueTrackClick = useCallback((clickedTrack: Track, clickedIndex: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    if (currentTrack?.id === clickedTrack.id) {
+      if (isPlaying) {
+        pause();
+      } else {
+        resume();
+      }
+      return;
+    }
+
+    // Preserve current queue tracks: move clicked track to position 0 (Now Playing) without deleting any tracks
+    const filtered = queue.filter(t => t.id !== clickedTrack.id);
+    const newQueue = [clickedTrack, ...filtered];
+
+    // Update local queue state live
+    const updatedLocal = newQueue.map((track, idx) => ({
+      track,
+      key: `${track.id}_${idx}`
+    }));
+    setLocalQueue(updatedLocal);
+    stateRef.current.localQueue = updatedLocal;
+
+    setQueue(newQueue, 0);
+    syncReorderedQueue();
+    play(clickedTrack, undefined, clickedTrack.url, undefined, true, false);
+  }, [currentTrack?.id, isPlaying, pause, resume, queue, setQueue, syncReorderedQueue, play]);
 
   const renderItem = useCallback(({ item, index: idx }: { item: { track: Track; key: string }; index: number }) => {
     const isCurrent = currentTrack?.id === item.track.id;
@@ -2760,9 +2788,10 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
+        onTrackPress={handleQueueTrackClick}
       />
     );
-  }, [currentTrack?.id, draggedIndex, dragYVal, handleDragStart, handleDragMove, handleDragEnd]);
+  }, [currentTrack?.id, draggedIndex, dragYVal, handleDragStart, handleDragMove, handleDragEnd, handleQueueTrackClick]);
 
   const getItemLayout = useCallback((_: any, index: number) => ({
     length: 64,
@@ -2863,9 +2892,10 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
                   showsVerticalScrollIndicator={false}
                   scrollEnabled={draggedIndex === null}
                   contentContainerStyle={styles.queueListContent}
-                  initialNumToRender={15}
-                  maxToRenderPerBatch={15}
-                  windowSize={5}
+                  removeClippedSubviews={Platform.OS === 'android'}
+                  initialNumToRender={14}
+                  maxToRenderPerBatch={10}
+                  windowSize={7}
                   onScroll={handleScroll}
                   scrollEventThrottle={16}
                   onScrollToIndexFailed={() => { }}
@@ -3227,7 +3257,7 @@ export default function MusicScreen() {
     setView('list');
   }, []);
 
-  const handleTrackPress = useCallback((track: Track, tracksInCat: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string) => {
+  const handleTrackPress = useCallback((track: Track, tracksInCat: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => {
     if (!isShuffle && currentTrack?.id === track.id) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       if (isPlaying) {
@@ -3240,7 +3270,7 @@ export default function MusicScreen() {
     const idx = tracksInCat.findIndex(t => t.id === track.id);
     const slicedTracks = idx !== -1 ? tracksInCat.slice(idx) : [track];
     setQueue(slicedTracks, 0);
-    play(track, contextUri, offsetUri, isShuffle);
+    play(track, contextUri, offsetUri, isShuffle, undefined, _isFromSearch);
     setView('player');
   }, [play, setQueue, currentTrack?.id, isPlaying, pause, resume]);
 
