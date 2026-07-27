@@ -78,3 +78,20 @@ export const moodMusicTags = sqliteTable('mood_music_tags', {
   lastPlayedAt: text('last_played_at').notNull(),
   userId: text('user_id'),
 });
+
+// Music Preferences (VIP users' taste profile from survey)
+export const musicPreferences = sqliteTable('music_preferences', {
+  userId: text('user_id').primaryKey(),
+  preferences: text('preferences').notNull(), // JSON blob
+  updatedAt: text('updated_at').notNull(),
+});
+
+// Recommendation Signals (skip/complete tracking for learning)
+export const recommendationSignals = sqliteTable('recommendation_signals', {
+  id: text('id').primaryKey(),
+  userId: text('user_id'),
+  trackId: text('track_id').notNull(),
+  moodType: text('mood_type').notNull(),
+  signalType: text('signal_type').notNull(), // 'skip' | 'complete'
+  createdAt: text('created_at').notNull(),
+});

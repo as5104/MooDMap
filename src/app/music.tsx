@@ -412,23 +412,47 @@ const CategoriesView = React.memo(({
   onTrackPress: (track: Track, tracks: Track[]) => void;
 }) => {
   const isVIP = useTierStore((s) => s.isVIP);
-  const { isConnected: spotifyConnected } = useSpotify();
+  const { isConnected: spotifyConnected, getVIPRecommendations } = useSpotify();
   const todayMood = useAppStore((s) => s.todayMood);
   const user = useAppStore((s) => s.user);
 
-  const moodRecs = useMemo(() => {
-    if (!todayMood) return [];
-    try {
-      return getSmartRecommendations(
-        todayMood.moodType as any,
-        TRACKS_LIBRARY,
-        user?.id ?? null,
-        6
-      );
-    } catch {
-      return [];
+  const [moodRecs, setMoodRecs] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!todayMood) {
+      setMoodRecs([]);
+      return;
     }
-  }, [todayMood, user?.id]);
+
+    let isMounted = true;
+    (async () => {
+      try {
+        const vipRecs = await getVIPRecommendations(
+          todayMood.moodType as any,
+          todayMood.moodScore ?? 7,
+          8
+        );
+        if (isMounted && vipRecs && vipRecs.length > 0) {
+          setMoodRecs(vipRecs);
+          return;
+        }
+
+        const recs = getSmartRecommendations(
+          todayMood.moodType as any,
+          TRACKS_LIBRARY,
+          user?.id ?? null,
+          6
+        );
+        if (isMounted) setMoodRecs(recs);
+      } catch {
+        if (isMounted) setMoodRecs([]);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [todayMood, user?.id, isVIP, spotifyConnected, getVIPRecommendations]);
 
   const categories = useMemo(() => {
     const list = [...CATEGORIES_LIST];

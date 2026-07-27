@@ -12,20 +12,20 @@ import {
   useFonts,
 } from '@expo-google-fonts/poppins';
 import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
+import { Feather } from '@expo/vector-icons';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { StyleSheet, View, Text, AppState, AppStateStatus } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Feather } from '@expo/vector-icons';
 
+import { Button, CustomAlert, GradientBackground } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { initializeDatabase } from '@/db/client';
 import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/stores/appStore';
 import { useTierStore } from '@/stores/tierStore';
-import { CustomAlert, Button, GradientBackground } from '@/components/ui';
 
 import { MusicProvider } from '@/context/MusicContext';
 

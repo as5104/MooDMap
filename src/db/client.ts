@@ -146,6 +146,25 @@ export const initializeDatabase = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_mmt_mood ON mood_music_tags(mood_type);
       CREATE INDEX IF NOT EXISTS idx_mmt_track ON mood_music_tags(track_id);
       CREATE INDEX IF NOT EXISTS idx_mmt_user ON mood_music_tags(user_id);
+
+      CREATE TABLE IF NOT EXISTS music_preferences (
+        user_id TEXT PRIMARY KEY NOT NULL,
+        preferences TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS recommendation_signals (
+        id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT,
+        track_id TEXT NOT NULL,
+        mood_type TEXT NOT NULL,
+        signal_type TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_recsig_user ON recommendation_signals(user_id);
+      CREATE INDEX IF NOT EXISTS idx_recsig_track ON recommendation_signals(track_id);
+      CREATE INDEX IF NOT EXISTS idx_recsig_mood ON recommendation_signals(mood_type);
     `);
 
     // Run safe migrations for existing tables

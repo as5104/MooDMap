@@ -37,6 +37,8 @@ import { getMoodScoreForPeriod, getMoodCountForPeriod, getMoodStreak, getMoodCou
 import { getJournalCount } from '@/services/journalService';
 import { exportUserData, importUserData } from '@/services/dataTransferService';
 import { getSetting, saveSetting } from '@/services/settingsService';
+import { getPreferenceSummary, hasMusicPreferences } from '@/services/musicPreferenceService';
+
 
 // XP thresholds per level
 const XP_PER_LEVEL = 500;
@@ -57,6 +59,8 @@ export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
   const [lastBackupDate, setLastBackupDate] = useState<string | null>(null);
+  const [prefSummary, setPrefSummary] = useState<string>('');
+  const [hasPrefs, setHasPrefs] = useState<boolean>(false);
 
   const refreshData = useAppStore((s) => s.refreshData);
 
@@ -143,9 +147,11 @@ export default function ProfileScreen() {
       setBiometricLockEnabled(bioSetting === 'enabled');
       setLastBackupDate(backupDate || null);
 
-      // Check VIP status asynchronously
+      // Check VIP status & preferences asynchronously
       if (userId) {
         checkVIPStatus(userId);
+        setHasPrefs(hasMusicPreferences(userId));
+        setPrefSummary(getPreferenceSummary(userId));
       }
 
       // Dynamically calculate and update total XP in store
@@ -665,6 +671,50 @@ export default function ProfileScreen() {
                     </Pressable>
                   )}
                 </View>
+
+                {/* Music Preferences Survey Card */}
+                {spotifyConnected && (
+                  <View style={{ marginTop: Spacing.md, marginBottom: Spacing.md }}>
+                    <Pressable
+                      style={{
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        borderRadius: Radius.lg,
+                        padding: Spacing.lg,
+                        borderWidth: 1,
+                        borderColor: hasPrefs ? 'rgba(190, 255, 108, 0.3)' : 'rgba(255, 255, 255, 0.12)',
+                      }}
+                      onPress={() => router.push('/music-preferences')}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.md }}>
+                        <View
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 20,
+                            backgroundColor: hasPrefs ? 'rgba(190, 255, 108, 0.15)' : 'rgba(255, 190, 106, 0.15)',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Feather
+                            name={hasPrefs ? 'sliders' : 'disc'}
+                            size={20}
+                            color={hasPrefs ? Colors.accent.primary : Colors.accent.amber}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontFamily: Fonts.subheading, fontSize: FontSizes.body, color: Colors.text.primary }}>
+                            {hasPrefs ? 'Music Taste Profile' : 'Set Up Music Taste'}
+                          </Text>
+                          <Text style={{ fontFamily: Fonts.body, fontSize: FontSizes.caption, color: Colors.text.secondary, marginTop: 2 }}>
+                            {hasPrefs ? prefSummary || 'Customized for personalized recommendations' : 'Personalize recommendations based on genres & artists'}
+                          </Text>
+                        </View>
+                        <Feather name="chevron-right" size={18} color={Colors.text.tertiary} />
+                      </View>
+                    </Pressable>
+                  </View>
+                )}
 
                 {/* Deactivate link */}
                 <Pressable style={styles.vipDeactivateRow} onPress={handleVIPDeactivation}>

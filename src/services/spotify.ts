@@ -69,6 +69,8 @@ export interface SpotifyArtist {
   id: string;
   name: string;
   images?: SpotifyImage[];
+  genres?: string[];
+  popularity?: number;
 }
 
 export interface SpotifyAlbum {
@@ -221,6 +223,8 @@ export async function refreshSpotifyToken(
 
 // API Helpers
 
+let _rateLimitedUntil = 0;
+
 /**
  * Make an authenticated request to the Spotify API.
  */
@@ -230,6 +234,11 @@ async function spotifyFetch<T>(
   method: string = 'GET',
   body?: any
 ): Promise<T | null> {
+  // Fail-fast if currently in a Spotify rate-limit cooldown
+  if (Date.now() < _rateLimitedUntil) {
+    return null;
+  }
+
   try {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${accessToken}`,
@@ -244,58 +253,33 @@ async function spotifyFetch<T>(
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
 
-    if (response.status === 204) return null; // No content (successful play/pause)
+    if (response.status === 204) return null;
 
-    // Handle rate limiting — wait and retry once
+    // Handle rate limiting — trigger cooldown so engine falls back to zero-rate-limit online search
     if (response.status === 429) {
-      const retryAfter = parseInt(response.headers.get('Retry-After') || '5', 10);
-      console.warn(`[Spotify] Rate limited (429) for ${endpoint}. Retrying after ${retryAfter}s...`);
-      await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-      
-      const retryResponse = await fetch(`${SPOTIFY_API_BASE}${endpoint}`, {
-        method,
-        headers,
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      });
-      
-      if (retryResponse.status === 204) return null;
-      if (!retryResponse.ok) {
-        console.warn(`[Spotify] Retry also failed (${retryResponse.status}) for ${endpoint}`);
-        return null; // Silently fail after retry — don't crash the app
-      }
-      
-      const retryText = await retryResponse.text();
-      if (!retryText || retryText.trim() === '') return null;
-      try { return JSON.parse(retryText) as T; } catch (e) { return null; }
+      const retryAfter = parseInt(response.headers.get('Retry-After') || '10', 10);
+      _rateLimitedUntil = Date.now() + Math.max(retryAfter, 10) * 1000;
+      console.warn(`[Spotify] Rate limited (429) on ${endpoint}. Cooldown active for ${retryAfter}s.`);
+      return null;
     }
 
     if (!response.ok) {
       const errorText = await response.text();
       console.warn(`[Spotify] API error ${response.status} for ${endpoint}:`, errorText);
-      let message = `Spotify API error ${response.status}`;
-      try {
-        const errObj = JSON.parse(errorText);
-        if (errObj.error?.message) {
-          message = errObj.error.message;
-        }
-      } catch (e) {}
-      throw new Error(message);
+      return null;
     }
 
     const text = await response.text();
-    if (!text || text.trim() === '') {
-      return null;
-    }
+    if (!text || text.trim() === '') return null;
 
     try {
       return JSON.parse(text) as T;
     } catch (e) {
-      console.log(`[Spotify] Non-JSON success response for ${endpoint}`);
       return null;
     }
   } catch (e) {
     console.warn(`[Spotify] Fetch error for ${endpoint}:`, e);
-    throw e;
+    return null;
   }
 }
 
@@ -503,9 +487,13 @@ export async function searchTracks(
   query: string,
   limit: number = 10
 ): Promise<SpotifyTrack[]> {
+  const safeLimit = Number(limit) > 10 ? 20 : 10;
+  const cleanQ = query.trim();
+  if (!cleanQ) return [];
+
   const data = await spotifyFetch<SpotifySearchResult>(
     accessToken,
-    `/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}`
+    `/search?q=${encodeURIComponent(cleanQ)}&type=track&limit=${safeLimit}`
   );
   return data?.tracks?.items ?? [];
 }
@@ -520,12 +508,86 @@ export async function searchForMood(
   limit: number = 10
 ): Promise<SpotifyTrack[]> {
   // Build a search query from genres and keywords
-  const genreQuery = genres.slice(0, 2).map((g) => `genre:"${g}"`).join(' ');
+  const genreQuery = genres.slice(0, 2).map((g) => g).join(' ');
   const keywordQuery = keywords.slice(0, 2).join(' ');
   const query = `${genreQuery} ${keywordQuery}`.trim();
 
   if (!query) return [];
   return searchTracks(accessToken, query, limit);
+}
+
+/**
+ * Search for artists by name.
+ * Used in the music preference survey for artist selection.
+ */
+export async function searchArtists(
+  accessToken: string,
+  query: string,
+  limit: number = 20
+): Promise<SpotifyArtist[]> {
+  // Spotify Search API allows up to 50 for type=artist
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
+  const cleanQ = query.trim();
+  if (!cleanQ) return [];
+
+  const data = await spotifyFetch<{ artists: { items: SpotifyArtist[] } }>(
+    accessToken,
+    `/search?q=${encodeURIComponent(cleanQ)}&type=artist&limit=${safeLimit}`
+  );
+  return data?.artists?.items ?? [];
+}
+
+/**
+ * Get artists related to a given artist.
+ * Used in Layer 4 (Artist Discovery) to expand beyond seed artists.
+ */
+export async function getRelatedArtists(
+  accessToken: string,
+  artistId: string
+): Promise<SpotifyArtist[]> {
+  return [];
+}
+
+/**
+ * Get an artist's top tracks.
+ * Used in Layer 4 (Artist Discovery) to get tracks from preferred/related artists.
+ */
+export async function getArtistTopTracks(
+  accessToken: string,
+  artistId: string,
+  market: string = 'from_token'
+): Promise<SpotifyTrack[]> {
+  const data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
+    accessToken,
+    `/artists/${artistId}/top-tracks?market=${market}`
+  );
+  return data?.tracks ?? [];
+}
+
+/**
+ * Batch fetch multiple artists by IDs (max 50).
+ * Returns full artist objects including genres[].
+ * Used to extract genre tags from user's top artists for the survey.
+ */
+export async function getMultipleArtists(
+  accessToken: string,
+  ids: string[]
+): Promise<SpotifyArtist[]> {
+  if (ids.length === 0) return [];
+  // Spotify limits to 50 IDs per request
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    chunks.push(ids.slice(i, i + 50));
+  }
+  const results: SpotifyArtist[] = [];
+  for (const chunk of chunks) {
+    const data = await spotifyFetch<{ artists: SpotifyArtist[] }>(
+      accessToken,
+      `/artists?ids=${chunk.join(',')}`
+    );
+    if (data?.artists) results.push(...data.artists);
+  }
+  return results;
 }
 
 // Utility

@@ -2,7 +2,8 @@
  * MoodMap — Home Dashboard
  */
 
-import { GlassCard, GradientBackground, MetricCard, WeeklyMoodRow, MoodHistoryIllustration, JournalIllustration } from '@/components/ui';
+import { MusicCover } from '@/components/music/MusicCover';
+import { GlassCard, GradientBackground, JournalIllustration, MetricCard, MoodHistoryIllustration, WeeklyMoodRow } from '@/components/ui';
 import { MoodFace } from '@/components/ui/MoodFace';
 import { Colors } from '@/constants/colors';
 import { Radius, Shadows, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
@@ -10,9 +11,12 @@ import { MOOD_MAP, type MoodType } from '@/constants/moods';
 import { getSuggestion } from '@/constants/suggestions';
 import { TAG_MAP } from '@/constants/tags';
 import { Fonts, FontSizes } from '@/constants/typography';
+import { useMusic } from '@/context/MusicContext';
+import { useSpotify } from '@/hooks/useSpotify';
 import { getJournalCount, getLatestJournal, type JournalEntryRow } from '@/services/journalService';
 import {
   computeCompositeScorePercent,
+  formatMoodNote,
   getMoodCount,
   getMoodCountForPeriod,
   getMoodScoreForPeriod,
@@ -21,13 +25,16 @@ import {
   getTodayMood,
   getTopMoods,
   getWeeklyMoods,
-  formatMoodNote,
   type DayMoodData,
   type MoodSummaryData,
   type TopMoodItem,
 } from '@/services/moodService';
+import { getSmartRecommendations, MOOD_GENRE_MAP, type RecommendedTrack } from '@/services/recommendationEngine';
+import { getBestImage } from '@/services/spotify';
 import { useAppStore } from '@/stores/appStore';
+import { useTierStore } from '@/stores/tierStore';
 import { Feather } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -38,13 +45,6 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { useMusic } from '@/context/MusicContext';
-import { useTierStore } from '@/stores/tierStore';
-import { useSpotify } from '@/hooks/useSpotify';
-import { getSmartRecommendations, MOOD_GENRE_MAP, type RecommendedTrack } from '@/services/recommendationEngine';
-import { getBestImage, formatDuration } from '@/services/spotify';
-import { MusicCover } from '@/components/music/MusicCover';
 
 // Greeting based on time of day
 function getGreeting(): string {
@@ -78,7 +78,7 @@ export default function HomeScreen() {
   // Music & Spotify
   const { play: playTrack, queue, currentTrack } = useMusic();
   const isVIP = useTierStore((s) => s.isVIP);
-  const { nowPlaying, isConnected: spotifyConnected } = useSpotify();
+  const { nowPlaying, isConnected: spotifyConnected, getVIPRecommendations } = useSpotify();
 
   const today = new Date();
   const dateStr = today.toLocaleDateString('en-US', {
@@ -141,17 +141,29 @@ export default function HomeScreen() {
 
       // Load mood-based music recommendations
       if (todayEntry) {
-        try {
-          const recs = getSmartRecommendations(
-            todayEntry.mood_type as any,
-            queue.length > 0 ? queue : [],
-            userId ?? null,
-            6
-          );
-          setMoodRecs(recs);
-        } catch {
-          // Non-critical
-        }
+        (async () => {
+          try {
+            const vipRecs = await getVIPRecommendations(
+              todayEntry.mood_type as any,
+              todayEntry.mood_score ?? 7,
+              8
+            );
+            if (vipRecs && vipRecs.length > 0) {
+              setMoodRecs(vipRecs);
+              return;
+            }
+
+            const recs = getSmartRecommendations(
+              todayEntry.mood_type as any,
+              queue.length > 0 ? queue : [],
+              userId ?? null,
+              6
+            );
+            setMoodRecs(recs);
+          } catch {
+            // Non-critical
+          }
+        })();
       }
 
       // Dynamically calculate and update total XP in store
@@ -341,7 +353,7 @@ export default function HomeScreen() {
                   />
                 </View>
               </View>
-              
+
               <View style={styles.todayMoodDetails}>
                 <Text style={[styles.todayMoodLabelPremium, { color: currentMood.color }]}>
                   {currentMood.label}
@@ -396,8 +408,8 @@ export default function HomeScreen() {
                   <Text style={styles.todayMetricTitle}>Sleep</Text>
                 </View>
                 <Text style={styles.todayMetricValue} numberOfLines={1} adjustsFontSizeToFit>
-                  {todayMood.sleepHours != null 
-                    ? `${todayMood.sleepHours}h${todayMood.sleepQuality != null ? ` (${todayMood.sleepQuality}/5)` : ''}` 
+                  {todayMood.sleepHours != null
+                    ? `${todayMood.sleepHours}h${todayMood.sleepQuality != null ? ` (${todayMood.sleepQuality}/5)` : ''}`
                     : '—'}
                 </Text>
               </View>
@@ -604,12 +616,22 @@ export default function HomeScreen() {
                     </View>
                     <Text style={styles.moodRecTitle} numberOfLines={1}>{rec.track.title}</Text>
                     <Text style={styles.moodRecArtist} numberOfLines={1}>{rec.track.artist}</Text>
-                    {rec.source === 'personal' && (
+                    {rec.reason ? (
                       <View style={styles.moodRecBadge}>
-                        <Feather name="heart" size={8} color={Colors.accent.primary} />
-                        <Text style={styles.moodRecBadgeText}>Your pick</Text>
+                        <Feather
+                          name={
+                            rec.source === 'personal' ? 'heart' :
+                              rec.source === 'playlist' ? 'disc' :
+                                rec.source === 'discovery' ? 'compass' : 'star'
+                          }
+                          size={8}
+                          color={Colors.accent.primary}
+                        />
+                        <Text style={styles.moodRecBadgeText} numberOfLines={1}>
+                          {rec.reason}
+                        </Text>
                       </View>
-                    )}
+                    ) : null}
                   </Pressable>
                 ))
               ) : (

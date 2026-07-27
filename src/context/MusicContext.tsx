@@ -553,38 +553,29 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
           }
 
-          if (queueIdx !== -1) {
-            // The track is in our queue!
-            const isNewTrack = currentTrackRef.current?.id !== trackInfo.id;
+          if (queueIdx > 0) {
+            // The currently playing track is at index > 0!
+            // Slice off all completed/past tracks above it so currently playing track is ALWAYS at index 0!
+            console.log(`[MusicContext] Auto-cleaning queue: slicing ${queueIdx} top track(s) above currently playing track (${trackInfo.title})`);
+            const cleanQueue = q.slice(queueIdx);
+            queueRef.current = cleanQueue;
+            setQueueState(cleanQueue);
+            currentIndexRef.current = 0;
+            setCurrentIndex(0);
+            setCurrentTrack(cleanQueue[0]);
 
-            // On EVERY natural track completion (isNewTrack = true), remove completed track from top of queue
-            if (isNewTrack && q.length > 1) {
-              console.log('[MusicContext] Track completion transition. Slicing completed track from top of queue.');
-              const updatedQueue = q.slice(1);
-              queueRef.current = updatedQueue;
-              setQueueState(updatedQueue);
+            if (isQueueCustomRef.current && playRef.current && cleanQueue[0]) {
+              playRef.current(cleanQueue[0], currentContextUriRef.current, cleanQueue[0].url, undefined, true);
+            }
+            return;
+          } else if (queueIdx === 0) {
+            // Currently playing track is ALREADY at Position 0!
+            // Do NOT slice, sync UI track state if needed.
+            const isNewTrack = currentTrackRef.current?.id !== trackInfo.id;
+            if (isNewTrack || currentIndexRef.current !== 0) {
               currentIndexRef.current = 0;
               setCurrentIndex(0);
-              setCurrentTrack(updatedQueue[0]);
-
-              if (isQueueCustomRef.current && playRef.current && updatedQueue[0]) {
-                playRef.current(updatedQueue[0], currentContextUriRef.current, updatedQueue[0].url, undefined, true);
-              }
-              return;
-            }
-
-            // Sync UI index to match the current track
-            if (isNewTrack || currentIndexRef.current !== queueIdx) {
-              console.log('[MusicContext] Syncing to queue track played by Spotify:', trackInfo.title, 'at index:', queueIdx);
-              currentIndexRef.current = queueIdx;
-              setCurrentIndex(queueIdx);
-              setCurrentTrack(q[queueIdx]);
-            }
-
-            // On every Spotify song change, fetch and sync Spotify's actual upcoming queue list
-            if (!isQueueRecommendedRef.current && lastFetchedTrackIdRef.current !== trackInfo.id) {
-              lastFetchedTrackIdRef.current = trackInfo.id;
-              proactivelyFetchSpotifyQueue();
+              setCurrentTrack(q[0]);
             }
           } else {
             // The track is NOT in our queue (external song played, or Spotify auto-play)

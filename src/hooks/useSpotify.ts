@@ -18,8 +18,11 @@ import {
   getCurrentlyPlaying,
   getUserPlaylists,
   getTopTracks,
+  getTopArtists,
   getRecentlyPlayed,
   searchTracks,
+  searchArtists,
+  getMultipleArtists,
   searchForMood,
   play as spotifyPlay,
   pause as spotifyPause,
@@ -32,8 +35,18 @@ import {
   type SpotifyCurrentTrack,
   type SpotifyPlaylist,
   type SpotifyTrack,
+  type SpotifyArtist,
   type SpotifyPlayHistory,
 } from '@/services/spotify';
+import {
+  getVIPSmartRecommendations,
+  recordRecommendationSignal,
+  type RecommendedTrack,
+} from '@/services/recommendationEngine';
+import { getMusicPreferences } from '@/services/musicPreferenceService';
+import type { MoodType } from '@/constants/moods';
+import { useAppStore } from '@/stores/appStore';
+
 
 // Types
 
@@ -68,6 +81,13 @@ interface UseSpotifyReturn {
   loadRecentlyPlayed: () => Promise<void>;
   search: (query: string) => Promise<SpotifyTrack[]>;
   searchByMood: (genres: string[], keywords: string[]) => Promise<SpotifyTrack[]>;
+
+  // VIP Recommendation & Survey Actions
+  searchArtistsForSurvey: (query: string) => Promise<SpotifyArtist[]>;
+  loadTopArtistsForSurvey: () => Promise<SpotifyArtist[]>;
+  getVIPRecommendations: (mood: MoodType, moodScore?: number, limit?: number) => Promise<RecommendedTrack[]>;
+  reportTrackSkip: (trackId: string, mood: MoodType) => void;
+  reportTrackCompletion: (trackId: string, mood: MoodType) => void;
 }
 
 // Now Playing Poll Interval
@@ -442,6 +462,171 @@ export function useSpotify(): UseSpotifyReturn {
     [getValidAccessToken]
   );
 
+  const searchArtistsForSurvey = useCallback(
+    async (query: string): Promise<SpotifyArtist[]> => {
+      const q = query.trim();
+      if (!q) return [];
+
+      let spotifyResults: SpotifyArtist[] = [];
+      try {
+        const token = await getValidAccessToken();
+        if (token) {
+          spotifyResults = await searchArtists(token, q, 30);
+        }
+      } catch (err) {
+        console.warn('[useSpotify] Spotify search failed, using fallback:', err);
+      }
+
+      // Fetch Deezer HD artist photos as universal photo enrichment & fallback
+      try {
+        const deezerRes = await fetch(
+          `https://api.deezer.com/search/artist?q=${encodeURIComponent(q)}&limit=30`
+        );
+        if (deezerRes.ok) {
+          const deezerData = await deezerRes.json();
+          if (deezerData?.data && deezerData.data.length > 0) {
+            const deezerArtists: SpotifyArtist[] = deezerData.data.map((item: any) => ({
+              id: `deezer_${item.id}`,
+              name: item.name,
+              images: [
+                { url: item.picture_big || item.picture_medium || item.picture_small || '' },
+              ],
+            }));
+
+            if (spotifyResults.length === 0) {
+              return deezerArtists;
+            }
+
+            // Enrich Spotify results with Deezer photos if Spotify photo is missing
+            const deezerMap = new Map(
+              deezerArtists.map((d) => [d.name.toLowerCase().replace(/[^a-z0-9]/g, ''), d])
+            );
+
+            return spotifyResults.map((sArtist) => {
+              const hasPhoto = sArtist.images && sArtist.images.length > 0 && !!sArtist.images[0]?.url;
+              if (hasPhoto) return sArtist;
+
+              const cleanKey = sArtist.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const dMatch = deezerMap.get(cleanKey);
+              if (dMatch && dMatch.images?.length) {
+                return { ...sArtist, images: dMatch.images };
+              }
+              return sArtist;
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[useSpotify] Deezer photo enrichment failed:', e);
+      }
+
+      if (spotifyResults.length > 0) return spotifyResults;
+
+      // iTunes 3rd fallback
+      try {
+        const itunesRes = await fetch(
+          `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=musicArtist&limit=30`
+        );
+        if (itunesRes.ok) {
+          const data = await itunesRes.json();
+          if (data?.results && data.results.length > 0) {
+            return data.results.map((item: any) => {
+              // iTunes returns artworkUrl100 — upscale to 600x600 for HD
+              const itunesImg = item.artworkUrl100
+                ? item.artworkUrl100.replace('100x100', '600x600')
+                : '';
+              return {
+                id: `artist_${item.artistId}`,
+                name: item.artistName,
+                genres: item.primaryGenreName ? [item.primaryGenreName] : [],
+                images: itunesImg ? [{ url: itunesImg, width: 600, height: 600 }] : [],
+              };
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[useSpotify] iTunes artist search failed:', e);
+      }
+
+      return [];
+    },
+    [getValidAccessToken]
+  );
+
+  const loadTopArtistsForSurvey = useCallback(async (): Promise<SpotifyArtist[]> => {
+    try {
+      const token = await getValidAccessToken();
+      if (!token) return [];
+      const [shortTerm, mediumTerm, longTerm] = await Promise.all([
+        getTopArtists(token, 'short_term', 20).catch(() => []),
+        getTopArtists(token, 'medium_term', 20).catch(() => []),
+        getTopArtists(token, 'long_term', 20).catch(() => []),
+      ]);
+
+      const seen = new Set<string>();
+      const combined: SpotifyArtist[] = [];
+      for (const artist of [...shortTerm, ...mediumTerm, ...longTerm]) {
+        if (artist && artist.id && !seen.has(artist.id)) {
+          seen.add(artist.id);
+          combined.push(artist);
+        }
+      }
+      return combined;
+    } catch (err) {
+      console.warn('[useSpotify] loadTopArtistsForSurvey error:', err);
+      return [];
+    }
+  }, [getValidAccessToken]);
+
+  const getVIPRecommendations = useCallback(
+    async (mood: MoodType, moodScore: number = 7, limit: number = 12): Promise<RecommendedTrack[]> => {
+      try {
+        const user = useAppStore.getState().user;
+        const userId = user?.id ?? null;
+        const prefs = userId ? getMusicPreferences(userId) : null;
+
+        let token = '';
+        try {
+          token = (await getValidAccessToken()) || '';
+        } catch {
+          token = '';
+        }
+
+        const TRACKS_LIBRARY = require('@/context/MusicContext').TRACKS_LIBRARY ?? [];
+
+        return await getVIPSmartRecommendations(
+          mood,
+          moodScore,
+          TRACKS_LIBRARY,
+          userId ?? 'guest',
+          token,
+          playlists || [],
+          prefs,
+          limit
+        );
+      } catch (err) {
+        console.warn('[useSpotify] getVIPRecommendations error:', err);
+        return [];
+      }
+    },
+    [getValidAccessToken, playlists]
+  );
+
+  const reportTrackSkip = useCallback(
+    (trackId: string, mood: MoodType) => {
+      const user = useAppStore.getState().user;
+      recordRecommendationSignal(user?.id ?? null, trackId, mood, 'skip');
+    },
+    []
+  );
+
+  const reportTrackCompletion = useCallback(
+    (trackId: string, mood: MoodType) => {
+      const user = useAppStore.getState().user;
+      recordRecommendationSignal(user?.id ?? null, trackId, mood, 'complete');
+    },
+    []
+  );
+
   // Return
 
   return {
@@ -471,5 +656,12 @@ export function useSpotify(): UseSpotifyReturn {
     loadRecentlyPlayed,
     search,
     searchByMood,
+
+    searchArtistsForSurvey,
+    loadTopArtistsForSurvey,
+    getVIPRecommendations,
+    reportTrackSkip,
+    reportTrackCompletion,
   };
 }
+
