@@ -13,7 +13,9 @@ export {
 } from './EmptyStateIllustrations';
 export { FloatingTabBar } from './FloatingTabBar';
 export { GlassCard } from './GlassCard';
+export { GoogleLogo } from './GoogleLogo';
 export { BlurTargetCtx, GradientBackground, useBlurTarget } from './GradientBackground';
+
 export { Input } from './Input';
 export { MetricCard } from './MetricCard';
 export { MoodFace } from './MoodFace';

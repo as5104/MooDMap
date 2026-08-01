@@ -14,17 +14,19 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Button, Input, GlassCard } from '@/components/ui';
+import { GradientBackground, Button, Input, GlassCard, GoogleLogo } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
-import { signInWithEmail } from '@/lib/auth';
+import { signInWithEmail, signInWithGoogle } from '@/lib/auth';
+
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleLogin = async () => {
@@ -45,6 +47,23 @@ export default function LoginScreen() {
       router.replace('/');
     }
   };
+
+  const handleGoogleLogin = async () => {
+    setError('');
+    setGoogleLoading(true);
+
+    const result = await signInWithGoogle();
+
+    if (!result.success) {
+      if (result.error !== 'Google sign-in was canceled') {
+        setError(result.error ?? 'Google sign-in failed.');
+      }
+      setGoogleLoading(false);
+    } else {
+      router.replace('/');
+    }
+  };
+
 
   return (
     <GradientBackground variant="auth">
@@ -141,13 +160,14 @@ export default function LoginScreen() {
           <Button
             title="Continue with Google"
             variant="secondary"
-            onPress={() => {
-              setError('Google sign-in requires a development build.');
-            }}
+            onPress={handleGoogleLogin}
+            loading={googleLoading}
             fullWidth
             size="lg"
-            icon={<Text style={{ fontSize: 18 }}>G</Text>}
+            icon={<GoogleLogo size={20} />}
           />
+
+
 
           {/* Sign Up Link */}
           <View style={styles.footer}>

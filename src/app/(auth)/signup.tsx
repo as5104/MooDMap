@@ -14,11 +14,12 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { GradientBackground, Button, Input, GlassCard, AnimatedPressable, EmailSentIllustration } from '@/components/ui';
+import { GradientBackground, Button, Input, GlassCard, AnimatedPressable, EmailSentIllustration, GoogleLogo } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing } from '@/constants/layout';
-import { signUpWithEmail } from '@/lib/auth';
+import { signUpWithEmail, signInWithGoogle } from '@/lib/auth';
+
 
 export default function SignupScreen() {
   const [name, setName] = useState('');
@@ -26,6 +27,7 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -58,6 +60,23 @@ export default function SignupScreen() {
       router.replace('/');
     }
   };
+
+  const handleGoogleLogin = async () => {
+    setError('');
+    setGoogleLoading(true);
+
+    const result = await signInWithGoogle();
+
+    if (!result.success) {
+      if (result.error !== 'Google sign-in was canceled') {
+        setError(result.error ?? 'Google sign-in failed.');
+      }
+      setGoogleLoading(false);
+    } else {
+      router.replace('/');
+    }
+  };
+
 
   if (success) {
     return (
@@ -172,6 +191,25 @@ export default function SignupScreen() {
             />
           </GlassCard>
 
+          {/* Divider */}
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Google */}
+          <Button
+            title="Continue with Google"
+            variant="secondary"
+            onPress={handleGoogleLogin}
+            loading={googleLoading}
+            fullWidth
+            size="lg"
+            icon={<GoogleLogo size={20} />}
+          />
+
+
           {/* Login Link */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>Already have an account? </Text>
@@ -184,6 +222,7 @@ export default function SignupScreen() {
     </GradientBackground>
   );
 }
+
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
@@ -236,7 +275,26 @@ const styles = StyleSheet.create({
   inputSpacing: {
     marginBottom: Spacing.lg,
   },
+  // Divider
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.xl,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  dividerText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: 'rgba(255,255,255,0.25)',
+    marginHorizontal: Spacing.md,
+  },
   footer: {
+
     flexDirection: 'row',
     justifyContent: 'center',
     marginTop: Spacing.xxxl,
