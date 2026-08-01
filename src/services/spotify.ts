@@ -485,15 +485,17 @@ export interface SpotifySearchResult {
 export async function searchTracks(
   accessToken: string,
   query: string,
-  limit: number = 10
+  limit: number = 10,
+  offset: number = 0,
 ): Promise<SpotifyTrack[]> {
   const safeLimit = Number(limit) > 10 ? 20 : 10;
   const cleanQ = query.trim();
   if (!cleanQ) return [];
+  const safeOffset = Math.max(0, Math.min(Math.floor(offset) || 0, 990));
 
   const data = await spotifyFetch<SpotifySearchResult>(
     accessToken,
-    `/search?q=${encodeURIComponent(cleanQ)}&type=track&limit=${safeLimit}`
+    `/search?q=${encodeURIComponent(cleanQ)}&type=track&limit=${safeLimit}&offset=${safeOffset}`
   );
   return data?.tracks?.items ?? [];
 }

@@ -54,6 +54,14 @@ export interface RecommendedTrack {
   score: number; // 0-100
 }
 
+/** Optional controls for deliberately requesting a fresh recommendation batch. */
+export interface RecommendationRequestOptions {
+  /** Tracks already visible to the listener; these must not be suggested again. */
+  excludeTrackIds?: string[];
+  /** Varies query order and result offsets while preserving the current mood profile. */
+  refreshSeed?: number;
+}
+
 /** Internal scoring breakdown for a candidate track */
 interface TrackScoreBreakdown {
   moodRelevance: number;      // 0-30
@@ -405,10 +413,14 @@ export function getSmartRecommendations(
   mood: MoodType,
   availableTracks: Track[],
   userId: string | null,
-  limit: number = 8
+  limit: number = 8,
+  options: RecommendationRequestOptions = {},
 ): RecommendedTrack[] {
-  const personal = getPersonalRecommendations(mood, availableTracks, userId, 5);
-  const ruleBased = getRuleBasedRecommendations(mood, availableTracks, limit);
+  // Build a wider candidate pool before excluding the current cards. Previously
+  // this stopped at the first `limit` tracks, so a refresh had nothing new to
+  // choose even when the local library contained valid alternatives.
+  const personal = getPersonalRecommendations(mood, availableTracks, userId, Math.max(limit * 3, 12));
+  const ruleBased = getRuleBasedRecommendations(mood, availableTracks, availableTracks.length);
 
   const seen = new Set(personal.map((r) => r.track.id));
   const merged = [...personal];
@@ -420,7 +432,11 @@ export function getSmartRecommendations(
     }
   }
 
-  return merged.sort((a, b) => b.score - a.score);
+  const excluded = new Set(options.excludeTrackIds ?? []);
+  const fresh = merged.filter(rec => !excluded.has(rec.track.id));
+  // Never quietly put the old cards back into a user-requested refresh. If the
+  // local library has been exhausted, the UI can clearly show fewer cards.
+  return fresh.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
 // SIGNAL TRACKING (Skip / Complete / Favorite)
@@ -837,6 +853,7 @@ function spotifyTrackToAppTrack(st: SpotifyTrack): Track {
 function buildMoodSearchQueries(
   mood: MoodType,
   preferences: MusicPreferences | null,
+  refreshSeed?: number,
 ): string[] {
   const profile = MOOD_GENRE_MAP[mood];
   const queries: string[] = [];
@@ -878,7 +895,10 @@ function buildMoodSearchQueries(
     queries.push(`${kw} music`);
   }
 
-  return Array.from(new Set(queries));
+  const uniqueQueries = Array.from(new Set(queries));
+  if (!refreshSeed || uniqueQueries.length < 2) return uniqueQueries;
+  const start = Math.abs(refreshSeed) % uniqueQueries.length;
+  return [...uniqueQueries.slice(start), ...uniqueQueries.slice(0, start)];
 }
 
 /**
@@ -892,8 +912,9 @@ async function getPreferenceAwareSearchResults(
   userId: string | null,
   timeContext: TimeOfDay,
   trajectory: MoodTrajectory,
+  refreshSeed?: number,
 ): Promise<RecommendedTrack[]> {
-  const queries = buildMoodSearchQueries(mood, preferences);
+  const queries = buildMoodSearchQueries(mood, preferences, refreshSeed);
   if (queries.length === 0) return [];
 
   const allTracks: SpotifyTrack[] = [];
@@ -903,14 +924,15 @@ async function getPreferenceAwareSearchResults(
   // Execute Spotify search if token is present (top 6 queries to prevent quota burnout)
   if (accessToken) {
     const { searchTracks } = require('./spotify');
+    const resultOffset = refreshSeed ? (Math.abs(refreshSeed) % 5 + 1) * 10 : 0;
     const spotifyQueries = queries.slice(0, 6);
     const results = await Promise.allSettled(
       spotifyQueries.map(async (query) => {
-        const cacheKey = `search_${mood}_${query}`;
+        const cacheKey = `search_${mood}_${query}_${resultOffset}`;
         const cached = getCached(_searchCache, cacheKey);
         if (cached) return cached;
 
-        const tracks: SpotifyTrack[] = await searchTracks(accessToken, query, 10);
+        const tracks: SpotifyTrack[] = await searchTracks(accessToken, query, 10, resultOffset);
         setCache(_searchCache, cacheKey, tracks, SEARCH_CACHE_TTL);
         return tracks;
       })
@@ -933,11 +955,12 @@ async function getPreferenceAwareSearchResults(
         const cleanQ = rawQ.replace(/artist:"/gi, '').replace(/"/g, '').trim();
         if (!cleanQ) return [];
 
-        const cacheKey = `dz_search_${mood}_${cleanQ}`;
+        const resultOffset = refreshSeed ? (Math.abs(refreshSeed) % 5 + 1) * 10 : 0;
+        const cacheKey = `dz_search_${mood}_${cleanQ}_${resultOffset}`;
         const cached = getCached(_searchCache, cacheKey);
         if (cached) return cached;
 
-        const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(cleanQ)}&limit=15`);
+        const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(cleanQ)}&limit=15&index=${resultOffset}`);
         if (!res.ok) return [];
         const data = await res.json();
         if (!data?.data?.length) return [];
@@ -997,6 +1020,7 @@ async function getArtistDiscoveryTracks(
   userId: string | null,
   timeContext: TimeOfDay,
   trajectory: MoodTrajectory,
+  refreshSeed?: number,
 ): Promise<RecommendedTrack[]> {
   if (!preferences || (!preferences.favoriteArtistNames?.length && !preferences.favoriteArtistIds?.length)) return [];
 
@@ -1007,13 +1031,14 @@ async function getArtistDiscoveryTracks(
 
   const artistNamesToFetch = (preferences.favoriteArtistNames || []).slice(0, 5);
   if (accessToken && artistNamesToFetch.length > 0) {
+    const resultOffset = refreshSeed ? (Math.abs(refreshSeed) % 3 + 1) * 10 : 0;
     const topTrackResults = await Promise.allSettled(
       artistNamesToFetch.map(async (artistName) => {
-        const cacheKey = `artist_search_${artistName.toLowerCase()}`;
+        const cacheKey = `artist_search_${artistName.toLowerCase()}_${resultOffset}`;
         const cached = getCached(_artistTrackCache, cacheKey);
         if (cached) return cached;
 
-        const tracks: SpotifyTrack[] = await searchTracks(accessToken, artistName, 10);
+        const tracks: SpotifyTrack[] = await searchTracks(accessToken, artistName, 10, resultOffset);
         setCache(_artistTrackCache, cacheKey, tracks, ARTIST_TRACK_CACHE_TTL);
         return tracks;
       })
@@ -1122,8 +1147,9 @@ function enforceDiversity(tracks: RecommendedTrack[], limit: number): Recommende
     const artist = rec.track.artist.split(',')[0].trim().toLowerCase();
     const count = artistCounts.get(artist) ?? 0;
 
-    // Max 2 per artist
-    if (count >= 2) continue;
+    // One track per primary artist keeps each refreshed mood set feeling like a
+    // discovery mix instead of a small group of similar artist results.
+    if (count >= 1) continue;
 
     // Name+artist dedup (catches same song from different albums/releases)
     const nameKey = `${artist}_${rec.track.title.toLowerCase().replace(/\s*\(.*?\)/g, '').replace(/[^a-z0-9]/g, '')}`;
@@ -1249,6 +1275,7 @@ export async function getVIPSmartRecommendations(
   userPlaylists: SpotifyPlaylist[],
   preferences: MusicPreferences | null,
   limit: number = 12,
+  options: RecommendationRequestOptions = {},
 ): Promise<RecommendedTrack[]> {
   try {
     // Compute context
@@ -1264,13 +1291,13 @@ export async function getVIPSmartRecommendations(
     // Layers 3, 4, 5: Async Spotify-powered (parallel)
     const [searchResults, discoveryResults, playlistResults] = await Promise.all([
       getPreferenceAwareSearchResults(
-        spotifyToken, mood, moodScore, preferences, userId, timeContext, trajectory
+        spotifyToken, mood, moodScore, preferences, userId, timeContext, trajectory, options.refreshSeed
       ).catch(e => {
         console.warn('[Recommendations] Layer 3 (search) failed:', e);
         return [] as RecommendedTrack[];
       }),
       getArtistDiscoveryTracks(
-        spotifyToken, mood, moodScore, preferences, userId, timeContext, trajectory
+        spotifyToken, mood, moodScore, preferences, userId, timeContext, trajectory, options.refreshSeed
       ).catch(e => {
         console.warn('[Recommendations] Layer 4 (discovery) failed:', e);
         return [] as RecommendedTrack[];
@@ -1287,8 +1314,17 @@ export async function getVIPSmartRecommendations(
     const hasOnlineTracks = searchResults.length > 0 || discoveryResults.length > 0 || playlistResults.length > 0;
     const onlineRuleFallback = hasOnlineTracks ? [] : ruleBasedRecs;
 
+    const excluded = new Set(options.excludeTrackIds ?? []);
+    const withoutVisibleTracks = (tracks: RecommendedTrack[]) =>
+      tracks.filter(rec => !excluded.has(rec.track.id));
+
     const blended = smartBlend(
-      personalRecs, searchResults, discoveryResults, playlistResults, onlineRuleFallback, limit * 2
+      withoutVisibleTracks(personalRecs),
+      withoutVisibleTracks(searchResults),
+      withoutVisibleTracks(discoveryResults),
+      withoutVisibleTracks(playlistResults),
+      withoutVisibleTracks(onlineRuleFallback),
+      limit * 3,
     );
 
     // Enforce diversity
@@ -1306,7 +1342,7 @@ export async function getVIPSmartRecommendations(
     return finalRecs.length > 0 ? finalRecs : diversified;
   } catch (e) {
     console.error('[Recommendations] VIP engine failed, falling back:', e);
-    return getSmartRecommendations(mood, localTracks, userId, limit);
+    return getSmartRecommendations(mood, localTracks, userId, limit, options);
   }
 }
 

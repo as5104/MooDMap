@@ -9,14 +9,14 @@
 [![Expo](https://img.shields.io/badge/Expo-SDK_56-000000.svg?logo=expo&logoColor=white)](https://expo.dev)
 [![React Native](https://img.shields.io/badge/React_Native-0.85-61DAFB.svg?logo=react&logoColor=black)](https://reactnative.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Supabase](https://img.shields.io/badge/Supabase-Auth_%26_DB-3ECF8E.svg?logo=supabase&logoColor=white)](https://supabase.com)
+[![Supabase](https://img.shields.io/badge/Supabase-Auth-3ECF8E.svg?logo=supabase&logoColor=white)](https://supabase.com)
 [![Spotify](https://img.shields.io/badge/Spotify-Web_API-1ED760.svg?logo=spotify&logoColor=white)](https://developer.spotify.com)
 
 <p align="center">
   <a href="https://github.com/as5104/MooDMap/releases/latest"><strong>📥 Download Latest APK</strong></a> •
   <a href="https://github.com/as5104/MooDMap/releases"><strong>🚀 Release Notes</strong></a> •
-  <a href="#-system-architecture"><strong>🏗️ Architecture</strong></a> •
-  <a href="#-getting-started"><strong>💻 Quick Start</strong></a>
+  <a href="#system-architecture"><strong>🏗️ Architecture</strong></a> •
+  <a href="#getting-started"><strong>💻 Quick Start</strong></a>
 </p>
 
 </div>

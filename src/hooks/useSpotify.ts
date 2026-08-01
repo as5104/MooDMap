@@ -41,6 +41,7 @@ import {
 import {
   getVIPSmartRecommendations,
   recordRecommendationSignal,
+  type RecommendationRequestOptions,
   type RecommendedTrack,
 } from '@/services/recommendationEngine';
 import { getMusicPreferences } from '@/services/musicPreferenceService';
@@ -85,7 +86,12 @@ interface UseSpotifyReturn {
   // VIP Recommendation & Survey Actions
   searchArtistsForSurvey: (query: string) => Promise<SpotifyArtist[]>;
   loadTopArtistsForSurvey: () => Promise<SpotifyArtist[]>;
-  getVIPRecommendations: (mood: MoodType, moodScore?: number, limit?: number) => Promise<RecommendedTrack[]>;
+  getVIPRecommendations: (
+    mood: MoodType,
+    moodScore?: number,
+    limit?: number,
+    options?: RecommendationRequestOptions,
+  ) => Promise<RecommendedTrack[]>;
   reportTrackSkip: (trackId: string, mood: MoodType) => void;
   reportTrackCompletion: (trackId: string, mood: MoodType) => void;
 }
@@ -578,7 +584,12 @@ export function useSpotify(): UseSpotifyReturn {
   }, [getValidAccessToken]);
 
   const getVIPRecommendations = useCallback(
-    async (mood: MoodType, moodScore: number = 7, limit: number = 12): Promise<RecommendedTrack[]> => {
+    async (
+      mood: MoodType,
+      moodScore: number = 7,
+      limit: number = 12,
+      options: RecommendationRequestOptions = {},
+    ): Promise<RecommendedTrack[]> => {
       try {
         const user = useAppStore.getState().user;
         const userId = user?.id ?? null;
@@ -601,7 +612,8 @@ export function useSpotify(): UseSpotifyReturn {
           token,
           playlists || [],
           prefs,
-          limit
+          limit,
+          options,
         );
       } catch (err) {
         console.warn('[useSpotify] getVIPRecommendations error:', err);
@@ -664,4 +676,3 @@ export function useSpotify(): UseSpotifyReturn {
     reportTrackCompletion,
   };
 }
-

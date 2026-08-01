@@ -415,8 +415,12 @@ const CategoriesView = React.memo(({
   const { isConnected: spotifyConnected, getVIPRecommendations } = useSpotify();
   const todayMood = useAppStore((s) => s.todayMood);
   const user = useAppStore((s) => s.user);
+  const moodRecommendationSession = useAppStore((s) => s.moodRecommendationSession);
+  const setMoodRecommendationSession = useAppStore((s) => s.setMoodRecommendationSession);
 
   const [moodRecs, setMoodRecs] = useState<any[]>([]);
+  const [isRefreshingMoodRecs, setIsRefreshingMoodRecs] = useState(false);
+  const [moodRefreshCycle, setMoodRefreshCycle] = useState(0);
 
   useEffect(() => {
     if (!todayMood) {
@@ -424,16 +428,38 @@ const CategoriesView = React.memo(({
       return;
     }
 
+    const moodKey = `${user?.id ?? 'guest'}:${todayMood.id}`;
+    const forceFresh = moodRefreshCycle > 0;
+    if (!forceFresh && moodRecommendationSession?.key === moodKey && moodRecommendationSession.tracks.length > 0) {
+      setMoodRecs(moodRecommendationSession.tracks);
+      return;
+    }
+
     let isMounted = true;
     (async () => {
       try {
+        const options = forceFresh ? {
+          excludeTrackIds: moodRecommendationSession?.key === moodKey
+            ? moodRecommendationSession.seenTrackIds
+            : [],
+          refreshSeed: Date.now(),
+        } : {};
         const vipRecs = await getVIPRecommendations(
           todayMood.moodType as any,
           todayMood.moodScore ?? 7,
-          8
+          8,
+          options,
         );
         if (isMounted && vipRecs && vipRecs.length > 0) {
           setMoodRecs(vipRecs);
+          setMoodRecommendationSession({
+            key: moodKey,
+            tracks: vipRecs,
+            seenTrackIds: Array.from(new Set([
+              ...(moodRecommendationSession?.key === moodKey ? moodRecommendationSession.seenTrackIds : []),
+              ...vipRecs.map(rec => rec.track.id),
+            ])),
+          });
           return;
         }
 
@@ -441,18 +467,31 @@ const CategoriesView = React.memo(({
           todayMood.moodType as any,
           TRACKS_LIBRARY,
           user?.id ?? null,
-          6
+          6,
+          options,
         );
-        if (isMounted) setMoodRecs(recs);
+        if (isMounted) {
+          setMoodRecs(recs);
+          setMoodRecommendationSession({
+            key: moodKey,
+            tracks: recs,
+            seenTrackIds: Array.from(new Set([
+              ...(moodRecommendationSession?.key === moodKey ? moodRecommendationSession.seenTrackIds : []),
+              ...recs.map(rec => rec.track.id),
+            ])),
+          });
+        }
       } catch {
         if (isMounted) setMoodRecs([]);
+      } finally {
+        if (isMounted) setIsRefreshingMoodRecs(false);
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [todayMood, user?.id, isVIP, spotifyConnected, getVIPRecommendations]);
+  }, [todayMood, user?.id, isVIP, spotifyConnected, getVIPRecommendations, moodRefreshCycle, moodRecommendationSession, setMoodRecommendationSession]);
 
   const categories = useMemo(() => {
     const list = [...CATEGORIES_LIST];
@@ -516,6 +555,22 @@ const CategoriesView = React.memo(({
                 {todayMood.moodType.toUpperCase()}
               </Text>
             </View>
+            <Pressable
+              style={styles.musicRecsRefreshButton}
+              disabled={isRefreshingMoodRecs}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setIsRefreshingMoodRecs(true);
+                setMoodRefreshCycle(cycle => cycle + 1);
+              }}
+              hitSlop={10}
+            >
+              {isRefreshingMoodRecs ? (
+                <ActivityIndicator size="small" color={Colors.accent.primary} />
+              ) : (
+                <Feather name="refresh-cw" size={15} color={Colors.accent.primary} />
+              )}
+            </Pressable>
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.md }}>
@@ -4797,6 +4852,14 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.bodyBold,
     fontSize: FontSizes.tiny - 1,
     letterSpacing: 1,
+  },
+  musicRecsRefreshButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(190, 255, 108, 0.08)',
   },
   musicRecCard: {
     width: 90,

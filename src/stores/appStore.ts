@@ -8,8 +8,17 @@ import type { Session, User } from '@supabase/supabase-js';
 import type { MoodType } from '@/constants/moods';
 import type { DayMoodData, MoodEntryRow } from '@/services/moodService';
 import type { JournalEntryRow } from '@/services/journalService';
+import type { RecommendedTrack } from '@/services/recommendationEngine';
 
 export type JournalViewMode = 'list' | 'grid';
+
+export interface MoodRecommendationSession {
+  /** User + mood-log identity; prevents one mood's mix leaking into another. */
+  key: string;
+  tracks: RecommendedTrack[];
+  /** Every track shown by refreshes in this session, used to prevent repeats. */
+  seenTrackIds: string[];
+}
 
 interface TodayMood {
   id: string;
@@ -40,6 +49,8 @@ interface AppState {
   // Today's Mood
   todayMood: TodayMood | null;
   setTodayMood: (mood: TodayMood | null) => void;
+  moodRecommendationSession: MoodRecommendationSession | null;
+  setMoodRecommendationSession: (session: MoodRecommendationSession | null) => void;
 
   // Weekly Moods (cached)
   weeklyMoods: DayMoodData[];
@@ -104,7 +115,16 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Today's Mood
   todayMood: null,
-  setTodayMood: (todayMood) => set({ todayMood }),
+  setTodayMood: (todayMood) => set((state) => ({
+    todayMood,
+    // A new mood entry starts a new mix. Re-reading the same entry while
+    // navigating between screens must preserve the existing session.
+    moodRecommendationSession: state.todayMood?.id === todayMood?.id
+      ? state.moodRecommendationSession
+      : null,
+  })),
+  moodRecommendationSession: null,
+  setMoodRecommendationSession: (moodRecommendationSession) => set({ moodRecommendationSession }),
 
   // Weekly Moods
   weeklyMoods: [],
@@ -155,6 +175,7 @@ export const useAppStore = create<AppState>((set) => ({
       session: null,
       user: null,
       todayMood: null,
+      moodRecommendationSession: null,
       weeklyMoods: [],
       moodScore: 0,
       moodStreak: 0,

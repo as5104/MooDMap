@@ -11,7 +11,7 @@ import { MOOD_MAP, type MoodType } from '@/constants/moods';
 import { getSuggestion } from '@/constants/suggestions';
 import { TAG_MAP } from '@/constants/tags';
 import { Fonts, FontSizes } from '@/constants/typography';
-import { useMusic } from '@/context/MusicContext';
+import { TRACKS_LIBRARY, useMusic } from '@/context/MusicContext';
 import { useSpotify } from '@/hooks/useSpotify';
 import { getJournalCount, getLatestJournal, type JournalEntryRow } from '@/services/journalService';
 import {
@@ -36,8 +36,9 @@ import { useTierStore } from '@/stores/tierStore';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -61,6 +62,7 @@ export default function HomeScreen() {
   const user = useAppStore((s) => s.user);
   const todayMood = useAppStore((s) => s.todayMood);
   const setTodayMood = useAppStore((s) => s.setTodayMood);
+  const setMoodRecommendationSession = useAppStore((s) => s.setMoodRecommendationSession);
   const dataVersion = useAppStore((s) => s.dataVersion);
   const isAppReady = useAppStore((s) => s.isAppReady);
   const displayName = user?.user_metadata?.display_name ?? 'User';
@@ -74,9 +76,12 @@ export default function HomeScreen() {
   const [summary, setSummary] = useState<MoodSummaryData | null>(null);
   const [topMoods, setTopMoods] = useState<TopMoodItem[]>([]);
   const [moodRecs, setMoodRecs] = useState<RecommendedTrack[]>([]);
+  const [isRefreshingMoodRecs, setIsRefreshingMoodRecs] = useState(false);
+  const recommendedTrackHistoryRef = useRef(new Set<string>());
+  const recommendationMoodKeyRef = useRef<string | null>(null);
 
   // Music & Spotify
-  const { play: playTrack, queue, currentTrack } = useMusic();
+  const { play: playTrack } = useMusic();
   const isVIP = useTierStore((s) => s.isVIP);
   const { nowPlaying, isConnected: spotifyConnected, getVIPRecommendations } = useSpotify();
 
@@ -87,6 +92,51 @@ export default function HomeScreen() {
     month: 'short',
     year: 'numeric',
   });
+
+  const loadMoodRecommendations = useCallback(async (
+    moodType: MoodType,
+    moodScoreValue: number,
+    moodEntryId: string,
+    forceFresh: boolean = false,
+  ) => {
+    const moodKey = `${user?.id ?? 'guest'}:${moodEntryId}`;
+    const cachedSession = useAppStore.getState().moodRecommendationSession;
+    if (!forceFresh && cachedSession?.key === moodKey && cachedSession.tracks.length > 0) {
+      recommendedTrackHistoryRef.current = new Set(cachedSession.seenTrackIds);
+      setMoodRecs(cachedSession.tracks);
+      return;
+    }
+    if (recommendationMoodKeyRef.current !== moodKey) {
+      recommendationMoodKeyRef.current = moodKey;
+      recommendedTrackHistoryRef.current.clear();
+    }
+
+    if (forceFresh) setIsRefreshingMoodRecs(true);
+    try {
+      const options = forceFresh ? {
+        excludeTrackIds: Array.from(recommendedTrackHistoryRef.current),
+        refreshSeed: Date.now(),
+      } : {};
+      const vipRecs = await getVIPRecommendations(moodType, moodScoreValue, 8, options);
+      const recs = vipRecs.length > 0
+        ? vipRecs
+        : getSmartRecommendations(moodType, TRACKS_LIBRARY, user?.id ?? null, 8, options);
+
+      if (recs.length > 0) {
+        const seenTrackIds = Array.from(new Set([
+          ...(cachedSession?.key === moodKey ? cachedSession.seenTrackIds : []),
+          ...recs.map(rec => rec.track.id),
+        ]));
+        setMoodRecs(recs);
+        recommendedTrackHistoryRef.current = new Set(seenTrackIds);
+        setMoodRecommendationSession({ key: moodKey, tracks: recs, seenTrackIds });
+      }
+    } catch (error) {
+      console.warn('[Home] Could not refresh mood recommendations:', error);
+    } finally {
+      if (forceFresh) setIsRefreshingMoodRecs(false);
+    }
+  }, [getVIPRecommendations, setMoodRecommendationSession, user]);
 
   // Load data from DB
   const loadData = useCallback(() => {
@@ -139,31 +189,8 @@ export default function HomeScreen() {
       setSummary(summaryData);
       setTopMoods(topMoodsData);
 
-      // Load mood-based music recommendations
       if (todayEntry) {
-        (async () => {
-          try {
-            const vipRecs = await getVIPRecommendations(
-              todayEntry.mood_type as any,
-              todayEntry.mood_score ?? 7,
-              8
-            );
-            if (vipRecs && vipRecs.length > 0) {
-              setMoodRecs(vipRecs);
-              return;
-            }
-
-            const recs = getSmartRecommendations(
-              todayEntry.mood_type as any,
-              queue.length > 0 ? queue : [],
-              userId ?? null,
-              6
-            );
-            setMoodRecs(recs);
-          } catch {
-            // Non-critical
-          }
-        })();
+        loadMoodRecommendations(todayEntry.mood_type as MoodType, todayEntry.mood_score ?? 7, todayEntry.id);
       }
 
       // Dynamically calculate and update total XP in store
@@ -172,7 +199,7 @@ export default function HomeScreen() {
     } catch (e) {
       console.error('[Home] Load error:', e);
     }
-  }, [user?.id, isAppReady]);
+  }, [user?.id, isAppReady, loadMoodRecommendations]);
 
   // Reload on focus and when dataVersion changes
   useFocusEffect(
@@ -582,9 +609,28 @@ export default function HomeScreen() {
                   {MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood'}
                 </Text>
               </View>
-              <Pressable onPress={() => router.push('/music')} hitSlop={8}>
-                <Text style={styles.seeAll}>Browse</Text>
-              </Pressable>
+              <View style={styles.moodRecActions}>
+                <Pressable
+                  onPress={() => {
+                    if (!isRefreshingMoodRecs) {
+                      loadMoodRecommendations(todayMood.moodType, todayMood.moodScore ?? 7, todayMood.id, true);
+                    }
+                  }}
+                  hitSlop={10}
+                  style={styles.moodRecRefreshButton}
+                  disabled={isRefreshingMoodRecs}
+                >
+                  {isRefreshingMoodRecs ? (
+                    <ActivityIndicator size="small" color={Colors.accent.primary} />
+                  ) : (
+                    <Feather name="refresh-cw" size={15} color={Colors.accent.primary} />
+                  )}
+                  <Text style={styles.moodRecRefreshText}>Refresh</Text>
+                </Pressable>
+                <Pressable onPress={() => router.push('/music')} hitSlop={8}>
+                  <Text style={styles.seeAll}>Browse</Text>
+                </Pressable>
+              </View>
             </View>
 
             <ScrollView
@@ -820,6 +866,22 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body,
     fontSize: FontSizes.bodySmall,
     color: Colors.text.tertiary,
+  },
+  moodRecActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  moodRecRefreshButton: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  moodRecRefreshText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.caption,
+    color: Colors.accent.primary,
   },
 
   // Spotify Now Playing
