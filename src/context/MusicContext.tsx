@@ -1087,50 +1087,50 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 if (langTag === 'hindi') {
                   searchQueries.push(
                     { q: `Bollywood romantic ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
-                    { q: `Bollywood ${isOldEra ? 'hits' : 'latest hits'}${yearFilter}`, limit: 4, tag: 'genre-2' },
-                    { q: `filmi gaane ${isOldEra ? '' : 'new'}${yearFilter}`.trim(), limit: 3, tag: 'genre-3' },
+                    { q: `Bollywood ${isOldEra ? 'classic' : 'new'} songs${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `filmi gaane ${primaryArtist.split(' ')[0]}${yearFilter}`.trim(), limit: 3, tag: 'genre-3' },
                   );
                 } else if (langTag === 'bengali') {
                   searchQueries.push(
                     { q: `Bengali modern songs ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
                     { q: `adhunik bangla gaan${yearFilter}`, limit: 4, tag: 'genre-2' },
-                    { q: `Bengali romantic hits${yearFilter}`, limit: 3, tag: 'genre-3' },
+                    { q: `Bengali romantic songs${yearFilter}`, limit: 3, tag: 'genre-3' },
                   );
                 } else if (langTag === 'spanish') {
                   searchQueries.push(
                     { q: `reggaeton ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
-                    { q: `Latin pop hits${yearFilter}`, limit: 4, tag: 'genre-2' },
-                    { q: `musica latina ${isOldEra ? '' : 'nueva'}${yearFilter}`.trim(), limit: 3, tag: 'genre-3' },
+                    { q: `Latin pop songs${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `musica latina ${primaryArtist.split(' ')[0]}${yearFilter}`.trim(), limit: 3, tag: 'genre-3' },
                   );
                 } else if (langTag === 'japanese') {
                   searchQueries.push(
                     { q: `J-Pop ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
-                    { q: `Japanese pop hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `Japanese pop songs${yearFilter}`, limit: 4, tag: 'genre-2' },
                     { q: `anime opening songs${yearFilter}`, limit: 3, tag: 'genre-3' },
                   );
                 } else if (langTag === 'korean') {
                   searchQueries.push(
                     { q: `K-Pop ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
-                    { q: `Korean pop hits${yearFilter}`, limit: 4, tag: 'genre-2' },
-                    { q: `K-Pop ${isOldEra ? 'releases' : 'new releases'}${yearFilter}`, limit: 3, tag: 'genre-3' },
+                    { q: `Korean pop songs${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `K-Pop ${isOldEra ? 'classic' : 'new'} songs${yearFilter}`, limit: 3, tag: 'genre-3' },
                   );
                 } else if (langTag === 'tamil') {
                   searchQueries.push(
                     { q: `Tamil movie songs ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
-                    { q: `Kollywood romantic hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `Kollywood romantic songs${yearFilter}`, limit: 4, tag: 'genre-2' },
                     { q: `Tamil melody songs${yearFilter}`, limit: 3, tag: 'genre-3' },
                   );
                 } else if (langTag === 'telugu') {
                   searchQueries.push(
                     { q: `Telugu movie songs ${primaryArtist.split(' ')[0]}${yearFilter}`, limit: 5, tag: 'genre-1' },
-                    { q: `Tollywood romantic hits${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `Tollywood romantic songs${yearFilter}`, limit: 4, tag: 'genre-2' },
                     { q: `Telugu melody songs${yearFilter}`, limit: 3, tag: 'genre-3' },
                   );
                 } else {
                   searchQueries.push(
                     { q: `${primaryArtist} similar artists${yearFilter}`, limit: 5, tag: 'genre-1' },
-                    { q: `top hits popular songs${yearFilter}`, limit: 4, tag: 'genre-2' },
-                    { q: `trending music ${isOldEra ? 'releases' : 'new releases'}${yearFilter}`, limit: 3, tag: 'genre-3' },
+                    { q: `${primaryArtist} songs${yearFilter}`, limit: 4, tag: 'genre-2' },
+                    { q: `${primaryArtist} ${isOldEra ? 'classic' : 'popular'} songs${yearFilter}`, limit: 3, tag: 'genre-3' },
                   );
                 }
 
@@ -1148,8 +1148,40 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   )
                 );
 
-                // 4. Interleave & Filter Out Podcasts / Regional Misalignments
+                // 4. Interleave & Filter — strict quality gate
                 const seenIds = new Set<string>([rawTrackId]);
+                const seenFingerprints = new Set<string>();
+
+                // Add the seed track fingerprint to prevent it appearing again
+                const seedFp = `${primaryArtist.toLowerCase().replace(/[^a-z0-9]/g, '')}_${track.title.toLowerCase().replace(/\s*\(.*?\)/g, '').replace(/[^a-z0-9]/g, '')}`;
+                seenFingerprints.add(seedFp);
+
+                // Junk/compilation track patterns
+                const JUNK_NAME_PATTERNS = [
+                  /\btop\s*(\d+|hits?|music|songs?)\b/i,
+                  /\bbest\s*(of|songs?|hits?|tracks?)\b/i,
+                  /\bgreatest\s*hits?\b/i,
+                  /\bhits?\s*(collection|compilation|mix|medley)\b/i,
+                  /\b(mega|super|ultimate)\s*mix\b/i,
+                  /\bnon[\s-]*stop\b/i,
+                  /\bmedley\b/i,
+                  /\b(dj\s*mix|mashup|mash[\s-]*up)\b/i,
+                  /\b(workout|gym|running)\s*mix\b/i,
+                  /\b(party|club)\s*mix\b/i,
+                  /\bcountdown\b/i,
+                  /\bjukebox\b/i,
+                  /\b(karaoke|tribute)\b/i,
+                  /\b(8d|slowed|reverb|sped\s*up)\s*(audio|version|remix)?\b/i,
+                  /\bringtone\b/i,
+                ];
+                const JUNK_ALBUM_PATTERNS = [
+                  /\btop\s*(\d+|hits?)\b/i,
+                  /\bgreatest\s*hits?\b/i,
+                  /\bnow\s*that'?s?\s*what\s*i\s*call/i,
+                  /\b(hits?|songs?)\s*(of|from)\s*(the\s*)?\d{4}/i,
+                  /\b(various\s*artists?|compilation)\b/i,
+                ];
+
                 const buckets: any[][] = searchResults.map(r => r.tracks);
                 const interleaved: any[] = [];
                 let maxLen = Math.max(...buckets.map(b => b.length));
@@ -1158,13 +1190,35 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   for (const bucket of buckets) {
                     if (i < bucket.length) {
                       const st = bucket[i];
-                      if (st && st.id && !seenIds.has(st.id)) {
-                        if (st.type && st.type !== 'track') continue;
-                        if (st.uri && (st.uri.includes(':episode:') || st.uri.includes(':show:'))) continue;
-                        if (st.duration_ms && st.duration_ms > 900000) continue;
-                        seenIds.add(st.id);
-                        interleaved.push(st);
-                      }
+                      if (!st || !st.id || seenIds.has(st.id)) continue;
+
+                      // Type guard: must be a track, not podcast/episode
+                      if (st.type && st.type !== 'track') continue;
+                      if (st.uri && (st.uri.includes(':episode:') || st.uri.includes(':show:'))) continue;
+
+                      // Duration guard: reject very long (> 15 min) and very short (< 45 sec)
+                      if (st.duration_ms && st.duration_ms > 900000) continue;
+                      if (st.duration_ms && st.duration_ms < 45000) continue;
+
+                      // Junk/compilation name filter
+                      const trackName = st.name || '';
+                      const albumName = st.album?.name || '';
+                      if (JUNK_NAME_PATTERNS.some((p: RegExp) => p.test(trackName))) continue;
+                      if (JUNK_ALBUM_PATTERNS.some((p: RegExp) => p.test(albumName))) continue;
+
+                      // Reject "Various Artists"
+                      if (st.artists?.length === 1 && /various\s*artists?/i.test(st.artists[0]?.name || '')) continue;
+
+                      // Name+artist fingerprint deduplication
+                      const fpName = trackName.toLowerCase()
+                        .replace(/\s*\(.*?\)\s*/g, '').replace(/\s*\[.*?\]\s*/g, '').replace(/[^a-z0-9]/g, '');
+                      const fpArtist = (st.artists?.[0]?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                      const fp = `${fpArtist}_${fpName}`;
+                      if (seenFingerprints.has(fp)) continue;
+
+                      seenIds.add(st.id);
+                      seenFingerprints.add(fp);
+                      interleaved.push(st);
                     }
                   }
                 }

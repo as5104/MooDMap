@@ -713,6 +713,102 @@ function scoreSpotifyTrack(
   };
 }
 
+// TRACK QUALITY FILTERS
+
+/**
+ * Patterns that indicate a compilation, playlist-type, or junk track rather than
+ * an actual official single/album song. Case-insensitive matching.
+ */
+const JUNK_TRACK_PATTERNS = [
+  /\btop\s*(\d+|hits?|music|songs?)\b/i,
+  /\bbest\s*(of|songs?|hits?|tracks?)\b/i,
+  /\bgreatest\s*hits?\b/i,
+  /\bhits?\s*(collection|compilation|mix|medley)\b/i,
+  /\b(mega|super|ultimate)\s*mix\b/i,
+  /\bnon[\s-]*stop\b/i,
+  /\bmedley\b/i,
+  /\b(dj\s*mix|mashup|mash[\s-]*up)\b/i,
+  /\b(workout|gym|running)\s*mix\b/i,
+  /\b(party|club)\s*mix\b/i,
+  /\bcountdown\b/i,
+  /\bjukebox\b/i,
+  /\b(karaoke|tribute)\b/i,
+  /\b(8d|slowed|reverb|sped\s*up)\s*(audio|version|remix)?\b/i,
+  /\bringtone\b/i,
+];
+
+/** Album names that indicate a compilation rather than a real album */
+const JUNK_ALBUM_PATTERNS = [
+  /\btop\s*(\d+|hits?)\b/i,
+  /\bgreatest\s*hits?\b/i,
+  /\bnow\s*that'?s?\s*what\s*i\s*call/i,
+  /\b(hits?|songs?)\s*(of|from)\s*(the\s*)?\d{4}/i,
+  /\b(various\s*artists?|compilation)\b/i,
+];
+
+/**
+ * Returns true if the track looks like a compilation, junk, or non-official track.
+ * Checks both track name and album name.
+ */
+function isJunkOrCompilationTrack(track: SpotifyTrack): boolean {
+  const name = track.name || '';
+  const albumName = track.album?.name || '';
+
+  // Reject if track name matches junk patterns
+  if (JUNK_TRACK_PATTERNS.some(p => p.test(name))) return true;
+
+  // Reject if album name matches compilation patterns
+  if (JUNK_ALBUM_PATTERNS.some(p => p.test(albumName))) return true;
+
+  // Reject very short tracks (likely intros, skits, or sound effects — under 45 seconds)
+  if (track.duration_ms && track.duration_ms < 45000) return true;
+
+  // Reject tracks with no real artist ("Various Artists")
+  if (track.artists.length === 1 && /various\s*artists?/i.test(track.artists[0].name)) return true;
+
+  return false;
+}
+
+/**
+ * Create a normalized fingerprint from track name + primary artist for deduplication.
+ * This catches the same song appearing under different album releases or IDs.
+ */
+function getTrackFingerprint(track: SpotifyTrack): string {
+  const name = (track.name || '').toLowerCase()
+    .replace(/\s*\(.*?\)\s*/g, '')   // remove parenthetical info like (feat. X), (Remix)
+    .replace(/\s*\[.*?\]\s*/g, '')   // remove bracket info like [Deluxe]
+    .replace(/[^a-z0-9]/g, '');       // strip punctuation & whitespace
+  const artist = (track.artists[0]?.name || '').toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  return `${artist}_${name}`;
+}
+
+/**
+ * Validate and deduplicate a batch of SpotifyTracks.
+ * Rejects junk/compilation tracks and removes name+artist duplicates.
+ */
+function filterAndDedup(
+  tracks: SpotifyTrack[],
+  seenIds: Set<string>,
+  seenFingerprints: Set<string>,
+): SpotifyTrack[] {
+  const accepted: SpotifyTrack[] = [];
+  for (const track of tracks) {
+    if (!track || !track.id) continue;
+    if (seenIds.has(track.id)) continue;
+    if (track.type === 'episode' || track.is_local) continue;
+    if (isJunkOrCompilationTrack(track)) continue;
+
+    const fp = getTrackFingerprint(track);
+    if (seenFingerprints.has(fp)) continue;
+
+    seenIds.add(track.id);
+    seenFingerprints.add(fp);
+    accepted.push(track);
+  }
+  return accepted;
+}
+
 // SPOTIFY TRACK - APP TRACK CONVERTER
 
 function spotifyTrackToAppTrack(st: SpotifyTrack): Track {
@@ -802,6 +898,7 @@ async function getPreferenceAwareSearchResults(
 
   const allTracks: SpotifyTrack[] = [];
   const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
 
   // Execute Spotify search if token is present (top 6 queries to prevent quota burnout)
   if (accessToken) {
@@ -821,12 +918,8 @@ async function getPreferenceAwareSearchResults(
 
     for (const result of results) {
       if (result.status === 'fulfilled' && result.value) {
-        for (const track of result.value) {
-          if (!seenIds.has(track.id) && track.type !== 'episode' && !track.is_local) {
-            seenIds.add(track.id);
-            allTracks.push(track);
-          }
-        }
+        const filtered = filterAndDedup(result.value, seenIds, seenFingerprints);
+        allTracks.push(...filtered);
       }
     }
   }
@@ -871,12 +964,8 @@ async function getPreferenceAwareSearchResults(
 
     for (const result of fallbackResults) {
       if (result.status === 'fulfilled' && result.value) {
-        for (const track of result.value) {
-          if (!seenIds.has(track.id)) {
-            seenIds.add(track.id);
-            allTracks.push(track);
-          }
-        }
+        const filtered = filterAndDedup(result.value, seenIds, seenFingerprints);
+        allTracks.push(...filtered);
       }
     }
   }
@@ -914,6 +1003,7 @@ async function getArtistDiscoveryTracks(
   const { searchTracks } = require('./spotify');
   const allTracks: SpotifyTrack[] = [];
   const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
 
   const artistNamesToFetch = (preferences.favoriteArtistNames || []).slice(0, 5);
   if (accessToken && artistNamesToFetch.length > 0) {
@@ -931,12 +1021,8 @@ async function getArtistDiscoveryTracks(
 
     for (const result of topTrackResults) {
       if (result.status === 'fulfilled' && result.value) {
-        for (const track of result.value) {
-          if (!seenIds.has(track.id)) {
-            seenIds.add(track.id);
-            allTracks.push(track);
-          }
-        }
+        const filtered = filterAndDedup(result.value, seenIds, seenFingerprints);
+        allTracks.push(...filtered);
       }
     }
   }
@@ -975,6 +1061,7 @@ async function minePlaylistsForMood(
   const { getPlaylistTracks } = require('./spotify');
   const allTracks: RecommendedTrack[] = [];
   const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
 
   // Mine top 3 playlists (to limit API calls)
   const playlistsToMine = playlists.slice(0, 3);
@@ -996,23 +1083,22 @@ async function minePlaylistsForMood(
 
   for (const result of results) {
     if (result.status === 'fulfilled' && result.value) {
-      for (const track of result.value.tracks) {
-        if (track && track.id && !seenIds.has(track.id) && track.type !== 'episode' && !track.is_local) {
-          seenIds.add(track.id);
-          const { score, reason } = scoreSpotifyTrack(
-            track, mood, moodScore, preferences, userId, timeContext, trajectory,
-            true, result.value.playlistName
-          );
-          allTracks.push({
-            track: spotifyTrackToAppTrack(track),
-            reason,
-            source: 'playlist',
-            score: score.total,
-          });
-        }
+      const filtered = filterAndDedup(result.value.tracks, seenIds, seenFingerprints);
+      for (const track of filtered) {
+        const { score, reason } = scoreSpotifyTrack(
+          track, mood, moodScore, preferences, userId, timeContext, trajectory,
+          true, result.value.playlistName
+        );
+        allTracks.push({
+          track: spotifyTrackToAppTrack(track),
+          reason,
+          source: 'playlist',
+          score: score.total,
+        });
       }
     }
   }
+
 
   return allTracks.sort((a, b) => b.score - a.score);
 }
@@ -1022,11 +1108,12 @@ async function minePlaylistsForMood(
 /**
  * Enforce diversity rules on the final recommendation list.
  * - Max 2 tracks per artist
- * - At least 3 different genres/sources
+ * - No duplicate songs by name+artist fingerprint
  * - Mix of sources (personal, discovery, playlist)
  */
 function enforceDiversity(tracks: RecommendedTrack[], limit: number): RecommendedTrack[] {
   const artistCounts = new Map<string, number>();
+  const seenNames = new Set<string>();
   const result: RecommendedTrack[] = [];
 
   for (const rec of tracks) {
@@ -1038,7 +1125,12 @@ function enforceDiversity(tracks: RecommendedTrack[], limit: number): Recommende
     // Max 2 per artist
     if (count >= 2) continue;
 
+    // Name+artist dedup (catches same song from different albums/releases)
+    const nameKey = `${artist}_${rec.track.title.toLowerCase().replace(/\s*\(.*?\)/g, '').replace(/[^a-z0-9]/g, '')}`;
+    if (seenNames.has(nameKey)) continue;
+
     artistCounts.set(artist, count + 1);
+    seenNames.add(nameKey);
     result.push(rec);
   }
 

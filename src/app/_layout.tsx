@@ -171,6 +171,10 @@ export default function RootLayout() {
           const savedViewMode = getSetting('journal_view_mode', 'list');
           useAppStore.getState().setJournalViewMode(savedViewMode as any);
 
+          // Load onboarding completion status
+          const isOnboardingDone = getSetting('has_completed_onboarding', 'false') === 'true';
+          useAppStore.getState().hasCompletedOnboarding = isOnboardingDone;
+
           // Check biometric lock setting on startup
           const isBioEnabled = getSetting('biometric_lock_enabled', 'disabled') === 'enabled';
           if (isBioEnabled) {
@@ -182,6 +186,7 @@ export default function RootLayout() {
         } catch (settingsError) {
           console.error('[App] Failed to load settings:', settingsError);
         }
+
 
         // Check for existing session
         const { data } = await supabase.auth.getSession();

@@ -91,7 +91,16 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Onboarding
   hasCompletedOnboarding: false,
-  setOnboardingComplete: (hasCompletedOnboarding) => set({ hasCompletedOnboarding }),
+  setOnboardingComplete: (hasCompletedOnboarding) => {
+    set({ hasCompletedOnboarding });
+    try {
+      const { saveSetting } = require('@/services/settingsService');
+      saveSetting('has_completed_onboarding', hasCompletedOnboarding ? 'true' : 'false');
+    } catch (e) {
+      console.error('[Store] Failed to save onboarding setting:', e);
+    }
+  },
+
 
   // Today's Mood
   todayMood: null,
