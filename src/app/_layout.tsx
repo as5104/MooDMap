@@ -339,13 +339,6 @@ export default function RootLayout() {
             }}
           />
           <Stack.Screen
-            name="recommended-music"
-            options={{
-              presentation: 'fullScreenModal',
-              animation: 'slide_from_bottom',
-            }}
-          />
-          <Stack.Screen
             name="about"
             options={{
               animation: 'slide_from_right',

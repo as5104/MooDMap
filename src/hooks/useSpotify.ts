@@ -164,6 +164,7 @@ export function useSpotify(): UseSpotifyReturn {
   useEffect(() => {
     if (!isVIP || !spotifyConnected) {
       setSpotifyUser(null);
+      setPlaylists([]);
       return;
     }
 
@@ -173,12 +174,14 @@ export function useSpotify(): UseSpotifyReturn {
         if (token) {
           const user = await getCurrentUser(token);
           if (user) setSpotifyUser(user);
+          const data = await getUserPlaylists(token);
+          if (data) setPlaylists(data);
         }
       } catch (err) {
-        console.warn('[useSpotify] Failed to load user profile on connect:', err);
+        console.warn('[useSpotify] Failed to load user profile & playlists on connect:', err);
       }
     })();
-  }, [isVIP, spotifyConnected]);
+  }, [isVIP, spotifyConnected, getValidAccessToken]);
 
   // Now Playing Polling
 

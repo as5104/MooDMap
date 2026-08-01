@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { File, Paths } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
+import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -867,7 +868,7 @@ const SpotifyListView = React.memo(({
     if (isConnected) {
       loadSpotifyPlaylists();
     }
-  }, [isConnected]);
+  }, [isConnected, loadSpotifyPlaylists]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -2175,6 +2176,25 @@ const PlayerView = React.memo(({
   const isSpotify = currentTrack?.category === 'spotify';
   const isTrackPlaying = isPlaying;
 
+  // Persistence of Player View Mode ('vinyl' | 'poster')
+  const [playerViewMode, setPlayerViewModeState] = useState<'vinyl' | 'poster'>(() => {
+    try {
+      const { getSetting } = require('../services/settingsService');
+      return (getSetting('player_view_mode', 'vinyl') as 'vinyl' | 'poster') || 'vinyl';
+    } catch {
+      return 'vinyl';
+    }
+  });
+  const [showAppearanceMenu, setShowAppearanceMenu] = useState(false);
+
+  const setPlayerViewMode = useCallback((mode: 'vinyl' | 'poster') => {
+    setPlayerViewModeState(mode);
+    try {
+      const { saveSetting } = require('../services/settingsService');
+      saveSetting('player_view_mode', mode);
+    } catch { }
+  }, []);
+
   // Sync / Refresh Spotify state immediately when the track ID changes
   useEffect(() => {
     if (isSpotify && currentTrack?.id) {
@@ -2193,7 +2213,6 @@ const PlayerView = React.memo(({
     } else {
       await resume();
     }
-    // Perform a fast refresh after 500ms
     setTimeout(() => {
       refreshNowPlaying();
     }, 500);
@@ -2201,7 +2220,6 @@ const PlayerView = React.memo(({
 
   const handleNextPress = useCallback(async () => {
     await next();
-    // Perform a fast refresh after 500ms
     setTimeout(() => {
       refreshNowPlaying();
     }, 500);
@@ -2209,7 +2227,6 @@ const PlayerView = React.memo(({
 
   const handlePrevPress = useCallback(async () => {
     await prev();
-    // Perform a fast refresh after 500ms
     setTimeout(() => {
       refreshNowPlaying();
     }, 500);
@@ -2217,11 +2234,10 @@ const PlayerView = React.memo(({
 
   const insets = useSafeAreaInsets();
 
-
-  // Artwork rotation animation
+  // Artwork rotation animation for Vinyl mode
   const rotation = useSharedValue(0);
   useEffect(() => {
-    if (isTrackPlaying && isPlayerActive) {
+    if (isTrackPlaying && isPlayerActive && playerViewMode === 'vinyl') {
       rotation.value = rotation.value % 360;
       rotation.value = withRepeat(
         withTiming(rotation.value + 360, { duration: 35000, easing: Easing.linear }),
@@ -2231,129 +2247,196 @@ const PlayerView = React.memo(({
     } else {
       cancelAnimation(rotation);
     }
-  }, [isTrackPlaying, isPlayerActive, rotation]);
+  }, [isTrackPlaying, isPlayerActive, playerViewMode, rotation]);
 
   const rotatedArtworkStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
-  const palette = useMemo(() => getTrackColorPalette(currentTrack), [currentTrack]);
   if (!currentTrack) return null;
 
   const isCurrentFav = favorites.includes(currentTrack.id);
+  const isPosterMode = playerViewMode === 'poster';
 
   return (
     <View style={[styles.playerContainer, { paddingBottom: insets.bottom + 48 }]}>
+      {/* Background artwork & gradient overlay for Poster Mode */}
+      {isPosterMode && (
+        <View
+          style={[
+            styles.posterBackgroundContainer,
+            {
+              top: -insets.top - 20,
+              bottom: -insets.bottom - 48,
+            },
+          ]}
+          pointerEvents="none"
+        >
+          {currentTrack.cover ? (
+            <ExpoImage
+              source={{ uri: currentTrack.cover }}
+              style={styles.posterBgImage}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.posterBgImage, { backgroundColor: '#12141F' }]} />
+          )}
+          <LinearGradient
+            colors={[
+              'rgba(8, 10, 16, 0.50)',
+              'rgba(8, 10, 16, 0.25)',
+              'rgba(8, 10, 16, 0.90)',
+            ]}
+            locations={[0, 0.4, 1]}
+            style={styles.posterGradientOverlay}
+          />
+        </View>
+      )}
+
       {/* Navigation Header */}
       <View style={styles.navigationHeader}>
         {/* Absolute Centered Title */}
         <View style={styles.absoluteTitleContainer} pointerEvents="none">
-          <Text style={styles.navigationTitleText} numberOfLines={1}>
-            Now Playing
-          </Text>
+          <View style={isPosterMode ? styles.glassHeaderBadge : undefined}>
+            <Text style={styles.navigationTitleText} numberOfLines={1}>
+              Now Playing
+            </Text>
+          </View>
         </View>
 
-        <Pressable style={styles.closeBtn} onPress={onGoBack}>
+        <Pressable style={isPosterMode ? styles.glassIconBtn : styles.closeBtn} onPress={onGoBack}>
           <Feather name="chevron-left" size={24} color={Colors.text.primary} />
         </Pressable>
-        <Pressable style={styles.closeBtn} onPress={() => toggleFavorite(currentTrack.id)}>
-          <Feather
-            name="heart"
-            size={20}
-            color={isCurrentFav ? Colors.error : Colors.text.primary}
-            fill={isCurrentFav ? Colors.error : 'transparent'}
-          />
-        </Pressable>
-      </View>
 
-      {/* Large Centered Rotating Vinyl Disc with Center Sticker Cover */}
-      <View style={styles.playerArtworkSection}>
-        <View style={styles.playerArtworkWrapper}>
-          {/* Rotating Vinyl Disc Frame */}
-          <Animated.View style={[{ width: 240, height: 240, position: 'relative' }, rotatedArtworkStyle]} renderToHardwareTextureAndroid={true}>
-            {/* The Svg Vinyl Disc */}
-            <Svg viewBox="0 0 400 400" width="100%" height="100%">
-              <Defs>
-                {/* Cutout mask to create standard vinyl grooves */}
-                <Mask id="grooves">
-                  <Rect width="400" height="400" fill="white" />
-                  <Circle cx={200} cy={200} r={170} fill="black" />
-                  <Circle cx={200} cy={200} r={150} fill="white" />
-                  <Circle cx={200} cy={200} r={145} fill="black" />
-                  <Circle cx={200} cy={200} r={130} fill="white" />
-                  <Circle cx={200} cy={200} r={125} fill="black" />
-                  <Circle cx={200} cy={200} r={110} fill="white" />
-                  <Circle cx={200} cy={200} r={105} fill="black" />
-                  <Circle cx={200} cy={200} r={90} fill="white" />
-                  <Circle cx={200} cy={200} r={85} fill="black" />
-                  <Circle cx={200} cy={200} r={70} fill="white" />
-                </Mask>
-              </Defs>
+        {/* Right Action Stack: Heart Button in Original Header Position, 3-Dot Button Stacked Directly Below */}
+        <View style={{ alignItems: 'center' }}>
+          <Pressable style={isPosterMode ? styles.glassIconBtn : styles.closeBtn} onPress={() => toggleFavorite(currentTrack.id)}>
+            <Feather
+              name="heart"
+              size={20}
+              color={isCurrentFav ? Colors.error : Colors.text.primary}
+              fill={isCurrentFav ? Colors.error : 'transparent'}
+            />
+          </Pressable>
 
-              {/* Outer Vinyl Body */}
-              <G>
-                {/* Outer shiny edge */}
-                <Circle cx={200} cy={200} r={200} fill="#111111" />
-                <Circle cx={200} cy={200} r={190} fill="#0A0A0A" />
-
-                {/* Thin lime ring on the outer record body */}
-                <Circle cx={200} cy={200} r={186} fill="none" stroke="#8DE91D" strokeWidth={1} opacity={0.35} />
-
-                {/* Grooves (Applied via Mask) */}
-                <Circle cx={200} cy={200} r={180} fill="#2c2c2c" mask="url(#grooves)" />
-
-                {/* Record Label Accent Rings (App themed Lime green rings around the sticker) */}
-                <Circle cx={200} cy={200} r={114} fill="none" stroke="#8DE91D" strokeWidth={2} opacity={0.8} />
-                <Circle cx={200} cy={200} r={108} fill="none" stroke="#8DE91D" strokeWidth={1} opacity={0.5} strokeDasharray="4,4" />
-
-                {/* Record Sticker Base Paper */}
-                <Circle cx={200} cy={200} r={100} fill="#1E1E24" />
-              </G>
-            </Svg>
-
-            {/* Circular Cover Art Sticker pasted on top of the Vinyl center */}
-            <View style={{
-              position: 'absolute',
-              width: 120,
-              height: 120,
-              borderRadius: 60,
-              top: 60,
-              left: 60,
-              overflow: 'hidden',
-              backgroundColor: '#1E1E24',
-            }}>
-              <MusicCover
-                cover={currentTrack.cover}
-                style={{ width: '100%', height: '100%' }}
-                iconSize={36}
-                borderRadius={60}
-              />
-            </View>
-
-            {/* Center Spindle Hole punched through the sticker */}
-            <View style={{
-              position: 'absolute',
-              width: 24,
-              height: 24,
-              borderRadius: 12,
-              top: 108,
-              left: 108,
-              backgroundColor: 'transparent',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }} pointerEvents="none">
-              <Svg width={24} height={24} viewBox="0 0 24 24">
-                {/* Center hole details */}
-                <Path d="M9 12 Q 12 9 15 12 Q 12 15 9 12" fill="#ffffff" opacity={0.25} />
-                <Circle cx={12} cy={12} r={6} fill="#111111" stroke="#FFFFFF" strokeWidth={1} />
-                <Circle cx={12} cy={12} r={2} fill="#000000" />
-              </Svg>
-            </View>
-          </Animated.View>
+          <Pressable
+            style={[
+              isPosterMode ? styles.glassIconBtn : styles.closeBtn,
+              { position: 'absolute', top: 50, right: 0 }
+            ]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowAppearanceMenu(true);
+            }}
+          >
+            <Feather
+              name="more-vertical"
+              size={20}
+              color={Colors.text.primary}
+            />
+          </Pressable>
         </View>
       </View>
 
-      {/* Title, Visualizer, Timeline, and Controls Group */}
-      <View style={styles.playerControlsGroup}>
+      {/* Center Artwork Display (Square Poster Card in Poster Mode / Vinyl Disc in Vinyl Mode) */}
+      {isPosterMode ? (
+        <View style={styles.posterArtworkSection}>
+          <View style={styles.posterArtworkCard}>
+            <MusicCover
+              cover={currentTrack.cover}
+              style={styles.posterArtworkImg}
+              iconSize={48}
+              borderRadius={Radius.xl}
+            />
+          </View>
+        </View>
+      ) : (
+        /* Large Centered Rotating Vinyl Disc with Center Sticker Cover */
+        <View style={styles.playerArtworkSection}>
+          <View style={styles.playerArtworkWrapper}>
+            {/* Rotating Vinyl Disc Frame */}
+            <Animated.View style={[{ width: 240, height: 240, position: 'relative' }, rotatedArtworkStyle]} renderToHardwareTextureAndroid={true}>
+              {/* The Svg Vinyl Disc */}
+              <Svg viewBox="0 0 400 400" width="100%" height="100%">
+                <Defs>
+                  <Mask id="grooves">
+                    <Rect width="400" height="400" fill="white" />
+                    <Circle cx={200} cy={200} r={170} fill="black" />
+                    <Circle cx={200} cy={200} r={150} fill="white" />
+                    <Circle cx={200} cy={200} r={145} fill="black" />
+                    <Circle cx={200} cy={200} r={130} fill="white" />
+                    <Circle cx={200} cy={200} r={125} fill="black" />
+                    <Circle cx={200} cy={200} r={110} fill="white" />
+                    <Circle cx={200} cy={200} r={105} fill="black" />
+                    <Circle cx={200} cy={200} r={90} fill="white" />
+                    <Circle cx={200} cy={200} r={85} fill="black" />
+                    <Circle cx={200} cy={200} r={70} fill="white" />
+                  </Mask>
+                </Defs>
+
+                {/* Outer Vinyl Body */}
+                <G>
+                  <Circle cx={200} cy={200} r={200} fill="#111111" />
+                  <Circle cx={200} cy={200} r={190} fill="#0A0A0A" />
+                  <Circle cx={200} cy={200} r={186} fill="none" stroke="#8DE91D" strokeWidth={1} opacity={0.35} />
+                  <Circle cx={200} cy={200} r={180} fill="#2c2c2c" mask="url(#grooves)" />
+                  <Circle cx={200} cy={200} r={114} fill="none" stroke="#8DE91D" strokeWidth={2} opacity={0.8} />
+                  <Circle cx={200} cy={200} r={108} fill="none" stroke="#8DE91D" strokeWidth={1} opacity={0.5} strokeDasharray="4,4" />
+                  <Circle cx={200} cy={200} r={100} fill="#1E1E24" />
+                </G>
+              </Svg>
+
+              {/* Circular Cover Art Sticker pasted on top of the Vinyl center */}
+              <View style={{
+                position: 'absolute',
+                width: 120,
+                height: 120,
+                borderRadius: 60,
+                top: 60,
+                left: 60,
+                overflow: 'hidden',
+                backgroundColor: '#1E1E24',
+              }}>
+                <MusicCover
+                  cover={currentTrack.cover}
+                  style={{ width: '100%', height: '100%' }}
+                  iconSize={36}
+                  borderRadius={60}
+                />
+              </View>
+
+              {/* Center Spindle Hole */}
+              <View style={{
+                position: 'absolute',
+                width: 24,
+                height: 24,
+                borderRadius: 12,
+                top: 108,
+                left: 108,
+                backgroundColor: 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }} pointerEvents="none">
+                <Svg width={24} height={24} viewBox="0 0 24 24">
+                  <Path d="M9 12 Q 12 9 15 12 Q 12 15 9 12" fill="#ffffff" opacity={0.25} />
+                  <Circle cx={12} cy={12} r={6} fill="#111111" stroke="#FFFFFF" strokeWidth={1} />
+                  <Circle cx={12} cy={12} r={2} fill="#000000" />
+                </Svg>
+              </View>
+            </Animated.View>
+          </View>
+        </View>
+      )}
+
+      {/* Bottom Controls Group (Identical size & layout for both modes, with frosted glass in Poster Mode) */}
+      <View style={[styles.playerControlsGroup, isPosterMode && styles.posterGlassCardContainer]}>
+        {isPosterMode && (
+          <BlurView
+            intensity={Platform.OS === 'ios' ? 85 : 45}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+        )}
+
         {/* Track Title and Artist */}
         <View style={styles.playerInfoSection}>
           <Text numberOfLines={1} style={styles.playerTrackTitle}>
@@ -2372,7 +2455,6 @@ const PlayerView = React.memo(({
           seekTo={seekTo}
         />
 
-
         {/* Caching/Downloading Indicator */}
         {isDownloading && (
           <View style={styles.downloadBarContainer}>
@@ -2388,7 +2470,6 @@ const PlayerView = React.memo(({
           {/* Playback Mode (Cycles: Sequence -> Shuffle -> Repeat All -> Repeat One) */}
           <Pressable onPress={cyclePlaybackMode} style={styles.playerUtilityBtn} hitSlop={12}>
             <View style={styles.playerUtilityIconWrapper}>
-
               {shuffle ? (
                 <Feather
                   name="shuffle"
@@ -2420,7 +2501,6 @@ const PlayerView = React.memo(({
             onPress={handlePlayPausePress}
             style={styles.playerPlayBtn}
           >
-            {/* Smooth SVG circle to prevent Android jagged polygon play button bug */}
             <Svg width={72} height={72} style={StyleSheet.absoluteFill}>
               <Circle
                 cx={36}
@@ -2444,7 +2524,7 @@ const PlayerView = React.memo(({
             <Feather name="skip-forward" size={24} color="#FFFFFF" />
           </Pressable>
 
-          {/* Queue List (Navigates to Track List) */}
+          {/* Queue List */}
           <Pressable
             onPress={onShowQueue}
             style={styles.playerUtilityBtn}
@@ -2458,6 +2538,95 @@ const PlayerView = React.memo(({
           </Pressable>
         </View>
       </View>
+
+      {/* Appearance Menu Modal */}
+      {showAppearanceMenu && (
+        <View style={styles.menuBackdropOverlay}>
+          <BlurView
+            intensity={Platform.OS === 'ios' ? 40 : 25}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowAppearanceMenu(false)} />
+          <View style={[styles.menuContainer, { paddingBottom: insets.bottom + 130 }]}>
+            <GlassCard intensity="strong" padding="none" style={styles.menuContent}>
+              <View style={styles.menuSelectorHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                  <Feather name="layout" size={18} color={Colors.accent.primary} />
+                  <Text style={styles.menuTitleText}>Player Appearance</Text>
+                </View>
+                <Pressable onPress={() => setShowAppearanceMenu(false)} hitSlop={8} style={styles.menuSelectorCloseBtn}>
+                  <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
+                </Pressable>
+              </View>
+
+              <View style={{ flexDirection: 'row', padding: Spacing.md, gap: Spacing.md }}>
+                {/* Vinyl Disc Mode Option */}
+                <Pressable
+                  style={[
+                    styles.appearanceGridCard,
+                    playerViewMode === 'vinyl' && styles.activeAppearanceGridCard,
+                  ]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setPlayerViewMode('vinyl');
+                    setShowAppearanceMenu(false);
+                  }}
+                >
+                  <View style={[
+                    styles.appearanceGridIcon,
+                    playerViewMode === 'vinyl' && styles.activeAppearanceGridIcon,
+                  ]}>
+                    <Feather name="disc" size={24} color={playerViewMode === 'vinyl' ? Colors.accent.primary : '#FFFFFF'} />
+                  </View>
+                  <Text style={[
+                    styles.appearanceGridText,
+                    playerViewMode === 'vinyl' && styles.activeAppearanceGridText,
+                  ]}>
+                    Vinyl Disc View
+                  </Text>
+                  {playerViewMode === 'vinyl' && (
+                    <View style={styles.activeCheckBadge}>
+                      <Feather name="check" size={12} color="#000000" />
+                    </View>
+                  )}
+                </Pressable>
+
+                {/* Full Poster Mode Option */}
+                <Pressable
+                  style={[
+                    styles.appearanceGridCard,
+                    playerViewMode === 'poster' && styles.activeAppearanceGridCard,
+                  ]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setPlayerViewMode('poster');
+                    setShowAppearanceMenu(false);
+                  }}
+                >
+                  <View style={[
+                    styles.appearanceGridIcon,
+                    playerViewMode === 'poster' && styles.activeAppearanceGridIcon,
+                  ]}>
+                    <Feather name="image" size={24} color={playerViewMode === 'poster' ? Colors.accent.primary : '#FFFFFF'} />
+                  </View>
+                  <Text style={[
+                    styles.appearanceGridText,
+                    playerViewMode === 'poster' && styles.activeAppearanceGridText,
+                  ]}>
+                    Full Poster View
+                  </Text>
+                  {playerViewMode === 'poster' && (
+                    <View style={styles.activeCheckBadge}>
+                      <Feather name="check" size={12} color="#000000" />
+                    </View>
+                  )}
+                </Pressable>
+              </View>
+            </GlassCard>
+          </View>
+        </View>
+      )}
     </View>
   );
 });
@@ -3236,15 +3405,27 @@ export default function MusicScreen() {
       setActiveView(view);
     }
 
-    viewIndex.value = withSpring(target, {
-      damping: 20,
-      stiffness: 110,
-      mass: 0.9,
-    }, (finished) => {
-      if (finished) {
-        runOnJS(setActiveView)(view);
-      }
-    });
+    if (viewIndex.value >= 1.9 && target < 2) {
+      // Exiting Player View: Use crisp, smooth timing transition with zero spring tail crawl
+      viewIndex.value = withTiming(target, {
+        duration: 260,
+        easing: Easing.out(Easing.quad),
+      }, (finished) => {
+        if (finished) {
+          runOnJS(setActiveView)(view);
+        }
+      });
+    } else {
+      viewIndex.value = withSpring(target, {
+        damping: 24,
+        stiffness: 140,
+        mass: 0.8,
+      }, (finished) => {
+        if (finished) {
+          runOnJS(setActiveView)(view);
+        }
+      });
+    }
   }, [view]);
 
   const categoriesStyle = useAnimatedStyle(() => {
@@ -4897,5 +5078,132 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.subheading,
     fontSize: FontSizes.body,
     color: Colors.text.primary,
+  },
+
+  // Full Poster & Appearance Modal Styles
+  posterBackgroundContainer: {
+    position: 'absolute',
+    left: -SCREEN_PADDING,
+    right: -SCREEN_PADDING,
+    zIndex: -1,
+    overflow: 'hidden',
+  },
+  posterBgImage: {
+    width: '100%',
+    height: '100%',
+  },
+  posterGradientOverlay: {
+    ...StyleSheet.absoluteFill,
+  },
+  posterArtworkSection: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: Spacing.md,
+  },
+  posterArtworkCard: {
+    width: SCREEN_WIDTH * 0.72,
+    height: SCREEN_WIDTH * 0.72,
+    maxWidth: 320,
+    maxHeight: 320,
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'rgba(20, 22, 30, 0.6)',
+  },
+  posterArtworkImg: {
+    width: '100%',
+    height: '100%',
+  },
+  posterGlassCardContainer: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(12, 14, 22, 0.55)' : 'rgba(14, 16, 26, 0.88)',
+    paddingVertical: Spacing.md,
+  },
+  glassIconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(16, 18, 26, 0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  glassHeaderBadge: {
+    backgroundColor: 'rgba(16, 18, 26, 0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 6,
+  },
+  appearanceGridCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.xl,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    position: 'relative',
+    gap: Spacing.sm,
+  },
+  activeAppearanceGridCard: {
+    backgroundColor: 'rgba(141, 233, 29, 0.12)',
+    borderColor: Colors.accent.primary,
+  },
+  appearanceGridIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeAppearanceGridIcon: {
+    backgroundColor: 'rgba(141, 233, 29, 0.2)',
+  },
+  appearanceGridText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.bodySmall,
+    color: 'rgba(255, 255, 255, 0.8)',
+    textAlign: 'center',
+  },
+  activeAppearanceGridText: {
+    fontFamily: Fonts.bodyBold,
+    color: '#FFFFFF',
+  },
+  activeCheckBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: Colors.accent.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuBackdropOverlay: {
+    position: 'absolute',
+    top: -120,
+    left: -SCREEN_PADDING,
+    right: -SCREEN_PADDING,
+    bottom: -120,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    zIndex: 9999,
+    justifyContent: 'flex-end',
   },
 });
