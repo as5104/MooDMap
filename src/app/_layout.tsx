@@ -68,6 +68,9 @@ function useProtectedRoute() {
   }, [session, isAuthLoading, isAppReady, segments]);
 }
 
+import { AppVersionInfo, checkForAppUpdates } from '@/services/updateService';
+import { UpdateModal } from '@/components/ui/UpdateModal';
+
 export default function RootLayout() {
   const setSession = useAppStore((s) => s.setSession);
   const setUser = useAppStore((s) => s.setUser);
@@ -88,9 +91,33 @@ export default function RootLayout() {
   const isLockedRef = useRef(false);
   const isAuthenticatingRef = useRef(false);
 
+  // Auto Update Check State
+  const [updateInfo, setUpdateInfo] = useState<AppVersionInfo | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+
   useEffect(() => {
     isLockedRef.current = isLocked;
   }, [isLocked]);
+
+  // Startup Update Check
+  useEffect(() => {
+    const checkUpdates = async () => {
+      try {
+        const info = await checkForAppUpdates();
+        if (info.hasUpdate) {
+          setUpdateInfo(info);
+          setShowUpdateModal(true);
+        }
+      } catch (e) {
+        console.warn('[RootLayout] Startup update check failed:', e);
+      }
+    };
+
+    // Delay slightly to let splash screen transition finish
+    const timer = setTimeout(checkUpdates, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
 
   const triggerBiometricAuth = useCallback(async () => {
     if (isAuthenticatingRef.current) return;
@@ -307,17 +334,30 @@ export default function RootLayout() {
             }}
           />
           <Stack.Screen
-            name="journal-all"
+            name="recommended-music"
+            options={{
+              presentation: 'fullScreenModal',
+              animation: 'slide_from_bottom',
+            }}
+          />
+          <Stack.Screen
+            name="about"
             options={{
               animation: 'slide_from_right',
             }}
           />
         </Stack>
         <CustomAlert />
+        <UpdateModal
+          visible={showUpdateModal}
+          updateInfo={updateInfo}
+          onDismiss={() => setShowUpdateModal(false)}
+        />
       </MusicProvider>
     </GestureHandlerRootView>
   );
 }
+
 
 const styles = StyleSheet.create({
   root: {

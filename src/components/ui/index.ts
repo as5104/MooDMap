@@ -21,4 +21,6 @@ export { MetricCard } from './MetricCard';
 export { MoodFace } from './MoodFace';
 export type { FaceExpression } from './MoodFace';
 export { WeeklyMoodRow } from './WeeklyMoodRow';
+export { UpdateModal } from './UpdateModal';
+
 

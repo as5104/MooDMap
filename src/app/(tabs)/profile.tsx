@@ -368,10 +368,11 @@ export default function ProfileScreen() {
     {
       icon: 'info' as const,
       label: 'About',
-      value: 'v1.0',
-      onPress: undefined as (() => void) | undefined,
+      value: `v${require('@/services/updateService').getCurrentAppVersion()}`,
+      onPress: () => router.push('/about'),
     },
   ];
+
 
   return (
     <GradientBackground>
