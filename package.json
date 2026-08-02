@@ -58,6 +58,7 @@
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/outfit": "^0.4.3",
     "@types/react": "~19.2.2",
+    "babel-plugin-transform-remove-console": "^6.9.4",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~56.0.4",
