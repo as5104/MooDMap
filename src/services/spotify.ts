@@ -190,7 +190,7 @@ export async function exchangeCodeForTokens(
  */
 export async function refreshSpotifyToken(
   refreshToken: string
-): Promise<SpotifyTokens | null> {
+): Promise<{ tokens: SpotifyTokens | null; isRevoked?: boolean }> {
   try {
     const response = await fetch(SPOTIFY_TOKEN_ENDPOINT, {
       method: 'POST',
@@ -204,20 +204,28 @@ export async function refreshSpotifyToken(
       }).toString(),
     });
 
+    if (response.status === 400 || response.status === 401) {
+      console.warn('[Spotify] Token refresh revoked or invalid:', response.status);
+      return { tokens: null, isRevoked: true };
+    }
+
     if (!response.ok) {
       console.warn('[Spotify] Token refresh failed:', response.status);
-      return null;
+      return { tokens: null, isRevoked: false };
     }
 
     const data = await response.json();
     return {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token || refreshToken, // Spotify may or may not return a new one
-      expiresAt: Date.now() + data.expires_in * 1000,
+      tokens: {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || refreshToken,
+        expiresAt: Date.now() + data.expires_in * 1000,
+      },
+      isRevoked: false,
     };
   } catch (e) {
     console.warn('[Spotify] Token refresh error:', e);
-    return null;
+    return { tokens: null, isRevoked: false };
   }
 }
 

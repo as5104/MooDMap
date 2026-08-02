@@ -2,7 +2,7 @@
   "expo": {
     "name": "MoodMap",
     "slug": "MoodMap",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "moodmap",
@@ -22,6 +22,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.moodmap.app",
+      "versionCode": 2,
       "permissions": ["WAKE_LOCK"]
     },
     "web": {

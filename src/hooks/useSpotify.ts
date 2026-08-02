@@ -231,50 +231,50 @@ export function useSpotify(): UseSpotifyReturn {
       return;
     }
 
-    const isSpotifyActive = currentTrack?.category === 'spotify';
-
-    // Fetch once on mount/foreground transition to get initial state
+    // Always attempt initial fetch and load playlists on mount/connect
     refreshNowPlaying().catch(err => {
       console.warn('[useSpotify] Initial now playing refresh failed:', err);
     });
 
-    // Determine the poll interval based on playing state
-    // 5 seconds when playing for fast seek/skip sync; 15 seconds when paused to detect external resumes safely.
-    const pollInterval = isPlaying ? 5000 : 15000;
+    const isSpotifyActive = currentTrack?.category === 'spotify' || !!nowPlaying?.is_playing;
+    const pollInterval = isPlaying ? 5000 : 12000;
 
-    // If Spotify is active, poll while the app is in the foreground
-    if (isSpotifyActive) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-      }
-      pollRef.current = setInterval(() => {
-        refreshNowPlaying().catch(err => {
-          console.warn('[useSpotify] Polled now playing refresh failed:', err);
-        });
-      }, pollInterval);
-    } else {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
+    // Start polling while Spotify is connected and active
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
     }
+    pollRef.current = setInterval(() => {
+      refreshNowPlaying().catch(err => {
+        console.warn('[useSpotify] Polled now playing refresh failed:', err);
+      });
+    }, pollInterval);
 
-    // Pause/resume polling based on app state (only poll if playing Spotify and app is active)
+    // Sync state and resume polling automatically on app foregrounding (coming from RAM)
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         refreshNowPlaying().catch(err => {
           console.warn('[useSpotify] App active now playing refresh failed:', err);
         });
-        if (isSpotifyActive) {
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-          }
-          pollRef.current = setInterval(() => {
-            refreshNowPlaying().catch(err => {
-              console.warn('[useSpotify] App active polled now playing refresh failed:', err);
-            });
-          }, pollInterval);
+
+        // Ensure user playlists are loaded if state was empty
+        if (playlists.length === 0) {
+          getValidAccessToken().then(token => {
+            if (token) {
+              getUserPlaylists(token).then(data => {
+                if (data && data.length > 0) setPlaylists(data);
+              }).catch(() => {});
+            }
+          }).catch(() => {});
         }
+
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+        }
+        pollRef.current = setInterval(() => {
+          refreshNowPlaying().catch(err => {
+            console.warn('[useSpotify] App active polled now playing refresh failed:', err);
+          });
+        }, pollInterval);
       } else {
         if (pollRef.current) {
           clearInterval(pollRef.current);
@@ -290,7 +290,7 @@ export function useSpotify(): UseSpotifyReturn {
       }
       sub.remove();
     };
-  }, [isVIP, spotifyConnected, refreshNowPlaying, currentTrack?.id, isPlaying]);
+  }, [isVIP, spotifyConnected, refreshNowPlaying, currentTrack?.id, isPlaying, nowPlaying?.is_playing]);
 
   // Trigger immediate refresh when the playback timer reaches the end of the song
   useEffect(() => {

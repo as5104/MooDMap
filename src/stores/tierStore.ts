@@ -250,10 +250,13 @@ export const useTierStore = create<TierState>((set, get) => ({
     _refreshPromise = (async () => {
       try {
         const { refreshSpotifyToken } = require('../services/spotify');
-        const newTokens = await refreshSpotifyToken(spotifyTokens.refreshToken);
-        if (newTokens) {
-          await get().setSpotifyTokens(newTokens);
-          return newTokens.accessToken;
+        const res = await refreshSpotifyToken(spotifyTokens.refreshToken);
+        if (res.tokens) {
+          await get().setSpotifyTokens(res.tokens);
+          return res.tokens.accessToken;
+        } else if (res.isRevoked) {
+          console.warn('[Tier] Spotify refreshToken is revoked. Clearing stored credentials.');
+          await get().clearSpotifyTokens();
         }
       } catch (e) {
         console.error('[Tier] Token refresh failed:', e);
