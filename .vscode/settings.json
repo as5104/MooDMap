@@ -3,5 +3,13 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "java.jdt.ls.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-17",
+      "path": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot",
+      "default": true
+    }
+  ]
 }

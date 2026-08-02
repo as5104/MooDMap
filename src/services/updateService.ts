@@ -4,6 +4,9 @@
  */
 
 import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system';
+import { Paths } from 'expo-file-system';
+import * as IntentLauncher from 'expo-intent-launcher';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 
@@ -96,5 +99,55 @@ export async function openUpdateDownload(url?: string): Promise<void> {
     await Linking.openURL(targetUrl);
   } catch (err) {
     console.error('[UpdateService] Failed to open download link:', err);
+  }
+}
+
+/**
+ * Download APK directly inside app with progress callback, then trigger native Android Package Installer.
+ */
+export async function downloadAndInstallUpdate(
+  apkUrl: string,
+  onProgress?: (progress: number) => void
+): Promise<boolean> {
+  if (Platform.OS !== 'android') {
+    await openUpdateDownload(apkUrl);
+    return true;
+  }
+
+  try {
+    const fileUri = `${Paths.cache.uri}/MooDMap-Update.apk`;
+
+    const downloadResumable = FileSystem.createDownloadResumable(
+      apkUrl,
+      fileUri,
+      {},
+      (downloadProgress) => {
+        const progress =
+          downloadProgress.totalBytesWritten /
+          (downloadProgress.totalBytesExpectedToWrite || 120000000);
+        if (onProgress) onProgress(Math.min(Math.max(progress, 0), 1));
+      }
+    );
+
+    const result = await downloadResumable.downloadAsync();
+    if (!result || !result.uri) {
+      throw new Error('Download failed');
+    }
+
+    // Get content URI for Android Package Installer
+    const contentUri = await FileSystem.getContentUriAsync(result.uri);
+
+    // Launch Android Package Installer directly without browser redirect
+    await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+      data: contentUri,
+      flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+      type: 'application/vnd.android.package-archive',
+    });
+
+    return true;
+  } catch (err) {
+    console.warn('[UpdateService] In-app direct update failed, falling back to browser:', err);
+    await openUpdateDownload(apkUrl);
+    return false;
   }
 }

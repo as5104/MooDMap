@@ -1,9 +1,6 @@
-/**
- * MoodMap — Update Modal Component
- */
-
-import React from 'react';
+import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   StyleSheet,
@@ -17,7 +14,7 @@ import { GlassCard } from './GlassCard';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Radius, Spacing } from '@/constants/layout';
-import { AppVersionInfo, openUpdateDownload } from '@/services/updateService';
+import { AppVersionInfo, downloadAndInstallUpdate } from '@/services/updateService';
 
 interface UpdateModalProps {
   visible: boolean;
@@ -26,20 +23,38 @@ interface UpdateModalProps {
 }
 
 export function UpdateModal({ visible, updateInfo, onDismiss }: UpdateModalProps) {
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
   if (!updateInfo || !visible) return null;
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
+    if (!updateInfo.downloadUrl || isDownloading) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    openUpdateDownload(updateInfo.downloadUrl);
-    onDismiss();
+    setIsDownloading(true);
+    setDownloadProgress(0.05);
+
+    const success = await downloadAndInstallUpdate(
+      updateInfo.downloadUrl,
+      (progress) => {
+        setDownloadProgress(progress);
+      }
+    );
+
+    setIsDownloading(false);
+    if (success) {
+      onDismiss();
+    }
   };
+
+  const progressPercent = Math.round(downloadProgress * 100);
 
   return (
     <Modal
       transparent
       animationType="fade"
       visible={visible}
-      onRequestClose={onDismiss}
+      onRequestClose={isDownloading ? undefined : onDismiss}
     >
       <View style={styles.overlay}>
         <GlassCard intensity="strong" padding="lg" style={styles.modalCard}>
@@ -65,17 +80,37 @@ export function UpdateModal({ visible, updateInfo, onDismiss }: UpdateModalProps
             </Text>
           </View>
 
-          {/* Actions */}
-          <View style={styles.buttonRow}>
-            <Pressable style={styles.laterBtn} onPress={onDismiss}>
-              <Text style={styles.laterText}>Later</Text>
-            </Pressable>
+          {/* Download Progress Bar when downloading */}
+          {isDownloading ? (
+            <View style={styles.progressContainer}>
+              <View style={styles.progressTextRow}>
+                <Text style={styles.progressLabel}>
+                  {progressPercent >= 100 ? 'Opening Package Installer...' : `Downloading... ${progressPercent}%`}
+                </Text>
+                <ActivityIndicator size="small" color="#8DE91D" />
+              </View>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    { width: `${Math.min(Math.max(progressPercent, 5), 100)}%` },
+                  ]}
+                />
+              </View>
+            </View>
+          ) : (
+            /* Actions */
+            <View style={styles.buttonRow}>
+              <Pressable style={styles.laterBtn} onPress={onDismiss}>
+                <Text style={styles.laterText}>Later</Text>
+              </Pressable>
 
-            <Pressable style={styles.updateBtn} onPress={handleUpdate}>
-              <Feather name="download" size={16} color="#000000" />
-              <Text style={styles.updateText}>Update Now</Text>
-            </Pressable>
-          </View>
+              <Pressable style={styles.updateBtn} onPress={handleUpdate}>
+                <Feather name="download" size={16} color="#000000" />
+                <Text style={styles.updateText}>Update Now</Text>
+              </Pressable>
+            </View>
+          )}
         </GlassCard>
       </View>
     </Modal>
@@ -147,6 +182,33 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.caption,
     color: 'rgba(255, 255, 255, 0.8)',
     lineHeight: 18,
+  },
+  progressContainer: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  progressTextRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  progressLabel: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.bodySmall,
+    color: '#8DE91D',
+  },
+  progressBarTrack: {
+    height: 8,
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#8DE91D',
+    borderRadius: 4,
   },
   buttonRow: {
     flexDirection: 'row',
