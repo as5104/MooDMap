@@ -70,10 +70,32 @@ export default function ProfileScreen() {
   const requestVIPAccess = useTierStore((s) => s.requestVIPAccess);
   const checkVIPStatus = useTierStore((s) => s.checkVIPStatus);
   const deactivateVIP = useTierStore((s) => s.deactivateVIP);
-  const { isConnected: spotifyConnected, spotifyUser, connect: connectSpotify, disconnect: disconnectSpotify, isConnecting } = useSpotify();
+  const {
+    isConnected: spotifyConnected,
+    spotifyUser,
+    connect: connectSpotify,
+    disconnect: disconnectSpotify,
+    isConnecting,
+    refreshSession: refreshSpotifySession,
+  } = useSpotify();
 
   const [requesting, setRequesting] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [isRefreshingSpotify, setIsRefreshingSpotify] = useState(false);
+
+  const handleSyncSpotifySession = useCallback(async () => {
+    setIsRefreshingSpotify(true);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      await refreshSpotifySession();
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      customAlert('Spotify Synced', 'Your Spotify session, playlists, and current playback state have been refreshed successfully.');
+    } catch (e) {
+      customAlert('Sync Failed', 'Could not refresh Spotify session. Please check your connection.');
+    } finally {
+      setIsRefreshingSpotify(false);
+    }
+  }, [refreshSpotifySession]);
   const successScale = useSharedValue(1);
 
   const successStyle = useAnimatedStyle(() => ({
@@ -647,18 +669,35 @@ export default function ProfileScreen() {
                   </View>
 
                   {spotifyConnected ? (
-                    <Pressable
-                      style={styles.spotifyDisconnectBtn}
-                      onPress={() => {
-                        customAlert('Disconnect Spotify', 'Remove Spotify connection?', [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Disconnect', style: 'destructive', onPress: disconnectSpotify },
-                        ]);
-                      }}
-                    >
-                      <Feather name="link-2" size={14} color={Colors.text.secondary} />
-                      <Text style={styles.spotifyDisconnectText}>Disconnect</Text>
-                    </Pressable>
+                    <View style={styles.spotifyActionsRow}>
+                      <Pressable
+                        style={[styles.spotifySyncBtn, isRefreshingSpotify && { opacity: 0.7 }]}
+                        onPress={handleSyncSpotifySession}
+                        disabled={isRefreshingSpotify}
+                      >
+                        {isRefreshingSpotify ? (
+                          <ActivityIndicator size="small" color={Colors.accent.olive} />
+                        ) : (
+                          <>
+                            <Feather name="refresh-cw" size={14} color={Colors.accent.olive} />
+                            <Text style={styles.spotifySyncText}>Sync Session</Text>
+                          </>
+                        )}
+                      </Pressable>
+
+                      <Pressable
+                        style={styles.spotifyDisconnectBtn}
+                        onPress={() => {
+                          customAlert('Disconnect Spotify', 'Remove Spotify connection?', [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Disconnect', style: 'destructive', onPress: disconnectSpotify },
+                          ]);
+                        }}
+                      >
+                        <Feather name="link-2" size={14} color={Colors.text.secondary} />
+                        <Text style={styles.spotifyDisconnectText}>Disconnect</Text>
+                      </Pressable>
+                    </View>
                   ) : (
                     <Pressable
                       style={styles.spotifyConnectBtn}
@@ -1183,15 +1222,39 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.bodySmall,
     color: Colors.text.onAccent,
   },
-  spotifyDisconnectBtn: {
+  spotifyActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  spotifySyncBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.sm,
+    gap: Spacing.xs,
+    backgroundColor: 'rgba(193, 255, 114, 0.12)',
+    borderColor: 'rgba(193, 255, 114, 0.25)',
+    borderWidth: 1,
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
+  },
+  spotifySyncText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.accent.olive,
+  },
+  spotifyDisconnectBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: Radius.pill,
     paddingVertical: Spacing.sm + 2,
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: Spacing.md,
   },
   spotifyDisconnectText: {
     fontFamily: Fonts.bodyMedium,

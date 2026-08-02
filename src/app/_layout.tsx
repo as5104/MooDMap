@@ -257,17 +257,20 @@ export default function RootLayout() {
     };
   }, [triggerBiometricAuth]);
 
+  const isAppReady = useAppStore((s) => s.isAppReady);
+  const isAuthLoading = useAppStore((s) => s.isAuthLoading);
+
   // Activate the auth guard
   useProtectedRoute();
 
-  // Hide splash once fonts are loaded and app is ready
+  // Hide native splash screen once fonts are loaded and app initialization is complete
   useEffect(() => {
-    if (fontsLoaded) {
-      SplashScreen.hideAsync();
+    if (fontsLoaded && isAppReady && !isAuthLoading) {
+      SplashScreen.hideAsync().catch(() => {});
     }
-  }, [fontsLoaded]);
+  }, [fontsLoaded, isAppReady, isAuthLoading]);
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded || !isAppReady || isAuthLoading) {
     return null;
   }
 

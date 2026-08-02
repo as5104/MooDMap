@@ -80,6 +80,7 @@ interface UseSpotifyReturn {
   loadPlaylists: () => Promise<void>;
   loadTopTracks: (timeRange?: 'short_term' | 'medium_term' | 'long_term') => Promise<void>;
   loadRecentlyPlayed: () => Promise<void>;
+  refreshSession: () => Promise<void>;
   search: (query: string) => Promise<SpotifyTrack[]>;
   searchByMood: (genres: string[], keywords: string[]) => Promise<SpotifyTrack[]>;
 
@@ -443,6 +444,23 @@ export function useSpotify(): UseSpotifyReturn {
     }
   }, [getValidAccessToken]);
 
+  const refreshSession = useCallback(async () => {
+    try {
+      const token = await getValidAccessToken();
+      if (token) {
+        await Promise.all([
+          refreshNowPlaying(),
+          loadPlaylists(),
+          loadRecentlyPlayed(),
+        ]);
+        const user = await getCurrentUser(token);
+        if (user) setSpotifyUser(user);
+      }
+    } catch (err) {
+      console.warn('[useSpotify] Manual refreshSession failed:', err);
+    }
+  }, [getValidAccessToken, refreshNowPlaying, loadPlaylists, loadRecentlyPlayed]);
+
   const search = useCallback(
     async (query: string): Promise<SpotifyTrack[]> => {
       try {
@@ -669,6 +687,7 @@ export function useSpotify(): UseSpotifyReturn {
     loadPlaylists,
     loadTopTracks,
     loadRecentlyPlayed,
+    refreshSession,
     search,
     searchByMood,
 

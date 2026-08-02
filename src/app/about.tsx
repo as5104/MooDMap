@@ -103,9 +103,11 @@ export default function AboutScreen() {
           {/* App Branding Hero */}
           <GlassCard intensity="strong" padding="lg" style={styles.heroCard}>
             <View style={styles.heroInner}>
-              <View style={styles.logoBadge}>
-                <Feather name="map" size={36} color={Colors.accent.primary} />
-              </View>
+              <Image
+                source={require('../../assets/images/logo-mark.png')}
+                style={styles.heroLogoImage}
+                resizeMode="contain"
+              />
               <Text style={styles.appName}>MooDMap</Text>
               <Text style={styles.appTagline}>
                 Personalized Mood Tracking & Intelligent Music Recommendation System
@@ -287,15 +289,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     textAlign: 'center',
   },
-  logoBadge: {
+  heroLogoImage: {
     width: 68,
     height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(141, 233, 29, 0.12)',
-    borderColor: 'rgba(141, 233, 29, 0.25)',
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: Spacing.sm,
   },
   appName: {
