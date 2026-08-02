@@ -23,7 +23,7 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.moodmap.app",
       "versionCode": 4,
-      "permissions": ["WAKE_LOCK"]
+      "permissions": ["WAKE_LOCK", "REQUEST_INSTALL_PACKAGES"]
     },
     "web": {
       "output": "static",

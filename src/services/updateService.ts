@@ -117,30 +117,62 @@ export async function downloadAndInstallUpdate(
   try {
     const fileUri = `${Paths.cache.uri}/MooDMap-Update.apk`;
 
-    const downloadResumable = FileSystem.createDownloadResumable(
-      apkUrl,
-      fileUri,
-      {},
-      (downloadProgress) => {
-        const progress =
-          downloadProgress.totalBytesWritten /
-          (downloadProgress.totalBytesExpectedToWrite || 120000000);
-        if (onProgress) onProgress(Math.min(Math.max(progress, 0), 1));
+    // Resolve direct download URL if GitHub redirects (302/301) to AWS S3
+    let targetDownloadUrl = apkUrl;
+    try {
+      const headRes = await fetch(apkUrl, { method: 'HEAD', redirect: 'follow' });
+      if (headRes.url) {
+        targetDownloadUrl = headRes.url;
       }
-    );
+    } catch (_) {
+      // Ignore head check error
+    }
 
-    const result = await downloadResumable.downloadAsync();
-    if (!result || !result.uri) {
+    let downloadedUri: string | null = null;
+
+    try {
+      const downloadResumable = FileSystem.createDownloadResumable(
+        targetDownloadUrl,
+        fileUri,
+        {},
+        (downloadProgress) => {
+          const progress =
+            downloadProgress.totalBytesWritten /
+            (downloadProgress.totalBytesExpectedToWrite || 120000000);
+          if (onProgress) onProgress(Math.min(Math.max(progress, 0.05), 1));
+        }
+      );
+
+      const result = await downloadResumable.downloadAsync();
+      if (result && result.uri && result.status < 400) {
+        downloadedUri = result.uri;
+      }
+    } catch (resumableErr) {
+      console.warn('[UpdateService] Resumable download failed, using direct downloadAsync:', resumableErr);
+    }
+
+    // Direct downloadAsync fallback if resumable download failed
+    if (!downloadedUri) {
+      if (onProgress) onProgress(0.5);
+      const directResult = await FileSystem.downloadAsync(targetDownloadUrl, fileUri);
+      if (directResult && directResult.uri) {
+        downloadedUri = directResult.uri;
+      }
+    }
+
+    if (!downloadedUri) {
       throw new Error('Download failed');
     }
 
+    if (onProgress) onProgress(1);
+
     // Get content URI for Android Package Installer
-    const contentUri = await FileSystem.getContentUriAsync(result.uri);
+    const contentUri = await FileSystem.getContentUriAsync(downloadedUri);
 
     // Launch Android Package Installer directly without browser redirect
     await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
       data: contentUri,
-      flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+      flags: 268435457, // FLAG_GRANT_READ_URI_PERMISSION (1) | FLAG_ACTIVITY_NEW_TASK (268435456)
       type: 'application/vnd.android.package-archive',
     });
 
