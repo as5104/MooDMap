@@ -7,6 +7,7 @@ import {
   StyleSheet,
   View,
   Text,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -78,7 +79,11 @@ export default function LoginScreen() {
         >
           {/* Logo Section */}
           <View style={styles.header}>
-            <View style={styles.logo}><Feather name="map" size={34} color={Colors.accent.olive} /></View>
+            <Image
+              source={require('../../../assets/images/logo-mark.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
             <Text style={styles.appName}>MoodMap</Text>
             <Text style={styles.subtitle}>
               Your personal mood companion
@@ -198,14 +203,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.xxxl + 8,
   },
-  logo: {
+  logoImage: {
     width: 72,
     height: 72,
-    borderRadius: 36,
-    backgroundColor: 'rgba(190, 255, 108, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   appName: {
     fontFamily: Fonts.heading,
