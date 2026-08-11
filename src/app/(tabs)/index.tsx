@@ -31,6 +31,7 @@ import {
 } from '@/services/moodService';
 import { getSmartRecommendations, MOOD_GENRE_MAP, type RecommendedTrack } from '@/services/recommendationEngine';
 import { getBestImage } from '@/services/spotify';
+import { getCustomAvatarUri } from '@/services/profileService';
 import { useAppStore } from '@/stores/appStore';
 import { useTierStore } from '@/stores/tierStore';
 import { Feather } from '@expo/vector-icons';
@@ -65,8 +66,16 @@ export default function HomeScreen() {
   const setMoodRecommendationSession = useAppStore((s) => s.setMoodRecommendationSession);
   const dataVersion = useAppStore((s) => s.dataVersion);
   const isAppReady = useAppStore((s) => s.isAppReady);
-  const displayName = user?.user_metadata?.display_name ?? 'User';
+  const displayName = user?.user_metadata?.display_name
+    ?? user?.user_metadata?.full_name
+    ?? user?.user_metadata?.name
+    ?? 'User';
   const firstName = displayName.split(' ')[0];
+  const avatarUrl: string | undefined = user?.user_metadata?.avatar_url ?? user?.user_metadata?.picture;
+  const avatarVersion = useAppStore((s) => s.avatarVersion);
+  const customAvatarPath = getCustomAvatarUri();
+  const customAvatarUri = customAvatarPath ? `${customAvatarPath}?v=${avatarVersion}` : undefined;
+  const effectiveAvatarUrl = customAvatarUri || avatarUrl;
 
   const [moodScore, setMoodScore] = useState(0);
   const [weeklyMoods, setWeeklyMoods] = useState<DayMoodData[]>([]);
@@ -271,10 +280,17 @@ export default function HomeScreen() {
             </View>
           </View>
           <Pressable
-            style={styles.avatar}
+            style={effectiveAvatarUrl ? styles.avatarImageWrap : styles.avatar}
             onPress={() => router.push('/(tabs)/profile')}
           >
-            <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
+            {effectiveAvatarUrl ? (
+              <Image
+                source={{ uri: effectiveAvatarUrl }}
+                style={styles.avatarImage}
+              />
+            ) : (
+              <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase()}</Text>
+            )}
           </Pressable>
         </View>
 
@@ -1027,6 +1043,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarImageWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   avatarText: {
     fontFamily: Fonts.heading,

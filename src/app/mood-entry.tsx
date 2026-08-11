@@ -254,7 +254,10 @@ export default function MoodEntryScreen() {
 
   const { currentTrack } = useMusic();
 
-  const displayName = user?.user_metadata?.display_name ?? 'User';
+  const displayName = user?.user_metadata?.display_name
+    ?? user?.user_metadata?.full_name
+    ?? user?.user_metadata?.name
+    ?? 'User';
   const firstName = displayName.split(' ')[0];
 
   // State

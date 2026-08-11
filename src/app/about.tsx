@@ -26,7 +26,7 @@ import {
   AppVersionInfo,
   checkForAppUpdates,
   getCurrentAppVersion,
-  openUpdateDownload,
+  downloadAndInstallUpdate,
 } from '@/services/updateService';
 
 export default function AboutScreen() {
@@ -37,6 +37,8 @@ export default function AboutScreen() {
   const currentVersion = getCurrentAppVersion();
   const [isChecking, setIsChecking] = useState(false);
   const [versionInfo, setVersionInfo] = useState<AppVersionInfo | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   // Initial update check on screen mount
   const handleCheck = useCallback(async (showHaptic = true) => {
@@ -164,13 +166,44 @@ export default function AboutScreen() {
 
             {/* Check / Update Button */}
             {versionInfo?.hasUpdate ? (
-              <Pressable
-                style={styles.updateActionBtn}
-                onPress={() => openUpdateDownload(versionInfo.downloadUrl)}
-              >
-                <Feather name="download" size={16} color="#000000" />
-                <Text style={styles.updateActionText}>Download Latest Update</Text>
-              </Pressable>
+              isDownloading ? (
+                <View style={styles.progressContainer}>
+                  <View style={styles.progressTextRow}>
+                    <Text style={styles.progressLabel}>
+                      {Math.round(downloadProgress * 100) >= 100
+                        ? 'Opening Package Installer...'
+                        : `Downloading... ${Math.round(downloadProgress * 100)}%`}
+                    </Text>
+                    <ActivityIndicator size="small" color="#8DE91D" />
+                  </View>
+                  <View style={styles.progressBarTrack}>
+                    <View
+                      style={[
+                        styles.progressBarFill,
+                        { width: `${Math.min(Math.max(Math.round(downloadProgress * 100), 5), 100)}%` },
+                      ]}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <Pressable
+                  style={styles.updateActionBtn}
+                  onPress={async () => {
+                    if (!versionInfo.downloadUrl) return;
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setIsDownloading(true);
+                    setDownloadProgress(0.05);
+                    await downloadAndInstallUpdate(
+                      versionInfo.downloadUrl,
+                      (progress) => setDownloadProgress(progress)
+                    );
+                    setIsDownloading(false);
+                  }}
+                >
+                  <Feather name="download" size={16} color="#000000" />
+                  <Text style={styles.updateActionText}>Download Latest Update</Text>
+                </Pressable>
+              )
             ) : (
               <Pressable
                 style={[styles.checkBtn, isChecking && styles.btnDisabled]}
@@ -383,6 +416,33 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.bodyBold,
     fontSize: FontSizes.caption + 1,
     color: '#000000',
+  },
+  progressContainer: {
+    width: '100%',
+    marginTop: Spacing.xs,
+  },
+  progressTextRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  progressLabel: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.bodySmall,
+    color: '#8DE91D',
+  },
+  progressBarTrack: {
+    height: 8,
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#8DE91D',
+    borderRadius: 4,
   },
   btnDisabled: {
     opacity: 0.6,

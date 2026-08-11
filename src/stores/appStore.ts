@@ -86,6 +86,8 @@ interface AppState {
   // Data Refresh Flag
   dataVersion: number;
   refreshData: () => void;
+  avatarVersion: number;
+  bumpAvatarVersion: () => void;
 
   // Sign-Out Reset
   resetForSignOut: () => void;
@@ -168,6 +170,8 @@ export const useAppStore = create<AppState>((set) => ({
   // Data refresh — increment to trigger re-fetches
   dataVersion: 0,
   refreshData: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
+  avatarVersion: Date.now(),
+  bumpAvatarVersion: () => set(() => ({ avatarVersion: Date.now() })),
 
   // Reset all user-specific state on sign-out
   resetForSignOut: () =>

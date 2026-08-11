@@ -11,5 +11,10 @@
       "path": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot",
       "default": true
     }
+  ],
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/.metadata/**",
+    "**/archetype/**"
   ]
 }

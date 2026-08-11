@@ -12,6 +12,8 @@ import {
   TextInput,
   ActivityIndicator,
   Platform,
+  Image,
+  Modal,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import Animated, {
@@ -32,12 +34,14 @@ import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/lay
 import { useAppStore } from '@/stores/appStore';
 import { useTierStore } from '@/stores/tierStore';
 import { useSpotify } from '@/hooks/useSpotify';
-import { signOut } from '@/lib/auth';
+import { signOut, updateUserProfile } from '@/lib/auth';
+import { supabase } from '@/lib/supabase';
 import { getMoodScoreForPeriod, getMoodCountForPeriod, getMoodStreak, getMoodCount } from '@/services/moodService';
 import { getJournalCount } from '@/services/journalService';
 import { exportUserData, importUserData } from '@/services/dataTransferService';
 import { getSetting, saveSetting } from '@/services/settingsService';
 import { getPreferenceSummary, hasMusicPreferences } from '@/services/musicPreferenceService';
+import { pickAndValidateAvatar, saveCustomAvatar, getCustomAvatarUri, clearCustomAvatar } from '@/services/profileService';
 
 
 // XP thresholds per level
@@ -49,7 +53,12 @@ export default function ProfileScreen() {
   const totalXP = useAppStore((s) => s.totalXP);
   const dataVersion = useAppStore((s) => s.dataVersion);
   const isAppReady = useAppStore((s) => s.isAppReady);
-  const displayName = user?.user_metadata?.display_name ?? 'User';
+  const displayName = user?.user_metadata?.display_name
+    ?? user?.user_metadata?.full_name
+    ?? user?.user_metadata?.name
+    ?? 'User';
+  const firstName = displayName.split(' ')[0];
+  const avatarUrl: string | undefined = user?.user_metadata?.avatar_url ?? user?.user_metadata?.picture;
   const email = user?.email ?? '';
 
   const [journalCount, setJournalCount] = useState(0);
@@ -61,6 +70,30 @@ export default function ProfileScreen() {
   const [lastBackupDate, setLastBackupDate] = useState<string | null>(null);
   const [prefSummary, setPrefSummary] = useState<string>('');
   const [hasPrefs, setHasPrefs] = useState<boolean>(false);
+
+  // Profile edit state
+  const avatarVersion = useAppStore((s) => s.avatarVersion);
+  const customAvatarPath = getCustomAvatarUri();
+  const customAvatarUri = customAvatarPath ? `${customAvatarPath}?v=${avatarVersion}` : undefined;
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState(firstName);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // Pending avatar edits inside modal (preview only, not saved to disk until Save is pressed)
+  const [pendingAvatarUri, setPendingAvatarUri] = useState<string | undefined>(undefined);
+  const [pendingAvatarAction, setPendingAvatarAction] = useState<'set' | 'remove' | null>(null);
+
+  // Effective avatar for main screen: custom upload > Google > initial
+  const effectiveAvatarUrl = customAvatarUri || avatarUrl;
+
+  // Effective avatar for edit modal preview
+  const modalPreviewAvatarUrl =
+    pendingAvatarAction === 'set'
+      ? pendingAvatarUri
+      : pendingAvatarAction === 'remove'
+      ? avatarUrl
+      : effectiveAvatarUrl;
 
   const refreshData = useAppStore((s) => s.refreshData);
 
@@ -356,6 +389,71 @@ export default function ProfileScreen() {
     }
   }, [biometricLockEnabled]);
 
+  // Profile Edit Handlers
+  const handleOpenEditModal = useCallback(() => {
+    setEditName(firstName);
+    setPendingAvatarUri(undefined);
+    setPendingAvatarAction(null);
+    setShowEditModal(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, [firstName]);
+
+  const handlePickAvatar = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const result = await pickAndValidateAvatar();
+    if (result.success && result.tempUri) {
+      setPendingAvatarUri(result.tempUri);
+      setPendingAvatarAction('set');
+    } else if (result.error && result.error !== 'Image selection was canceled.') {
+      customAlert('Upload Failed', result.error);
+    }
+  }, []);
+
+  const handleRemoveAvatar = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPendingAvatarUri(undefined);
+    setPendingAvatarAction('remove');
+  }, []);
+
+  const handleSaveProfile = useCallback(async () => {
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      customAlert('Invalid Name', 'Please enter a valid name.');
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      // 1. Save or remove custom avatar if user modified it in modal
+      if (pendingAvatarAction === 'set' && pendingAvatarUri) {
+        const saveRes = await saveCustomAvatar(pendingAvatarUri);
+        if (saveRes.success && saveRes.uri) {
+          useAppStore.getState().bumpAvatarVersion();
+        }
+      } else if (pendingAvatarAction === 'remove') {
+        await clearCustomAvatar();
+        useAppStore.getState().bumpAvatarVersion();
+      }
+
+      // 2. Update display name in Supabase
+      const result = await updateUserProfile({ display_name: trimmed });
+      if (result.success) {
+        // Refresh user in Zustand store so all screens update
+        const { data } = await supabase.auth.getUser();
+        if (data.user) {
+          useAppStore.getState().setUser(data.user);
+        }
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setShowEditModal(false);
+      } else {
+        customAlert('Update Failed', result.error || 'Could not update profile.');
+      }
+    } catch (err) {
+      customAlert('Error', 'An unexpected error occurred.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }, [editName, pendingAvatarAction, pendingAvatarUri]);
+
   const menuItems = [
     {
       icon: 'bell' as const,
@@ -414,13 +512,26 @@ export default function ProfileScreen() {
         {/* Avatar Card */}
         <GlassCard intensity="medium" padding="lg" style={styles.profileCard}>
           <View style={styles.avatarRow}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {displayName.charAt(0).toUpperCase()}
-              </Text>
+            <View style={styles.avatarContainer}>
+              {effectiveAvatarUrl ? (
+                <Image
+                  source={{ uri: effectiveAvatarUrl }}
+                  style={styles.avatarImage}
+                />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {firstName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              {/* Edit overlay icon */}
+              <Pressable style={styles.editAvatarBtn} onPress={handleOpenEditModal} hitSlop={6}>
+                <Feather name="edit-2" size={11} color="#000" />
+              </Pressable>
             </View>
             <View style={styles.profileInfo}>
-              <Text style={styles.name}>{displayName}</Text>
+              <Text style={styles.name}>{firstName}</Text>
               <Text style={styles.email}>{email}</Text>
               <View style={styles.memberBadge}>
                 <Feather name={isVIP ? "award" : "star"} size={12} color={isVIP ? Colors.accent.amber : Colors.accent.olive} />
@@ -776,6 +887,102 @@ export default function ProfileScreen() {
           style={styles.signOutBtn}
         />
       </ScrollView>
+
+      {/* Edit Profile Modal */}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={showEditModal}
+        onRequestClose={() => !isSavingProfile && setShowEditModal(false)}
+      >
+        <View style={styles.editOverlay}>
+          <GlassCard intensity="strong" padding="lg" style={styles.editModalCard}>
+            {/* Header */}
+            <View style={styles.editHeader}>
+              <Text style={styles.editTitle}>Edit Profile</Text>
+              <Pressable
+                onPress={() => !isSavingProfile && setShowEditModal(false)}
+                hitSlop={12}
+              >
+                <Feather name="x" size={20} color="rgba(255,255,255,0.6)" />
+              </Pressable>
+            </View>
+
+            {/* Avatar Preview & Actions */}
+            <View style={styles.editAvatarSection}>
+              <View style={styles.editAvatarPreview}>
+                {modalPreviewAvatarUrl ? (
+                  <Image
+                    source={{ uri: modalPreviewAvatarUrl }}
+                    style={styles.editAvatarImg}
+                  />
+                ) : (
+                  <View style={[styles.avatar, styles.editAvatarFallback]}>
+                    <Text style={[styles.avatarText, { fontSize: 28 }]}>
+                      {(editName || firstName).charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.editAvatarBtnRow}>
+                <Pressable style={styles.editPhotoBtn} onPress={handlePickAvatar}>
+                  <Feather name="camera" size={14} color={Colors.accent.primary} />
+                  <Text style={styles.editPhotoBtnText}>Change Photo</Text>
+                </Pressable>
+                {(pendingAvatarAction === 'set' || (Boolean(customAvatarUri) && pendingAvatarAction !== 'remove')) && (
+                  <Pressable style={styles.editPhotoBtn} onPress={handleRemoveAvatar}>
+                    <Feather name="trash-2" size={14} color={Colors.accent.coral} />
+                    <Text style={[styles.editPhotoBtnText, { color: Colors.accent.coral }]}>Remove</Text>
+                  </Pressable>
+                )}
+              </View>
+              <Text style={styles.editPhotoHint}>
+                JPEG, PNG, or WebP • Max 5 MB
+              </Text>
+            </View>
+
+            {/* Name Input */}
+            <View style={styles.editInputGroup}>
+              <Text style={styles.editLabel}>Display Name</Text>
+              <TextInput
+                style={styles.editInput}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Your name"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                maxLength={30}
+                autoCapitalize="words"
+                editable={!isSavingProfile}
+              />
+            </View>
+
+            {/* Actions */}
+            <View style={styles.editBtnRow}>
+              <Pressable
+                style={styles.editCancelBtn}
+                onPress={() => setShowEditModal(false)}
+                disabled={isSavingProfile}
+              >
+                <Text style={styles.editCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.editSaveBtn, isSavingProfile && { opacity: 0.6 }]}
+                onPress={handleSaveProfile}
+                disabled={isSavingProfile}
+              >
+                {isSavingProfile ? (
+                  <ActivityIndicator size="small" color="#000" />
+                ) : (
+                  <>
+                    <Feather name="check" size={16} color="#000" />
+                    <Text style={styles.editSaveText}>Save</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </GlassCard>
+        </View>
+      </Modal>
     </GradientBackground>
   );
 }
@@ -798,6 +1005,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  avatarContainer: {
+    position: 'relative',
+    width: 64,
+    height: 64,
+    marginRight: Spacing.lg,
+  },
   avatar: {
     width: 64,
     height: 64,
@@ -805,7 +1018,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent.olive,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.lg,
+  },
+  avatarImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
   },
   avatarText: {
     fontFamily: Fonts.heading,
@@ -1272,5 +1489,138 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body,
     fontSize: FontSizes.caption,
     color: Colors.text.tertiary,
+  },
+
+  // Edit Profile Modal
+  editAvatarBtn: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.accent.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2.5,
+    borderColor: '#111D12',
+  },
+  editOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+  },
+  editModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: Radius.card,
+  },
+  editHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  editTitle: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.primary,
+  },
+  editAvatarSection: {
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  editAvatarPreview: {
+    marginBottom: Spacing.md,
+  },
+  editAvatarImg: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  editAvatarFallback: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  editAvatarBtnRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginBottom: Spacing.xs,
+  },
+  editPhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  editPhotoBtnText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.caption,
+    color: Colors.accent.primary,
+  },
+  editPhotoHint: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: 'rgba(255,255,255,0.35)',
+    marginTop: 4,
+  },
+  editInputGroup: {
+    marginBottom: Spacing.lg,
+  },
+  editLabel: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.caption,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.xs,
+  },
+  editInput: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.body,
+    color: Colors.text.primary,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    height: 46,
+  },
+  editBtnRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  editCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editCancelText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.caption + 1,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  editSaveBtn: {
+    flex: 1.5,
+    height: 44,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.accent.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  editSaveText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.caption + 1,
+    color: '#000000',
   },
 });

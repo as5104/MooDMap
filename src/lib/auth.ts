@@ -152,6 +152,17 @@ export const verifyPasswordResetOTP = async (
   return { success: true };
 };
 
+/** Update the current user's profile metadata (display name, etc.) */
+export const updateUserProfile = async (
+  data: { display_name?: string }
+): Promise<AuthResult> => {
+  const { error } = await supabase.auth.updateUser({
+    data,
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+};
+
 /** Update the current user's password */
 export const updatePassword = async (
   newPassword: string
