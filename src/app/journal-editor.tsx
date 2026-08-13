@@ -366,10 +366,10 @@ export default function JournalEditorScreen() {
         <View style={[styles.container, { paddingTop: insets.top + Spacing.md }]}>
           {/* Header */}
           <View style={styles.header}>
-            <Pressable style={styles.closeBtn} onPress={() => router.back()}>
+            <Pressable style={styles.closeBtn} onPress={() => router.back()} hitSlop={8}>
               <Feather name="x" size={22} color={Colors.text.primary} />
             </Pressable>
-            <View style={styles.headerCenter}>
+            <View style={styles.headerCenter} pointerEvents="none">
               <Text style={styles.headerTitle}>
                 {isEditMode ? 'Edit Entry' : 'New Entry'}
               </Text>
@@ -381,6 +381,7 @@ export default function JournalEditorScreen() {
               style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
               onPress={handleSave}
               disabled={!canSave}
+              hitSlop={8}
             >
               <Text style={[styles.saveBtnText, !canSave && styles.saveBtnTextDisabled]}>
                 {saving ? 'Saving...' : isEditMode ? 'Update' : 'Save'}
@@ -541,6 +542,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: Spacing.lg,
+    position: 'relative',
+    height: 44,
   },
   closeBtn: {
     width: 44,
@@ -551,9 +554,17 @@ const styles = StyleSheet.create({
     borderColor: Colors.glass.borderSubtle,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 2,
   },
   headerCenter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
     alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
   },
   headerTitle: {
     fontFamily: Fonts.subheading,
@@ -571,6 +582,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm + 2,
     borderRadius: Radius.pill,
     backgroundColor: Colors.accent.primary,
+    zIndex: 2,
   },
   saveBtnDisabled: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',

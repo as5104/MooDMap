@@ -17,6 +17,7 @@ import {
   FlatList,
   Image,
   LayoutAnimation,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -737,8 +738,78 @@ const SpotifyListView = React.memo(({
     loadPlaylists: loadSpotifyPlaylists,
     search: searchSpotify,
     isConnected,
+    addToQueue: spotifyAddToQueueHook,
   } = useSpotify();
-  const { currentTrack, isPlaying } = useMusic();
+  const { currentTrack, isPlaying, favorites: spotifyFavorites, toggleFavorite: spotifyToggleFavorite, setQueue: setMusicQueue } = useMusic();
+
+  // — Spotify Track 3-dot menu state & animations —
+  const [spotifyMenuTrack, setSpotifyMenuTrack] = useState<any | null>(null);
+  const [showSpotifyMenu, setShowSpotifyMenu] = useState(false);
+  const menuSlideAnim = useRef(new RNAnimated.Value(220)).current;
+  const menuOpacityAnim = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    if (showSpotifyMenu) {
+      menuSlideAnim.setValue(220);
+      menuOpacityAnim.setValue(0);
+      RNAnimated.parallel([
+        RNAnimated.timing(menuOpacityAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        RNAnimated.spring(menuSlideAnim, {
+          toValue: 0,
+          tension: 75,
+          friction: 12,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [showSpotifyMenu, menuSlideAnim, menuOpacityAnim]);
+
+  const handleCloseSpotifyMenu = useCallback((onComplete?: () => void) => {
+    RNAnimated.parallel([
+      RNAnimated.timing(menuOpacityAnim, {
+        toValue: 0,
+        duration: 160,
+        useNativeDriver: true,
+      }),
+      RNAnimated.timing(menuSlideAnim, {
+        toValue: 220,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowSpotifyMenu(false);
+      if (onComplete) onComplete();
+    });
+  }, [menuOpacityAnim, menuSlideAnim]);
+
+  // Local toast for Spotify section
+  const [spToastMsg, setSpToastMsg] = useState<string | null>(null);
+  const [spToastType, setSpToastType] = useState<'success' | 'warning' | 'error'>('success');
+  const spToastOpacity = useRef(new RNAnimated.Value(0)).current;
+  const spToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showSpotifyToast = useCallback((message: string, type: 'success' | 'warning' | 'error' = 'success') => {
+    if (spToastTimerRef.current) clearTimeout(spToastTimerRef.current);
+    setSpToastMsg(message);
+    setSpToastType(type);
+    spToastOpacity.setValue(0);
+    RNAnimated.timing(spToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    spToastTimerRef.current = setTimeout(() => {
+      RNAnimated.timing(spToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+        setSpToastMsg(null);
+      });
+    }, 2000);
+  }, [spToastOpacity]);
+
+  const handleSpotifyMorePress = useCallback((item: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSpotifyMenuTrack(item);
+    setShowSpotifyMenu(true);
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -1041,15 +1112,18 @@ const SpotifyListView = React.memo(({
             </Text>
           </View>
           <View style={styles.trackActions}>
-            <Text style={styles.trackDuration}>
-              {Math.floor(item.duration_ms / 60000)}:
-              {String(Math.floor((item.duration_ms % 60000) / 1000)).padStart(2, '0')}
-            </Text>
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); handleSpotifyMorePress(item); }}
+              hitSlop={12}
+              style={styles.trackMoreBtn}
+            >
+              <Feather name="more-vertical" size={20} color="rgba(255, 255, 255, 0.6)" />
+            </Pressable>
           </View>
         </View>
       </GlassCard>
     );
-  }, [currentTrack?.id, filteredPlaylistTracks, handleTrackPressItem, selectedPlaylist]);
+  }, [currentTrack?.id, filteredPlaylistTracks, handleTrackPressItem, selectedPlaylist, handleSpotifyMorePress]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -1266,10 +1340,13 @@ const SpotifyListView = React.memo(({
                         </Text>
                       </View>
                       <View style={styles.trackActions}>
-                        <Text style={styles.trackDuration}>
-                          {Math.floor(item.duration_ms / 60000)}:
-                          {String(Math.floor((item.duration_ms % 60000) / 1000)).padStart(2, '0')}
-                        </Text>
+                        <Pressable
+                          onPress={(e) => { e.stopPropagation?.(); handleSpotifyMorePress(item); }}
+                          hitSlop={12}
+                          style={styles.trackMoreBtn}
+                        >
+                          <Feather name="more-vertical" size={20} color="rgba(255, 255, 255, 0.6)" />
+                        </Pressable>
                       </View>
                     </View>
                   </GlassCard>
@@ -1349,6 +1426,162 @@ const SpotifyListView = React.memo(({
             })
           )}
         </ScrollView>
+      )}
+
+      {/* Spotify Track 3-dot Options Sheet */}
+      <Modal
+        visible={showSpotifyMenu && !!spotifyMenuTrack}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={() => handleCloseSpotifyMenu()}
+      >
+        <RNAnimated.View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.65)', justifyContent: 'flex-end', opacity: menuOpacityAnim }}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => handleCloseSpotifyMenu()} />
+          <RNAnimated.View
+            style={{
+              width: '100%',
+              paddingHorizontal: 14,
+              paddingBottom: 110,
+              transform: [{ translateY: menuSlideAnim }],
+            }}
+            pointerEvents="box-none"
+          >
+            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)' }]}>
+              {/* Track header */}
+              <View style={styles.menuHeader}>
+                <Image
+                  source={spotifyMenuTrack?.album?.images?.[0]?.url ? { uri: spotifyMenuTrack.album.images[0].url } : undefined}
+                  style={[styles.menuTrackCover, { borderRadius: 12 }]}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text numberOfLines={1} style={styles.menuTrackTitle}>{spotifyMenuTrack?.name}</Text>
+                  <Text numberOfLines={1} style={styles.menuTrackArtist}>
+                    {spotifyMenuTrack?.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.menuDivider} />
+
+              {/* Add to Queue */}
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  if (!spotifyMenuTrack) return;
+                  const targetTrack = spotifyMenuTrack;
+                  handleCloseSpotifyMenu(async () => {
+                    try {
+                      await spotifyAddToQueueHook(targetTrack.uri);
+                      showSpotifyToast('Added to Queue');
+
+                      // Timed re-fetch of Spotify's live queue so our in-app queue list updates
+                      setTimeout(async () => {
+                        try {
+                          const { useTierStore } = require('../stores/tierStore');
+                          const token = await useTierStore.getState().getValidAccessToken();
+                          if (token) {
+                            const { getQueue } = require('../services/spotify');
+                            const { parseSpotifyQueueHelper } = require('../context/MusicContext');
+                            const queueData = await getQueue(token);
+                            if (queueData) {
+                              const combinedQueue = parseSpotifyQueueHelper(queueData);
+                              setMusicQueue(combinedQueue);
+                            }
+                          }
+                        } catch (syncErr) {
+                          console.warn('[SpotifyListView] Failed to sync updated Spotify queue:', syncErr);
+                        }
+                      }, 1200);
+                    } catch {
+                      showSpotifyToast('Could not add to queue — open Spotify and play something first', 'error');
+                    }
+                  });
+                }}
+              >
+                <Feather name="plus-circle" size={18} color="#FFF" />
+                <Text style={styles.menuOptionText}>Add to Queue</Text>
+              </Pressable>
+
+              {/* Add / Remove Favourite */}
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  if (!spotifyMenuTrack) return;
+                  const targetTrack = spotifyMenuTrack;
+                  handleCloseSpotifyMenu(() => {
+                    const trackId = 'spotify_' + targetTrack.id;
+                    const wasFav = spotifyFavorites.includes(trackId);
+                    spotifyToggleFavorite(trackId);
+                    showSpotifyToast(wasFav ? 'Removed from Favourites' : 'Added to Favourites');
+                  });
+                }}
+              >
+                <Feather
+                  name="heart"
+                  size={18}
+                  color={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? Colors.error : '#FFF'}
+                  fill={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? Colors.error : 'transparent'}
+                />
+                <Text style={styles.menuOptionText}>
+                  {spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? 'Remove from Favourites' : 'Add to Favourites'}
+                </Text>
+              </Pressable>
+            </GlassCard>
+          </RNAnimated.View>
+        </RNAnimated.View>
+      </Modal>
+
+      {/* Spotify section local toast */}
+      {spToastMsg && (
+        <RNAnimated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            // Sit above the mini player (~80px) with some breathing room
+            bottom: 130,
+            left: -SCREEN_PADDING,
+            right: -SCREEN_PADDING,
+            alignItems: 'center',
+            zIndex: 999999,
+            opacity: spToastOpacity,
+          }}
+        >
+          <View style={{
+            backgroundColor: 'rgba(30, 30, 36, 0.95)',
+            paddingVertical: 10,
+            paddingHorizontal: 20,
+            borderRadius: 9999,
+            borderWidth: 1,
+            borderColor: spToastType === 'error'
+              ? 'rgba(255, 107, 107, 0.25)'
+              : spToastType === 'warning'
+                ? 'rgba(255, 190, 106, 0.25)'
+                : 'rgba(141, 233, 29, 0.25)',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 6,
+            maxWidth: '85%',
+          }}>
+            <Feather
+              name={spToastType === 'success' ? 'check-circle' : 'alert-circle'}
+              size={14}
+              color={spToastType === 'error'
+                ? Colors.error
+                : spToastType === 'warning'
+                  ? Colors.warning
+                  : Colors.accent.primary}
+            />
+            <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption, flexShrink: 1 }}>
+              {spToastMsg}
+            </Text>
+          </View>
+        </RNAnimated.View>
       )}
     </View>
   );
@@ -2307,34 +2540,20 @@ const PlayerView = React.memo(({
           <Feather name="chevron-left" size={24} color={Colors.text.primary} />
         </Pressable>
 
-        {/* Right Action Stack: Heart Button in Original Header Position, 3-Dot Button Stacked Directly Below */}
-        <View style={{ alignItems: 'center' }}>
-          <Pressable style={isPosterMode ? styles.glassIconBtn : styles.closeBtn} onPress={() => toggleFavorite(currentTrack.id)}>
-            <Feather
-              name="heart"
-              size={20}
-              color={isCurrentFav ? Colors.error : Colors.text.primary}
-              fill={isCurrentFav ? Colors.error : 'transparent'}
-            />
-          </Pressable>
-
-          <Pressable
-            style={[
-              isPosterMode ? styles.glassIconBtn : styles.closeBtn,
-              { position: 'absolute', top: 50, right: 0 }
-            ]}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowAppearanceMenu(true);
-            }}
-          >
-            <Feather
-              name="more-vertical"
-              size={20}
-              color={Colors.text.primary}
-            />
-          </Pressable>
-        </View>
+        {/* Single 3-dot button — opens unified Track Options sheet (Favourite + Appearance) */}
+        <Pressable
+          style={isPosterMode ? styles.glassIconBtn : styles.closeBtn}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            setShowAppearanceMenu(true);
+          }}
+        >
+          <Feather
+            name="more-vertical"
+            size={20}
+            color={Colors.text.primary}
+          />
+        </Pressable>
       </View>
 
       {/* Center Artwork Display (Square Poster Card in Poster Mode / Vinyl Disc in Vinyl Mode) */}
@@ -2539,7 +2758,7 @@ const PlayerView = React.memo(({
         </View>
       </View>
 
-      {/* Appearance Menu Modal */}
+      {/* Track Options Modal — Favourite + Appearance */}
       {showAppearanceMenu && (
         <View style={styles.menuBackdropOverlay}>
           <BlurView
@@ -2550,14 +2769,43 @@ const PlayerView = React.memo(({
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowAppearanceMenu(false)} />
           <View style={[styles.menuContainer, { paddingBottom: insets.bottom + 130 }]}>
             <GlassCard intensity="strong" padding="none" style={styles.menuContent}>
+              {/* Header */}
               <View style={styles.menuSelectorHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                  <Feather name="layout" size={18} color={Colors.accent.primary} />
-                  <Text style={styles.menuTitleText}>Player Appearance</Text>
+                  <Feather name="more-vertical" size={18} color={Colors.accent.primary} />
+                  <Text style={styles.menuTitleText}>Track Options</Text>
                 </View>
                 <Pressable onPress={() => setShowAppearanceMenu(false)} hitSlop={8} style={styles.menuSelectorCloseBtn}>
                   <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
                 </Pressable>
+              </View>
+
+              {/* Favourite row */}
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  toggleFavorite(currentTrack.id);
+                  setShowAppearanceMenu(false);
+                }}
+              >
+                <Feather
+                  name="heart"
+                  size={18}
+                  color={isCurrentFav ? Colors.error : '#FFF'}
+                  fill={isCurrentFav ? Colors.error : 'transparent'}
+                />
+                <Text style={styles.menuOptionText}>
+                  {isCurrentFav ? 'Remove from Favourites' : 'Add to Favourites'}
+                </Text>
+              </Pressable>
+
+              <View style={styles.menuDivider} />
+
+              {/* Player Appearance sub-section label */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingTop: Spacing.sm }}>
+                <Feather name="layout" size={14} color={Colors.accent.primary} />
+                <Text style={[styles.menuTitleText, { fontSize: 13 }]}>Player Appearance</Text>
               </View>
 
               <View style={{ flexDirection: 'row', padding: Spacing.md, gap: Spacing.md }}>

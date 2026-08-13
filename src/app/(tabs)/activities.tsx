@@ -9,6 +9,7 @@ import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { GradientBackground, GlassCard, AnimatedPressable } from '@/components/ui';
+import { GlobalQuickMusicWidget } from '@/components/music/GlobalQuickMusicWidget';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
@@ -100,9 +101,12 @@ export default function ActivitiesScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Activities</Text>
-          <Text style={styles.subtitle}>Mindful practices crafted for your inner balance.</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: Spacing.lg }}>
+          <View style={{ flex: 1, paddingRight: Spacing.md }}>
+            <Text style={styles.title}>Activities</Text>
+            <Text style={styles.subtitle}>Mindful practices crafted for your inner balance.</Text>
+          </View>
+          <GlobalQuickMusicWidget inline />
         </View>
 
         {/* Recommended for You or Check-in Promotion — Hero Card */}

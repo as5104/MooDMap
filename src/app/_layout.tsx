@@ -28,6 +28,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useTierStore } from '@/stores/tierStore';
 
 import { MusicProvider } from '@/context/MusicContext';
+import { GlobalQuickMusicWidget } from '@/components/music/GlobalQuickMusicWidget';
 
 // Prevent splash from auto-hiding
 SplashScreen.preventAutoHideAsync();

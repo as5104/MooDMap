@@ -4,8 +4,8 @@
  */
 
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system';
 import { Paths } from 'expo-file-system';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
@@ -117,29 +117,31 @@ export async function downloadAndInstallUpdate(
   try {
     const fileUri = `${Paths.cache.uri}/MooDMap-Update.apk`;
 
-    // Resolve direct download URL if GitHub redirects (302/301) to AWS S3
-    let targetDownloadUrl = apkUrl;
+    // Clean up any previously cached update file
     try {
-      const headRes = await fetch(apkUrl, { method: 'HEAD', redirect: 'follow' });
-      if (headRes.url) {
-        targetDownloadUrl = headRes.url;
+      const oldInfo = await LegacyFileSystem.getInfoAsync(fileUri);
+      if (oldInfo.exists) {
+        await LegacyFileSystem.deleteAsync(fileUri, { idempotent: true });
       }
     } catch (_) {
-      // Ignore head check error
+      // Ignore cleanup error
     }
 
     let downloadedUri: string | null = null;
 
     try {
-      const downloadResumable = FileSystem.createDownloadResumable(
-        targetDownloadUrl,
+      // Create resumable download using legacy FileSystem helper (compatible with Expo SDK 56)
+      const downloadResumable = LegacyFileSystem.createDownloadResumable(
+        apkUrl,
         fileUri,
         {},
         (downloadProgress) => {
-          const progress =
-            downloadProgress.totalBytesWritten /
-            (downloadProgress.totalBytesExpectedToWrite || 120000000);
-          if (onProgress) onProgress(Math.min(Math.max(progress, 0.05), 1));
+          const expected = downloadProgress.totalBytesExpectedToWrite;
+          // AWS S3 / GitHub redirects often return -1 or 0 for totalBytesExpectedToWrite
+          const totalBytes = expected && expected > 0 ? expected : 25000000; // ~25MB fallback estimate
+          const rawProgress = downloadProgress.totalBytesWritten / totalBytes;
+          const progress = Math.min(Math.max(rawProgress, 0.05), 0.98);
+          if (onProgress) onProgress(progress);
         }
       );
 
@@ -148,14 +150,14 @@ export async function downloadAndInstallUpdate(
         downloadedUri = result.uri;
       }
     } catch (resumableErr) {
-      console.warn('[UpdateService] Resumable download failed, using direct downloadAsync:', resumableErr);
+      console.warn('[UpdateService] Resumable download failed, using direct downloadAsync fallback:', resumableErr);
     }
 
     // Direct downloadAsync fallback if resumable download failed
     if (!downloadedUri) {
       if (onProgress) onProgress(0.5);
-      const directResult = await FileSystem.downloadAsync(targetDownloadUrl, fileUri);
-      if (directResult && directResult.uri) {
+      const directResult = await LegacyFileSystem.downloadAsync(apkUrl, fileUri);
+      if (directResult && directResult.uri && directResult.status < 400) {
         downloadedUri = directResult.uri;
       }
     }
@@ -167,7 +169,7 @@ export async function downloadAndInstallUpdate(
     if (onProgress) onProgress(1);
 
     // Get content URI for Android Package Installer
-    const contentUri = await FileSystem.getContentUriAsync(downloadedUri);
+    const contentUri = await LegacyFileSystem.getContentUriAsync(downloadedUri);
 
     // Launch Android Package Installer directly without browser redirect
     await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {

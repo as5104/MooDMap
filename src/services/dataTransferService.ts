@@ -4,11 +4,13 @@
 
 import { Share } from 'react-native';
 import { File, Paths } from 'expo-file-system';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { queryAll, execute } from '@/db/client';
+import { queryAll, queryFirst, execute } from '@/db/client';
 import { customAlert } from '@/components/ui';
+import { getCustomAvatarUri, saveCustomAvatar } from './profileService';
 
-const EXPORT_VERSION = 1;
+const EXPORT_VERSION = 2;
 
 interface ExportData {
   version: number;
@@ -21,6 +23,9 @@ interface ExportData {
     streaks: any[];
     badges: any[];
     user_settings: any[];
+    music_preferences: any[];          // v2+: music taste survey data
+    profile_picture_base64?: string;   // v2+: base64-encoded avatar image
+    profile_picture_ext?: string;      // v2+: file extension e.g. '.jpg'
   };
 }
 
@@ -41,6 +46,51 @@ export async function exportUserData(userId: string): Promise<boolean> {
     const badges = queryAll('SELECT * FROM badges WHERE user_id = ?', [userId]);
     const userSettings = queryAll('SELECT * FROM user_settings');
 
+    // v2: Music preferences (music taste survey)
+    const musicPreferences = queryAll(
+      'SELECT * FROM music_preferences WHERE user_id = ?',
+      [userId]
+    );
+
+    // v2: Profile picture — read as base64
+    let profilePictureBase64: string | undefined;
+    let profilePictureExt: string | undefined;
+    try {
+      const avatarUri = getCustomAvatarUri();
+      if (avatarUri) {
+        // Detect extension
+        const cleanUri = avatarUri.split('?')[0];
+        const lastDot = cleanUri.lastIndexOf('.');
+        profilePictureExt = lastDot !== -1 ? cleanUri.substring(lastDot).toLowerCase() : '.jpg';
+
+        // Read as base64 — try fast native bridge first
+        try {
+          profilePictureBase64 = await LegacyFileSystem.readAsStringAsync(avatarUri, {
+            encoding: LegacyFileSystem.EncodingType.Base64,
+          });
+        } catch {
+          // Fallback to arrayBuffer if legacy fails
+          try {
+            const file = new File(avatarUri);
+            if (file.exists) {
+              const arrayBuffer = await file.arrayBuffer();
+              const bytes = new Uint8Array(arrayBuffer);
+              let binary = '';
+              for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+              }
+              profilePictureBase64 = btoa(binary);
+            }
+          } catch {
+            profilePictureBase64 = undefined;
+            profilePictureExt = undefined;
+          }
+        }
+      }
+    } catch {
+      // Avatar export is optional — don't fail the whole export
+    }
+
     const exportPayload: ExportData = {
       version: EXPORT_VERSION,
       exportedAt: new Date().toISOString(),
@@ -52,6 +102,9 @@ export async function exportUserData(userId: string): Promise<boolean> {
         streaks,
         badges,
         user_settings: userSettings,
+        music_preferences: musicPreferences,
+        profile_picture_base64: profilePictureBase64,
+        profile_picture_ext: profilePictureExt,
       },
     };
 
@@ -96,6 +149,7 @@ export async function exportUserData(userId: string): Promise<boolean> {
 /**
  * Import data from a JSON backup file.
  * Merges with existing data — skips duplicates by ID.
+ * Supports v1 (no music prefs/avatar) and v2+ backups.
  */
 export async function importUserData(currentUserId: string): Promise<boolean> {
   try {
@@ -145,17 +199,28 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
       return false;
     }
 
-    const { mood_entries = [], journal_entries = [], streaks = [], badges = [] } = parsed.data;
+    const {
+      mood_entries = [],
+      journal_entries = [],
+      streaks = [],
+      badges = [],
+      music_preferences = [],
+      profile_picture_base64,
+      profile_picture_ext,
+    } = parsed.data;
+
+    // Build summary for confirmation dialog
+    const totalImportItems = mood_entries.length + journal_entries.length;
 
     return new Promise((resolve) => {
       customAlert(
         'Import Data',
-        `This backup contains ${mood_entries.length} moods, ${journal_entries.length} journals, and ${streaks.length + badges.length} other items.\n\nExisting data will be preserved. Only new entries will be added.\n\nContinue?`,
+        `Found ${totalImportItems} items (${mood_entries.length} moods, ${journal_entries.length} journals).\n\nExisting data will be preserved. Continue?`,
         [
           { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
           {
             text: 'Import',
-            onPress: () => {
+            onPress: async () => {
               try {
                 let imported = 0;
 
@@ -246,7 +311,52 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
                   }
                 }
 
-                customAlert('Import Complete', `Successfully imported ${imported} items.`);
+                // v2+: Restore music preferences (upsert)
+                if (music_preferences.length > 0) {
+                  for (const pref of music_preferences) {
+                    try {
+                      execute(
+                        `INSERT OR REPLACE INTO music_preferences (user_id, preferences, updated_at)
+                         VALUES (?, ?, ?)`,
+                        [currentUserId, pref.preferences, pref.updated_at ?? new Date().toISOString()]
+                      );
+                      imported++;
+                    } catch (prefErr) {
+                      console.warn('[Import] Failed to restore music preferences:', prefErr);
+                    }
+                  }
+                }
+
+                // v2+: Restore profile picture
+                if (profile_picture_base64 && profile_picture_ext) {
+                  try {
+                    // Decode base64 back to a temp file
+                    const tempFileName = `import_avatar_${Date.now()}${profile_picture_ext}`;
+                    const tempFile = new File(Paths.cache, tempFileName);
+
+                    // Write base64 string directly using legacy API (supports base64 write)
+                    await LegacyFileSystem.writeAsStringAsync(
+                      tempFile.uri,
+                      profile_picture_base64,
+                      { encoding: LegacyFileSystem.EncodingType.Base64 }
+                    );
+
+                    // Save through profileService (handles extension, directory, settings key)
+                    const mimeType =
+                      profile_picture_ext === '.png' ? 'image/png'
+                        : profile_picture_ext === '.webp' ? 'image/webp'
+                          : 'image/jpeg';
+                    await saveCustomAvatar(tempFile.uri, mimeType, profile_picture_ext);
+
+                    // Clean up temp file
+                    try { tempFile.delete(); } catch { /* ignore */ }
+                  } catch (avatarErr) {
+                    console.warn('[Import] Failed to restore profile picture:', avatarErr);
+                    // Non-fatal — rest of import still succeeds
+                  }
+                }
+
+                customAlert('Import Complete', `Imported ${imported} items.`);
                 resolve(true);
               } catch (err: any) {
                 console.error('[Import] Failed:', err);

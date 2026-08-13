@@ -28,6 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { GradientBackground, GlassCard, Button, customAlert } from '@/components/ui';
+import { GlobalQuickMusicWidget } from '@/components/music/GlobalQuickMusicWidget';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
@@ -501,13 +502,16 @@ export default function ProfileScreen() {
         contentContainerStyle={[
           styles.content,
           {
-            paddingTop: insets.top + Spacing.lg,
+            paddingTop: insets.top + Spacing.xl,
             paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_MARGIN + Spacing.xxxl,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Profile</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.xl }}>
+          <Text style={[styles.title, { marginBottom: 0 }]}>Profile</Text>
+          <GlobalQuickMusicWidget inline />
+        </View>
 
         {/* Avatar Card */}
         <GlassCard intensity="medium" padding="lg" style={styles.profileCard}>

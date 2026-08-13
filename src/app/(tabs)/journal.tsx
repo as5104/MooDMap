@@ -4,6 +4,7 @@
 
 import { GlassCard, GradientBackground, customAlert, JournalIllustration } from '@/components/ui';
 import { MoodFace } from '@/components/ui/MoodFace';
+import { GlobalQuickMusicWidget } from '@/components/music/GlobalQuickMusicWidget';
 import { Colors } from '@/constants/colors';
 import { Radius, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { MOOD_MAP, type MoodType } from '@/constants/moods';
@@ -182,12 +183,15 @@ export default function JournalScreen() {
         {/* Header */}
         <View style={styles.headerRow}>
           <Text style={styles.title}>Journal History</Text>
-          <Pressable
-            style={styles.addBtn}
-            onPress={() => router.push('/journal-editor')}
-          >
-            <Feather name="plus" size={22} color={Colors.text.primary} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <GlobalQuickMusicWidget inline />
+            <Pressable
+              style={styles.addBtn}
+              onPress={() => router.push('/journal-editor')}
+            >
+              <Feather name="plus" size={22} color={Colors.text.primary} />
+            </Pressable>
+          </View>
         </View>
 
         {/* Counter */}

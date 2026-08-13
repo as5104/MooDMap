@@ -8,7 +8,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { tagTrackToMood } from '../services/recommendationEngine';
 import { useAlertStore } from '../stores/alertStore';
 import { clearAudioCache, getAudioCacheSize, getCachedAudioUri } from '../utils/audioCache';
@@ -564,9 +564,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setCurrentIndex(0);
             setCurrentTrack(cleanQueue[0]);
 
-            if (isQueueCustomRef.current && playRef.current && cleanQueue[0]) {
-              playRef.current(cleanQueue[0], currentContextUriRef.current, cleanQueue[0].url, undefined, true);
-            }
             return;
           } else if (queueIdx === 0) {
             // Currently playing track is ALREADY at Position 0!
@@ -710,92 +707,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Only update if there is a significant difference (> 2 seconds) to prevent progress bar jitter
         const diff = Math.abs(prev - progressSec);
         if (diff > 2.0) {
-          console.log(`[MusicContext] Syncing currentTime with Spotify: local=${prev}, remote=${progressSec}`);
           return progressSec;
         }
         return prev;
       });
-
-      // Custom Queue Track Transition:
-      // In custom queue mode, trigger play() for the next custom track ~1.8s BEFORE the current track ends.
-      if (isQueueCustomRef.current && queueRef.current.length > 1 && trackInfo) {
-        const durSec = trackInfo.durationSec || durationSec || 0;
-        const isNearEnd = durSec > 3 && progressSec >= durSec - 1.8;
-        const isPausedAtEnd = !playing && durSec > 0 && progressSec >= durSec - 4.0;
-
-        if ((isNearEnd || isPausedAtEnd) && Date.now() - lastAutoAdvanceTimeRef.current > 4000) {
-          console.log('[MusicContext] Custom queue pre-transition triggered (seamless transition to next custom track).');
-          lastAutoAdvanceTimeRef.current = Date.now();
-
-          const updatedQueue = queueRef.current.slice(1);
-          queueRef.current = updatedQueue;
-          setQueueState(updatedQueue);
-          currentIndexRef.current = 0;
-          setCurrentIndex(0);
-          setCurrentTrack(updatedQueue[0]);
-
-          if (playRef.current && updatedQueue[0]) {
-            playRef.current(updatedQueue[0], currentContextUriRef.current, updatedQueue[0].url, undefined, true);
-          }
-        }
-      }
-    }
-  }, []);
-
-  const addToQueue = useCallback(async (track: Track) => {
-    if (currentTrackRef.current && currentTrackRef.current.category !== track.category) {
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    // Determine the base index to insert after
-    let baseIndex = currentIndexRef.current;
-    if (lastInsertIndexRef.current !== null) {
-      baseIndex = lastInsertIndexRef.current;
-    }
-
-    const insertIndex = Math.max(0, Math.min(queueRef.current.length, baseIndex + 1));
-
-    setQueueState(prev => {
-      if (prev.length === 0) {
-        return [track];
-      }
-      const updated = [...prev];
-      updated.splice(insertIndex, 0, track);
-      return updated;
-    });
-
-    lastInsertIndexRef.current = insertIndex;
-    addedCountRef.current += 1;
-
-    // Natively queue track on Spotify
-    if (track.category === 'spotify') {
-      try {
-        const { useTierStore } = require('../stores/tierStore');
-        const token = await useTierStore.getState().getValidAccessToken();
-        if (token) {
-          const { addToQueue: spotifyAddToQueue } = require('../services/spotify');
-          await spotifyAddToQueue(token, track.url);
-          console.log('[MusicContext] Natively queued track on Spotify:', track.title);
-
-          // Re-fetch queue to make sure our UI queue is instantly aligned
-          setTimeout(async () => {
-            try {
-              const { getQueue } = require('../services/spotify');
-              const queueData = await getQueue(token);
-              if (queueData) {
-                const combinedQueue = parseSpotifyQueueHelper(queueData);
-                queueRef.current = combinedQueue;
-                setQueueState(combinedQueue);
-              }
-            } catch (err) {
-              console.warn('[MusicContext] Failed to sync queue after addToQueue:', err);
-            }
-          }, 1500);
-        }
-      } catch (err) {
-        console.warn('[MusicContext] Failed to queue track natively on Spotify:', err);
-      }
     }
   }, []);
 
@@ -821,10 +736,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadFavorites();
   }, [refreshCacheSize]);
 
-
-
-
-
   // Clear cache action
   const clearCache = useCallback(async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -842,28 +753,123 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentIndex(index);
   }, []);
 
-  // Mark reordered queue as custom and turn off shuffle state gaplessly
+  // Mark reordered queue as custom, turn off shuffle gaplessly, and sync sequence to Spotify native player
   const syncReorderedQueue = useCallback(async () => {
     isQueueCustomRef.current = true;
     setIsQueueRecommended(false); // No longer recommended if manually modified
-    console.log('[MusicContext] Queue manually adjusted. Disabling native queue overwriting.');
+    console.log('[MusicContext] Queue manually adjusted. Syncing custom sequence to Spotify native player...');
 
     if (currentTrackRef.current?.category !== 'spotify') return;
     try {
       const { useTierStore } = require('../stores/tierStore');
       const token = await useTierStore.getState().getValidAccessToken();
       if (token) {
-        const { setShuffle: spotifySetShuffleAPI } = require('../services/spotify');
-        // Disable native Spotify shuffle gaplessly so it respects sequence
+        const { setShuffle: spotifySetShuffleAPI, play: spotifyPlayAPI } = require('../services/spotify');
+        // Disable native Spotify shuffle gaplessly so sequence is strictly preserved
         try {
           await spotifySetShuffleAPI(token, false);
         } catch (e) { }
         setShuffle(false);
+
+        // Sync updated custom queue sequence starting from current playing track to Spotify's native player
+        const q = queueRef.current;
+        if (q && q.length > 0) {
+          const currentId = currentTrackRef.current?.id;
+          const currentIdx = currentId ? q.findIndex(t => t.id === currentId) : 0;
+          const startIdx = currentIdx !== -1 ? currentIdx : 0;
+          const remainingUris = q.slice(startIdx).map(t => t.url).filter(Boolean);
+
+          if (remainingUris.length > 0) {
+            const currentPosMs = Math.max(0, Math.floor((currentTimeRef.current || 0) * 1000));
+            await spotifyPlayAPI(token, remainingUris, currentPosMs);
+            console.log('[MusicContext] Synced reordered custom queue URIs to Spotify native player:', remainingUris.length);
+          }
+        }
       }
     } catch (err) {
-      console.warn('[MusicContext] Failed to disable native Spotify shuffle gaplessly:', err);
+      console.warn('[MusicContext] Failed to sync reordered custom queue to Spotify:', err);
     }
   }, []);
+
+  const addToQueue = useCallback(async (track: Track) => {
+    if (currentTrackRef.current && currentTrackRef.current.category !== track.category) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Handle Spotify tracks
+    if (track.category === 'spotify') {
+      if (isQueueCustomRef.current) {
+        // Custom Queue Mode: insert locally at Position 1 and sync full sequence to Spotify
+        const currentId = currentTrackRef.current?.id;
+        const currentIdx = currentId ? queueRef.current.findIndex(t => t.id === currentId) : currentIndexRef.current;
+        const activeIdx = currentIdx !== -1 ? currentIdx : 0;
+        const insertIndex = Math.max(0, Math.min(queueRef.current.length, activeIdx + 1 + addedCountRef.current));
+
+        const currentQueue = queueRef.current;
+        const updatedQueue = currentQueue.length === 0 ? [track] : [...currentQueue];
+        if (currentQueue.length > 0) {
+          updatedQueue.splice(insertIndex, 0, track);
+        }
+        queueRef.current = updatedQueue;
+        setQueueState(updatedQueue);
+
+        lastInsertIndexRef.current = insertIndex;
+        addedCountRef.current += 1;
+
+        console.log('[MusicContext] Custom queue active: syncing added track at position', insertIndex, 'to Spotify player...');
+        syncReorderedQueue();
+      } else {
+        // Normal Spotify Mode: use Spotify native queue API to avoid duplicate entries
+        try {
+          const { useTierStore } = require('../stores/tierStore');
+          const token = await useTierStore.getState().getValidAccessToken();
+          if (token) {
+            const { addToQueue: spotifyAddToQueue } = require('../services/spotify');
+            await spotifyAddToQueue(token, track.url);
+            console.log('[MusicContext] Natively queued track on Spotify:', track.title);
+
+            // Re-fetch Spotify native queue so UI aligns 1:1 without duplicate local insertions
+            setTimeout(async () => {
+              try {
+                if (!isQueueCustomRef.current) {
+                  const { getQueue } = require('../services/spotify');
+                  const queueData = await getQueue(token);
+                  if (queueData) {
+                    const combinedQueue = parseSpotifyQueueHelper(queueData);
+                    queueRef.current = combinedQueue;
+                    setQueueState(combinedQueue);
+                  }
+                }
+              } catch (err) {
+                console.warn('[MusicContext] Failed to sync queue after addToQueue:', err);
+              }
+            }, 1000);
+          }
+        } catch (err) {
+          console.warn('[MusicContext] Failed to queue track natively on Spotify:', err);
+        }
+      }
+      return;
+    }
+
+    // Local audio tracks
+    const currentId = currentTrackRef.current?.id;
+    const currentIdx = currentId ? queueRef.current.findIndex(t => t.id === currentId) : currentIndexRef.current;
+    const activeIdx = currentIdx !== -1 ? currentIdx : 0;
+    const insertIndex = Math.max(0, Math.min(queueRef.current.length, activeIdx + 1 + addedCountRef.current));
+
+    const currentQueue = queueRef.current;
+    const updatedQueue = currentQueue.length === 0 ? [track] : [...currentQueue];
+    if (currentQueue.length > 0) {
+      updatedQueue.splice(insertIndex, 0, track);
+    }
+    queueRef.current = updatedQueue;
+    setQueueState(updatedQueue);
+
+    lastInsertIndexRef.current = insertIndex;
+    addedCountRef.current += 1;
+  }, [syncReorderedQueue]);
 
   const proactivelyFetchSpotifyQueue = useCallback(async () => {
     if (currentTrackRef.current?.category !== 'spotify' || isQueueCustomRef.current || isFetchingQueueRef.current) return;
@@ -1266,9 +1272,20 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               console.log('[MusicContext] Playback started with recommended queue of size:', finalQueue.length);
             } else {
               // Playing a track from custom/reordered queue or direct track selection
-              // DO NOT build search recommendations or wipe out existing queue!
+              // Send all remaining custom queue URIs so Spotify cloud player auto-advances natively in background!
               try {
-                await spotifyPlayAPI(token, [track.url]);
+                let customUris = [track.url];
+                const q = queueRef.current;
+                if (q && q.length > 0) {
+                  const idx = q.findIndex(t => t.id === track.id || t.url === track.url);
+                  const startIdx = idx !== -1 ? idx : 0;
+                  const sliced = q.slice(startIdx);
+                  if (sliced.length > 0) {
+                    customUris = sliced.map(t => t.url).filter(Boolean);
+                  }
+                }
+                await spotifyPlayAPI(token, customUris);
+                console.log('[MusicContext] Started Spotify custom queue playback with URIs count:', customUris.length);
               } catch (err) {
                 console.warn('[MusicContext] Spotify direct track play error:', err);
               }

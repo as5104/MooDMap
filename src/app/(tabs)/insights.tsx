@@ -15,6 +15,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { GlobalQuickMusicWidget } from '@/components/music/GlobalQuickMusicWidget';
 import { GradientBackground, GlassCard, WeeklyMoodRow, InsightsIllustration } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
@@ -333,8 +334,13 @@ export default function InsightsScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <Text style={s.title}>Insights</Text>
-        <Text style={s.subtitle}>{hasData ? 'Your mood analytics at a glance' : 'Start logging moods to see insights'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: Spacing.md }}>
+          <View style={{ flex: 1, paddingRight: Spacing.md }}>
+            <Text style={s.title}>Insights</Text>
+            <Text style={s.subtitle}>{hasData ? 'Your mood analytics at a glance' : 'Start logging moods to see insights'}</Text>
+          </View>
+          <GlobalQuickMusicWidget inline />
+        </View>
 
         {/* Period Tabs */}
         <View style={s.periodRow} onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
