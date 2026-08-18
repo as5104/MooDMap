@@ -33,7 +33,7 @@ import {
   nextTrack as spotifyNext,
   pause as spotifyPause,
   play as spotifyPlay,
-  previousTrack as spotifyPrev,
+  resetSpotifyRateLimitCooldown,
   type SpotifyArtist,
   type SpotifyCurrentTrack,
   type SpotifyPlayHistory,
@@ -189,7 +189,7 @@ export function useSpotify(): UseSpotifyReturn {
           const user = await getCurrentUser(token);
           if (user) setSpotifyUser(user);
           const data = await getUserPlaylists(token);
-          if (data) setPlaylists(data);
+          if (data && data.length > 0) setPlaylists(data);
 
           // Trigger daily Spotify user data cache refresh
           const appUser = useAppStore.getState().user;
@@ -215,27 +215,27 @@ export function useSpotify(): UseSpotifyReturn {
       if (!token) return;
 
       const current = await getCurrentlyPlaying(token);
-      setNowPlaying(current);
+      if (current) {
+        setNowPlaying(current);
 
-      // Sync playback state back to MusicContext if playing Spotify
-      if (currentTrack?.category === 'spotify' || (!currentTrack && current?.is_playing)) {
-        if (current && current.item) {
-          const progressSec = current.progress_ms / 1000;
-          const durationSec = current.item.duration_ms / 1000;
+        // Sync playback state back to MusicContext if playing Spotify
+        if (currentTrack?.category === 'spotify' || (!currentTrack && current.is_playing)) {
+          if (current.item) {
+            const progressSec = current.progress_ms / 1000;
+            const durationSec = current.item.duration_ms / 1000;
 
-          const trackInfo = {
-            id: 'spotify_' + current.item.id,
-            title: current.item.name,
-            artist: current.item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
-            url: current.item.uri,
-            cover: spotifyGetBestImage(current.item.album?.images || [], 300) ?? '',
-            duration: spotifyFormatDuration(current.item.duration_ms),
-            durationSec: Math.floor(current.item.duration_ms / 1000),
-          };
+            const trackInfo = {
+              id: 'spotify_' + current.item.id,
+              title: current.item.name,
+              artist: current.item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
+              url: current.item.uri,
+              cover: spotifyGetBestImage(current.item.album?.images || [], 300) ?? '',
+              duration: spotifyFormatDuration(current.item.duration_ms),
+              durationSec: Math.floor(current.item.duration_ms / 1000),
+            };
 
-          updateSpotifyPlayback(progressSec, durationSec, current.is_playing, trackInfo);
-        } else {
-          updateSpotifyPlayback(0, 0, false);
+            updateSpotifyPlayback(progressSec, durationSec, current.is_playing, trackInfo);
+          }
         }
       }
     } catch (err) {
@@ -328,6 +328,7 @@ export function useSpotify(): UseSpotifyReturn {
   const connect = useCallback(async () => {
     if (!isVIP || !request) return;
 
+    resetSpotifyRateLimitCooldown();
     setIsConnecting(true);
     try {
       await promptAsync();
@@ -356,46 +357,56 @@ export function useSpotify(): UseSpotifyReturn {
   const play = useCallback(async (uris?: string | string[], contextUri?: string, offset?: { uri: string } | { position: number }) => {
     try {
       const token = await getValidAccessToken();
-      if (token) await spotifyPlay(token, uris, undefined, contextUri, offset);
+      if (token) {
+        await spotifyPlay(token, uris, undefined, contextUri, offset);
+      }
     } catch (err) {
-      console.warn('[useSpotify] play action error:', err);
-      throw err;
+      console.warn('[useSpotify] Play error:', err);
     }
   }, [getValidAccessToken]);
 
   const pause = useCallback(async () => {
     try {
       const token = await getValidAccessToken();
-      if (token) await spotifyPause(token);
+      if (token) {
+        await spotifyPause(token);
+      }
     } catch (err) {
-      console.warn('[useSpotify] pause action error:', err);
+      console.warn('[useSpotify] Pause error:', err);
     }
   }, [getValidAccessToken]);
 
   const next = useCallback(async () => {
     try {
       const token = await getValidAccessToken();
-      if (token) await spotifyNext(token);
+      if (token) {
+        await spotifyNext(token);
+      }
     } catch (err) {
-      console.warn('[useSpotify] next action error:', err);
+      console.warn('[useSpotify] Next error:', err);
     }
   }, [getValidAccessToken]);
 
   const prev = useCallback(async () => {
     try {
       const token = await getValidAccessToken();
-      if (token) await spotifyPrev(token);
+      if (token) {
+        const { previousTrack } = require('@/services/spotify');
+        await previousTrack(token);
+      }
     } catch (err) {
-      console.warn('[useSpotify] prev action error:', err);
+      console.warn('[useSpotify] Prev error:', err);
     }
   }, [getValidAccessToken]);
 
   const addToQueue = useCallback(async (uri: string) => {
     try {
       const token = await getValidAccessToken();
-      if (token) await spotifyAddToQueue(token, uri);
+      if (token) {
+        await spotifyAddToQueue(token, uri);
+      }
     } catch (err) {
-      console.warn('[useSpotify] addToQueue action error:', err);
+      console.warn('[useSpotify] Add to queue error:', err);
     }
   }, [getValidAccessToken]);
 
@@ -403,13 +414,14 @@ export function useSpotify(): UseSpotifyReturn {
     try {
       const token = await getValidAccessToken();
       if (token) {
-        const { getQueue } = require('../services/spotify');
+        const { getQueue } = require('@/services/spotify');
         return await getQueue(token);
       }
+      return null;
     } catch (err) {
-      console.warn('[useSpotify] getQueueList error:', err);
+      console.warn('[useSpotify] Get queue error:', err);
+      return null;
     }
-    return null;
   }, [getValidAccessToken]);
 
   const openInSpotify = useCallback((uri: string) => {
@@ -431,7 +443,9 @@ export function useSpotify(): UseSpotifyReturn {
       const token = await getValidAccessToken();
       if (token) {
         const data = await getUserPlaylists(token);
-        setPlaylists(data);
+        if (data && data.length > 0) {
+          setPlaylists(data);
+        }
       }
     } catch (err) {
       console.warn('[useSpotify] Failed to load playlists:', err);
@@ -444,7 +458,9 @@ export function useSpotify(): UseSpotifyReturn {
         const token = await getValidAccessToken();
         if (token) {
           const data = await getTopTracks(token, timeRange);
-          setTopTracks(data);
+          if (data && data.length > 0) {
+            setTopTracks(data);
+          }
         }
       } catch (err) {
         console.warn('[useSpotify] Failed to load top tracks:', err);
@@ -458,7 +474,9 @@ export function useSpotify(): UseSpotifyReturn {
       const token = await getValidAccessToken();
       if (token) {
         const data = await getRecentlyPlayed(token);
-        setRecentlyPlayed(data);
+        if (data && data.length > 0) {
+          setRecentlyPlayed(data);
+        }
       }
     } catch (err) {
       console.warn('[useSpotify] Failed to load recently played:', err);
@@ -467,6 +485,7 @@ export function useSpotify(): UseSpotifyReturn {
 
   const refreshSession = useCallback(async () => {
     try {
+      resetSpotifyRateLimitCooldown();
       const token = await getValidAccessToken();
       if (token) {
         await Promise.all([

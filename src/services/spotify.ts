@@ -231,7 +231,16 @@ export async function refreshSpotifyToken(
 
 // API Helpers
 
-let _rateLimitedUntil = 0;
+let _searchRateLimitedUntil = 0;
+let _playerRateLimitedUntil = 0;
+
+/**
+ * Reset any active in-memory Spotify rate-limit cooldown.
+ */
+export function resetSpotifyRateLimitCooldown(): void {
+  _searchRateLimitedUntil = 0;
+  _playerRateLimitedUntil = 0;
+}
 
 /**
  * Make an authenticated request to the Spotify API.
@@ -242,8 +251,11 @@ async function spotifyFetch<T>(
   method: string = 'GET',
   body?: any
 ): Promise<T | null> {
-  // Fail-fast if currently in a Spotify rate-limit cooldown
-  if (Date.now() < _rateLimitedUntil) {
+  const isSearch = endpoint.startsWith('/search');
+  const cooldown = isSearch ? _searchRateLimitedUntil : _playerRateLimitedUntil;
+
+  // Fail-fast if currently in cooldown for this endpoint category
+  if (Date.now() < cooldown) {
     return null;
   }
 
@@ -263,11 +275,16 @@ async function spotifyFetch<T>(
 
     if (response.status === 204) return null;
 
-    // Handle rate limiting — trigger cooldown so engine falls back to zero-rate-limit online search
+    // Handle rate limiting — separate search cooldown from player/library endpoints
     if (response.status === 429) {
-      const retryAfter = parseInt(response.headers.get('Retry-After') || '10', 10);
-      _rateLimitedUntil = Date.now() + Math.max(retryAfter, 10) * 1000;
-      console.warn(`[Spotify] Rate limited (429) on ${endpoint}. Cooldown active for ${retryAfter}s.`);
+      const rawRetry = parseInt(response.headers.get('Retry-After') || '10', 10);
+      const retryAfter = Math.min(Math.max(isNaN(rawRetry) ? 10 : rawRetry, 5), isSearch ? 30 : 10);
+      if (isSearch) {
+        _searchRateLimitedUntil = Date.now() + retryAfter * 1000;
+      } else {
+        _playerRateLimitedUntil = Date.now() + retryAfter * 1000;
+      }
+      console.warn(`[Spotify] Rate limited (429) on ${endpoint}. Cooldown active for ${retryAfter}s (raw: ${rawRetry}s).`);
       return null;
     }
 
