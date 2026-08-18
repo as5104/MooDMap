@@ -126,10 +126,10 @@ export default function HomeScreen() {
         excludeTrackIds: Array.from(recommendedTrackHistoryRef.current),
         refreshSeed: Date.now(),
       } : {};
-      const vipRecs = await getVIPRecommendations(moodType, moodScoreValue, 8, options);
+      const vipRecs = await getVIPRecommendations(moodType, moodScoreValue, 20, options);
       const recs = vipRecs.length > 0
         ? vipRecs
-        : getSmartRecommendations(moodType, TRACKS_LIBRARY, user?.id ?? null, 8, options);
+        : getSmartRecommendations(moodType, TRACKS_LIBRARY, user?.id ?? null, 20, options);
 
       if (recs.length > 0) {
         const seenTrackIds = Array.from(new Set([
@@ -619,12 +619,16 @@ export default function HomeScreen() {
         {todayMood && (
           <>
             <View style={styles.sectionRow}>
-              <View style={styles.sectionTitleRow}>
+              <Pressable
+                style={styles.sectionTitleRow}
+                onPress={() => router.push({ pathname: '/music', params: { view: 'recommended' } })}
+              >
                 <Feather name={(MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') as any} size={15} color={Colors.mood[todayMood.moodType] ?? Colors.accent.primary} />
                 <Text style={styles.sectionTitleInline}>
                   {MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood'}
                 </Text>
-              </View>
+                <Feather name="chevron-right" size={14} color={Colors.text.tertiary} style={{ marginLeft: 2 }} />
+              </Pressable>
               <View style={styles.moodRecActions}>
                 <Pressable
                   onPress={() => {
@@ -643,8 +647,8 @@ export default function HomeScreen() {
                   )}
                   <Text style={styles.moodRecRefreshText}>Refresh</Text>
                 </Pressable>
-                <Pressable onPress={() => router.push('/music')} hitSlop={8}>
-                  <Text style={styles.seeAll}>Browse</Text>
+                <Pressable onPress={() => router.push({ pathname: '/music', params: { view: 'recommended' } })} hitSlop={8}>
+                  <Text style={styles.seeAll}>See All</Text>
                 </Pressable>
               </View>
             </View>
@@ -656,13 +660,13 @@ export default function HomeScreen() {
               style={styles.moodRecsContainer}
             >
               {moodRecs.length > 0 ? (
-                moodRecs.slice(0, 6).map((rec) => (
+                moodRecs.slice(0, 10).map((rec) => (
                   <Pressable
                     key={rec.track.id}
                     style={styles.moodRecCard}
                     onPress={() => {
                       playTrack(rec.track);
-                      router.push('/music');
+                      router.push({ pathname: '/music', params: { view: 'recommended' } });
                     }}
                   >
                     <View style={[

@@ -1271,8 +1271,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
               console.log('[MusicContext] Playback started with recommended queue of size:', finalQueue.length);
             } else {
-              // Playing a track from custom/reordered queue or direct track selection
-              // Send all remaining custom queue URIs so Spotify cloud player auto-advances natively in background!
+              // Playing a track from custom/recommended queue or direct track selection
+              // Send all remaining custom queue URIs so Spotify cloud player has the full recommended list and auto-advances natively
               try {
                 let customUris = [track.url];
                 const q = queueRef.current;
@@ -1285,7 +1285,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   }
                 }
                 await spotifyPlayAPI(token, customUris);
-                console.log('[MusicContext] Started Spotify custom queue playback with URIs count:', customUris.length);
+                console.log('[MusicContext] Started Spotify playback with full queue URIs count:', customUris.length);
               } catch (err) {
                 console.warn('[MusicContext] Spotify direct track play error:', err);
               }

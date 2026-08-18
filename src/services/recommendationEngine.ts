@@ -12,9 +12,13 @@
 import type { MoodType } from '@/constants/moods';
 import type { Track } from '@/context/MusicContext';
 import { execute, queryAll, queryFirst } from '@/db/client';
-import { v4 as uuid } from 'uuid';
 import type { MusicPreferences } from './musicPreferenceService';
 import type { SpotifyPlaylist, SpotifyTrack } from './spotify';
+import type { SpotifyUserDataSnapshot } from './spotifyDataCacheService';
+
+function generateId(): string {
+  return `rec_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
 
 // TYPES
 
@@ -50,7 +54,7 @@ export interface MoodMusicTag {
 export interface RecommendedTrack {
   track: Track;
   reason: string;
-  source: 'rule' | 'personal' | 'spotify' | 'discovery' | 'playlist';
+  source: 'rule' | 'personal' | 'spotify' | 'discovery' | 'playlist' | 'familiar';
   score: number; // 0-100
 }
 
@@ -81,6 +85,45 @@ type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'night';
 type MoodTrajectory = 'improving' | 'declining' | 'stable';
 
 // LAYER 1: MOOD → GENRE MAPPING (Rule-Based)
+
+export function getTodayDateString(): string {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Generate a deterministic seed from the current date, mood, and refresh counter.
+ * Changes daily at midnight, changes per mood, and shifts on refresh.
+ */
+export function getMoodDailySeed(mood?: MoodType, refreshSeed: number = 0): number {
+  const today = getTodayDateString();
+  const key = `${today}_${mood || 'any'}_${refreshSeed}`;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    const char = key.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getDailySeed(): number {
+  return getMoodDailySeed();
+}
+
+/**
+ * Simple seeded random number generator (mulberry32).
+ * Returns a function that produces deterministic floats in [0, 1).
+ */
+function seededRng(seed: number): () => number {
+  return function () {
+    seed |= 0;
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
 
 export const MOOD_GENRE_MAP: Record<MoodType, MoodMusicProfile> = {
   anxious: {
@@ -326,7 +369,7 @@ export function tagTrackToMood(
           track_source, album_art, play_count, last_played_at, user_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         [
-          uuid(), moodEntryId, moodType, track.id, track.title, track.artist,
+          generateId(), moodEntryId, moodType, track.id, track.title, track.artist,
           source, track.cover, new Date().toISOString(), userId,
         ]
       );
@@ -454,7 +497,7 @@ export function recordRecommendationSignal(
     execute(
       `INSERT INTO recommendation_signals (id, user_id, track_id, mood_type, signal_type, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [uuid(), userId, trackId, moodType, signalType, new Date().toISOString()]
+      [generateId(), userId, trackId, moodType, signalType, new Date().toISOString()]
     );
   } catch (e) {
     console.error('[Recommendations] Failed to record signal:', e);
@@ -854,6 +897,7 @@ function buildMoodSearchQueries(
   mood: MoodType,
   preferences: MusicPreferences | null,
   refreshSeed?: number,
+  spotifyUserData?: SpotifyUserDataSnapshot,
 ): string[] {
   const profile = MOOD_GENRE_MAP[mood];
   const queries: string[] = [];
@@ -865,6 +909,40 @@ function buildMoodSearchQueries(
     for (const artist of preferences.favoriteArtistNames.slice(0, 5)) {
       queries.push(`artist:"${artist}"`);
       queries.push(`${artist}`);
+      queries.push(`${artist} ${mainKw}`);
+    }
+  }
+
+  // 1b. Inject artists from Spotify user data (recently played / top artists)
+  if (spotifyUserData) {
+    // Add top artists from short-term listening
+    const topArtistNames = spotifyUserData.topArtistsShort
+      .map(a => a.name)
+      .filter(name => !preferences?.favoriteArtistNames?.includes(name))
+      .slice(0, 3);
+    for (const artist of topArtistNames) {
+      queries.push(`${artist} ${mainKw}`);
+      queries.push(`${artist}`);
+    }
+
+    // Add genres from user's current top artists
+    const liveGenres = Array.from(new Set(
+      spotifyUserData.topArtistsShort.flatMap(a => a.genres)
+    )).slice(0, 4);
+    for (const genre of liveGenres) {
+      if (!preferences?.favoriteGenres?.includes(genre)) {
+        queries.push(`${genre} ${mainKw}`);
+      }
+    }
+
+    // Add recently played artists for variety
+    const recentArtists = Array.from(new Set(
+      spotifyUserData.recentlyPlayed.flatMap(t => t.artistNames)
+    )).filter(name =>
+      !preferences?.favoriteArtistNames?.includes(name) &&
+      !topArtistNames.includes(name)
+    ).slice(0, 2);
+    for (const artist of recentArtists) {
       queries.push(`${artist} ${mainKw}`);
     }
   }
@@ -896,9 +974,20 @@ function buildMoodSearchQueries(
   }
 
   const uniqueQueries = Array.from(new Set(queries));
-  if (!refreshSeed || uniqueQueries.length < 2) return uniqueQueries;
-  const start = Math.abs(refreshSeed) % uniqueQueries.length;
-  return [...uniqueQueries.slice(start), ...uniqueQueries.slice(0, start)];
+
+  // Apply daily seed + optional refresh seed for deterministic daily variation
+  const dailySeed = getDailySeed();
+  const combinedSeed = refreshSeed ? dailySeed + refreshSeed : dailySeed;
+  const rng = seededRng(combinedSeed);
+
+  // Fisher-Yates shuffle with seeded RNG
+  const shuffled = [...uniqueQueries];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  return shuffled;
 }
 
 /**
@@ -913,8 +1002,9 @@ async function getPreferenceAwareSearchResults(
   timeContext: TimeOfDay,
   trajectory: MoodTrajectory,
   refreshSeed?: number,
+  spotifyUserData?: SpotifyUserDataSnapshot,
 ): Promise<RecommendedTrack[]> {
-  const queries = buildMoodSearchQueries(mood, preferences, refreshSeed);
+  const queries = buildMoodSearchQueries(mood, preferences, refreshSeed, spotifyUserData);
   if (queries.length === 0) return [];
 
   const allTracks: SpotifyTrack[] = [];
@@ -924,7 +1014,8 @@ async function getPreferenceAwareSearchResults(
   // Execute Spotify search if token is present (top 6 queries to prevent quota burnout)
   if (accessToken) {
     const { searchTracks } = require('./spotify');
-    const resultOffset = refreshSeed ? (Math.abs(refreshSeed) % 5 + 1) * 10 : 0;
+    const dailySeed = getDailySeed();
+    const resultOffset = ((refreshSeed ? Math.abs(refreshSeed) : dailySeed) % 5 + 1) * 10;
     const spotifyQueries = queries.slice(0, 6);
     const results = await Promise.allSettled(
       spotifyQueries.map(async (query) => {
@@ -1136,7 +1227,7 @@ async function minePlaylistsForMood(
  * - No duplicate songs by name+artist fingerprint
  * - Mix of sources (personal, discovery, playlist)
  */
-function enforceDiversity(tracks: RecommendedTrack[], limit: number): RecommendedTrack[] {
+function enforceDiversity(tracks: RecommendedTrack[], limit: number, maxPerArtist: number = 3): RecommendedTrack[] {
   const artistCounts = new Map<string, number>();
   const seenNames = new Set<string>();
   const result: RecommendedTrack[] = [];
@@ -1147,9 +1238,8 @@ function enforceDiversity(tracks: RecommendedTrack[], limit: number): Recommende
     const artist = rec.track.artist.split(',')[0].trim().toLowerCase();
     const count = artistCounts.get(artist) ?? 0;
 
-    // One track per primary artist keeps each refreshed mood set feeling like a
-    // discovery mix instead of a small group of similar artist results.
-    if (count >= 1) continue;
+    // Up to maxPerArtist songs per artist allows deep curation of favorite artists without monopolization
+    if (count >= maxPerArtist) continue;
 
     // Name+artist dedup (catches same song from different albums/releases)
     const nameKey = `${artist}_${rec.track.title.toLowerCase().replace(/\s*\(.*?\)/g, '').replace(/[^a-z0-9]/g, '')}`;
@@ -1165,106 +1255,449 @@ function enforceDiversity(tracks: RecommendedTrack[], limit: number): Recommende
 
 // SMART BLENDING (Slot-Based Interleaving)
 
+// PROPORTION-BASED RECOMMENDATION ARCHITECTURE
+
 /**
- * Interleave tracks using a slot-based system for variety.
- * Ensures the recommendation list alternates between familiar, discovery, and fresh picks.
+ * Record tracks recommended today in SQLite to prevent repeating them on the same day.
  */
-function smartBlend(
-  personal: RecommendedTrack[],
-  search: RecommendedTrack[],
-  discovery: RecommendedTrack[],
-  playlist: RecommendedTrack[],
-  ruleBased: RecommendedTrack[],
-  limit: number,
-): RecommendedTrack[] {
-  // Combine all into pools
-  const allSorted = [...personal, ...search, ...discovery, ...playlist, ...ruleBased]
-    .sort((a, b) => b.score - a.score);
+export function recordDailyRecommendedTracks(
+  userId: string | null,
+  tracks: RecommendedTrack[]
+): void {
+  try {
+    const today = getTodayDateString();
+    for (const rec of tracks) {
+      execute(
+        `INSERT OR IGNORE INTO daily_recommended_tracks (id, user_id, track_id, track_title, artist_name, date, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          generateId(),
+          userId,
+          rec.track.id,
+          rec.track.title,
+          rec.track.artist,
+          today,
+          new Date().toISOString(),
+        ]
+      );
+    }
 
-  // Create category pools
-  const personalPool = [...personal].sort((a, b) => b.score - a.score);
-  const discoveryPool = [...discovery, ...search.filter(t => t.source === 'discovery')]
-    .sort((a, b) => b.score - a.score);
-  const preferencePool = [...search.filter(t => t.source === 'spotify')]
-    .sort((a, b) => b.score - a.score);
-  const playlistPool = [...playlist].sort((a, b) => b.score - a.score);
-  const rulePool = [...ruleBased].sort((a, b) => b.score - a.score);
+    // Prune entries older than 3 days to keep DB compact
+    const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    execute('DELETE FROM daily_recommended_tracks WHERE date < ?', [cutoff]);
+  } catch (e) {
+    console.warn('[Recommendations] Failed to record daily recommended tracks:', e);
+  }
+}
 
-  // Slot pattern: defines the type of track for each position
-  const slotPattern = ['best', 'personal', 'discovery', 'preference', 'fresh',
-    'personal', 'discovery', 'preference', 'playlist',
-    'discovery', 'preference', 'fresh'];
+/**
+ * Get all track IDs and name+artist fingerprints recommended today for this user.
+ */
+export function getTodayRecommendedHistory(
+  userId: string | null
+): { seenIds: Set<string>; seenFingerprints: Set<string> } {
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
+  try {
+    const today = getTodayDateString();
+    const rows = queryAll<{ track_id: string; track_title: string; artist_name: string }>(
+      `SELECT track_id, track_title, artist_name FROM daily_recommended_tracks
+       WHERE date = ? AND (user_id = ? OR (user_id IS NULL AND ? IS NULL))`,
+      [today, userId, userId]
+    );
 
-  const result: RecommendedTrack[] = [];
-  const usedIds = new Set<string>();
+    for (const row of rows) {
+      seenIds.add(row.track_id);
+      const cleanArtist = row.artist_name.split(',')[0].trim().toLowerCase();
+      const cleanTitle = row.track_title.toLowerCase().replace(/\s*\(.*?\)/g, '').replace(/[^a-z0-9]/g, '');
+      seenFingerprints.add(`${cleanArtist}_${cleanTitle}`);
+    }
+  } catch (e) {
+    console.warn('[Recommendations] Failed to get today recommended history:', e);
+  }
+  return { seenIds, seenFingerprints };
+}
 
-  function pickFromPool(pool: RecommendedTrack[]): RecommendedTrack | null {
-    for (let i = 0; i < pool.length; i++) {
-      if (!usedIds.has(pool[i].track.id)) {
-        usedIds.add(pool[i].track.id);
-        return pool.splice(i, 1)[0];
+// Helper: small non-blocking delay to prevent burst spikes
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Fetch fresh, mood-aligned tracks by the exact artists the user picked in their survey.
+ * Uses batched OR search queries to reduce Spotify API requests.
+ * Uses mood-specific daily seed and offset to rotate different songs by these artists every day and per mood.
+ */
+async function fetchSurveyArtistMoodTracks(
+  accessToken: string,
+  mood: MoodType,
+  moodScore: number,
+  artistNames: string[],
+  preferences: MusicPreferences | null,
+  userId: string | null,
+  timeContext: TimeOfDay,
+  trajectory: MoodTrajectory,
+  refreshSeed?: number,
+  historySeenIds?: Set<string>,
+  historySeenFingerprints?: Set<string>,
+): Promise<RecommendedTrack[]> {
+  if (artistNames.length === 0) return [];
+  const { searchTracks } = require('./spotify');
+  const profile = MOOD_GENRE_MAP[mood];
+  const moodKeyword = profile.keywords[0] ?? mood;
+  const moodLabel = profile.label ?? mood;
+  const seed = getMoodDailySeed(mood, refreshSeed ?? 0);
+  const resultOffset = (Math.abs(seed) % 5) * 5; // Offsets 0, 5, 10, 15, 20 to rotate daily & per mood
+
+  const allTracks: SpotifyTrack[] = [];
+  const seenIds = new Set<string>(historySeenIds || []);
+  const seenFingerprints = new Set<string>(historySeenFingerprints || []);
+
+  // Process ALL user-selected artists
+  // Group artists into 5-artist OR search batches to query all artists efficiently
+  const cleanAll = artistNames.map(a => a.replace(/"/g, '').trim()).filter(Boolean);
+  const CHUNK_SIZE = 5;
+  const artistChunks: string[][] = [];
+  for (let i = 0; i < cleanAll.length; i += CHUNK_SIZE) {
+    artistChunks.push(cleanAll.slice(i, i + CHUNK_SIZE));
+  }
+
+  for (const chunk of artistChunks) {
+    const chunkKey = chunk.map(a => a.toLowerCase()).sort().join('_');
+    const cacheKey = `survey_chunk_${chunkKey}_${mood}_${resultOffset}`;
+    const cached = getCached<SpotifyTrack[]>(_artistTrackCache, cacheKey);
+
+    if (cached && cached.length > 0) {
+      const filtered = filterAndDedup(cached, seenIds, seenFingerprints);
+      allTracks.push(...filtered);
+      continue;
+    }
+
+    let tracks: SpotifyTrack[] = [];
+    if (accessToken) {
+      // Group up to 5 artists in one query: (artist:"A" OR artist:"B" OR artist:"C" OR artist:"D" OR artist:"E") moodKeyword
+      const artistClauses = chunk.map(name => `artist:"${name}"`).join(' OR ');
+      const query = chunk.length > 1 ? `(${artistClauses}) ${moodKeyword}` : `artist:"${chunk[0]}" ${moodKeyword}`;
+
+      tracks = await searchTracks(accessToken, query, 15, resultOffset).catch(() => []);
+      if (tracks.length < 3) {
+        // Fallback: general query for these artists without the strict keyword
+        const fallbackQuery = chunk.length > 1 ? `(${artistClauses})` : `artist:"${chunk[0]}"`;
+        const fallbackTracks: SpotifyTrack[] = await searchTracks(accessToken, fallbackQuery, 12, resultOffset).catch(() => []);
+        tracks = [...tracks, ...fallbackTracks];
       }
     }
-    return null;
-  }
 
-  for (let i = 0; i < Math.min(limit, slotPattern.length); i++) {
-    const slot = slotPattern[i];
-    let pick: RecommendedTrack | null = null;
-
-    switch (slot) {
-      case 'best':
-        pick = pickFromPool(allSorted);
-        break;
-      case 'personal':
-        pick = pickFromPool(personalPool) || pickFromPool(rulePool);
-        break;
-      case 'discovery':
-        pick = pickFromPool(discoveryPool);
-        break;
-      case 'preference':
-        pick = pickFromPool(preferencePool) || pickFromPool(discoveryPool);
-        break;
-      case 'playlist':
-        pick = pickFromPool(playlistPool);
-        break;
-      case 'fresh':
-        pick = pickFromPool(rulePool) || pickFromPool(discoveryPool);
-        break;
+    // Online fallback via Deezer if Spotify is offline / rate limited / returned empty
+    if (tracks.length === 0) {
+      for (const artistName of chunk) {
+        try {
+          const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(`${artistName} ${moodKeyword}`)}&limit=6&index=${resultOffset}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.data?.length) {
+              const dzTracks: SpotifyTrack[] = data.data.map((item: any) => ({
+                id: `dz_${item.id}`,
+                name: item.title,
+                artists: [{ id: `dz_art_${item.artist?.id || 0}`, name: item.artist?.name || artistName }],
+                album: {
+                  id: `dz_alb_${item.album?.id || 0}`,
+                  name: item.album?.title || 'Single',
+                  images: [{ url: item.album?.cover_big || item.album?.cover_medium || '' }],
+                },
+                duration_ms: (item.duration || 180) * 1000,
+                uri: item.preview || item.link,
+                popularity: 80,
+                type: 'track' as const,
+              }));
+              tracks.push(...dzTracks);
+            }
+          }
+        } catch { /* ignore */ }
+      }
     }
 
-    // Fallback: pick highest-scored unused track from all
-    if (!pick) {
-      pick = pickFromPool(allSorted);
+    if (tracks.length > 0) {
+      setCache(_artistTrackCache, cacheKey, tracks, ARTIST_TRACK_CACHE_TTL);
+      const filtered = filterAndDedup(tracks, seenIds, seenFingerprints);
+      allTracks.push(...filtered);
     }
 
-    if (pick) result.push(pick);
+    // Small 80ms throttle to prevent burst spikes
+    await sleep(80);
   }
 
-  // Fill remaining slots if we haven't reached limit
-  while (result.length < limit) {
-    const pick = pickFromPool(allSorted);
-    if (!pick) break;
-    result.push(pick);
+  // Score tracks against mood
+  return allTracks.map(st => {
+    const { score } = scoreSpotifyTrack(st, mood, moodScore, preferences, userId, timeContext, trajectory);
+    const primaryArtist = st.artists?.[0]?.name || 'Your favorite artist';
+    return {
+      track: spotifyTrackToAppTrack(st),
+      reason: `By ${primaryArtist} • ${moodLabel} vibe`,
+      source: 'spotify' as const,
+      score: score.total + 10, // boost user-selected artists
+    };
+  }).sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Fetch and score tracks from the user's daily Spotify listening snapshot (favorites / top listened).
+ */
+function fetchSpotifyUserMoodTracks(
+  spotifyUserData: SpotifyUserDataSnapshot | undefined,
+  mood: MoodType,
+  moodScore: number,
+  preferences: MusicPreferences | null,
+  userId: string | null,
+  timeContext: TimeOfDay,
+  trajectory: MoodTrajectory,
+  historySeenIds?: Set<string>,
+  historySeenFingerprints?: Set<string>,
+): RecommendedTrack[] {
+  if (!spotifyUserData) return [];
+  const tracks: RecommendedTrack[] = [];
+  const seenIds = new Set<string>(historySeenIds || []);
+  const seenFingerprints = new Set<string>(historySeenFingerprints || []);
+
+  const allCached = [
+    ...spotifyUserData.topTracksShort,
+    ...spotifyUserData.topTracksMedium,
+    ...spotifyUserData.recentlyPlayed,
+  ];
+
+  for (const cached of allCached) {
+    if (!cached || seenIds.has(cached.id) || seenIds.has(`spotify_${cached.id}`)) continue;
+    const cleanArtist = cached.artistNames[0]?.toLowerCase().trim() || '';
+    const cleanTitle = cached.name.toLowerCase().replace(/\s*\(.*?\)/g, '').replace(/[^a-z0-9]/g, '');
+    const fp = `${cleanArtist}_${cleanTitle}`;
+    if (seenFingerprints.has(fp)) continue;
+
+    seenIds.add(cached.id);
+    seenIds.add(`spotify_${cached.id}`);
+    seenFingerprints.add(fp);
+
+    const appTrack: Track = {
+      id: `spotify_${cached.id}`,
+      title: cached.name,
+      artist: cached.artistNames.join(', '),
+      url: cached.uri || `spotify:track:${cached.id}`,
+      cover: cached.coverUrl || '',
+      duration: cached.duration || '3:30',
+      durationSec: cached.durationMs ? Math.floor(cached.durationMs / 1000) : 210,
+      category: 'spotify' as const,
+    };
+
+    const mockSpotifyTrack: SpotifyTrack = {
+      id: cached.id,
+      name: cached.name,
+      artists: cached.artistNames.map((name, i) => ({ id: cached.artistIds[i] || '', name })),
+      album: { id: '', name: '', images: cached.coverUrl ? [{ url: cached.coverUrl, width: 300, height: 300 }] : [] },
+      duration_ms: cached.durationMs || 210000,
+      uri: cached.uri,
+      preview_url: null,
+      external_urls: { spotify: `https://open.spotify.com/track/${cached.id}` },
+      type: 'track',
+    };
+
+    const { score } = scoreSpotifyTrack(mockSpotifyTrack, mood, moodScore, preferences, userId, timeContext, trajectory);
+
+    tracks.push({
+      track: appTrack,
+      reason: 'From your Spotify favorites',
+      source: 'familiar' as const,
+      score: score.total + 5,
+    });
   }
 
-  return result;
+  return tracks.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Fetch mood discovery tracks from outside the user's picked artists & top history.
+ * Consolidates queries to minimize Spotify API requests.
+ */
+async function fetchDiscoveryMoodTracks(
+  accessToken: string,
+  mood: MoodType,
+  moodScore: number,
+  excludedArtists: Set<string>,
+  preferences: MusicPreferences | null,
+  userId: string | null,
+  timeContext: TimeOfDay,
+  trajectory: MoodTrajectory,
+  refreshSeed?: number,
+  historySeenIds?: Set<string>,
+  historySeenFingerprints?: Set<string>,
+): Promise<RecommendedTrack[]> {
+  const profile = MOOD_GENRE_MAP[mood];
+  const { searchTracks } = require('./spotify');
+  const moodKeyword = profile.keywords[0] ?? mood;
+  const seed = getMoodDailySeed(mood, refreshSeed ?? 0);
+  const resultOffset = (Math.abs(seed) % 5 + 1) * 10;
+
+  // Combine top genres and keywords into 2 consolidated search queries
+  const topGenres = profile.genres.slice(0, 2).map(g => `genre:"${g}"`).join(' OR ');
+  const query1 = topGenres ? `(${topGenres}) ${moodKeyword}` : `${profile.genres[0] ?? 'pop'} ${moodKeyword}`;
+  const query2 = `${profile.keywords.slice(0, 2).join(' OR ')} music`;
+  const discoveryQueries = [query1, query2];
+
+  const allTracks: SpotifyTrack[] = [];
+  const seenIds = new Set<string>(historySeenIds || []);
+  const seenFingerprints = new Set<string>(historySeenFingerprints || []);
+
+  if (accessToken) {
+    for (const query of discoveryQueries) {
+      const cacheKey = `discovery_${mood}_${query}_${resultOffset}`;
+      const cached = getCached<SpotifyTrack[]>(_searchCache, cacheKey);
+
+      if (cached && cached.length > 0) {
+        const filtered = filterAndDedup(cached, seenIds, seenFingerprints);
+        allTracks.push(...filtered);
+        continue;
+      }
+
+      const tracks: SpotifyTrack[] = await searchTracks(accessToken, query, 14, resultOffset).catch(() => []);
+      if (tracks.length > 0) {
+        setCache(_searchCache, cacheKey, tracks, SEARCH_CACHE_TTL);
+        const filtered = filterAndDedup(tracks, seenIds, seenFingerprints);
+        allTracks.push(...filtered);
+      }
+
+      // Small throttle between discovery queries
+      await sleep(60);
+    }
+  }
+
+  // Filter out any track whose primary artist is in excludedArtists
+  const nonArtistTracks = allTracks.filter(st => {
+    const primary = st.artists?.[0]?.name?.toLowerCase()?.trim() || '';
+    return !excludedArtists.has(primary);
+  });
+
+  return nonArtistTracks.map(st => {
+    const { score } = scoreSpotifyTrack(st, mood, moodScore, preferences, userId, timeContext, trajectory);
+    return {
+      track: spotifyTrackToAppTrack(st),
+      reason: `Fresh discovery for your ${mood} mood`,
+      source: 'discovery' as const,
+      score: score.total,
+    };
+  }).sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Proportionately blends Artist Picks, Spotify Listening Data, and Discovery tracks
+ * based on the user's survey discovery level:
+ *   - Balanced (Default): 65% Artist Picks, 30% Spotify User Data, 5% Discovery
+ *   - Familiar: 60% Artist Picks, 40% Spotify User Data, 0% Discovery
+ *   - Adventurous: 70% Artist Picks, 10% Spotify User Data, 20% Discovery
+ */
+function proportionateBlend(
+  artistPool: RecommendedTrack[],
+  spotifyPool: RecommendedTrack[],
+  discoveryPool: RecommendedTrack[],
+  discoveryLevel: 'familiar' | 'balanced' | 'adventurous',
+  limit: number,
+  excludeTrackIds: Set<string>,
+): RecommendedTrack[] {
+  let artistRatio = 0.65;
+  let spotifyRatio = 0.30;
+  let discoveryRatio = 0.05;
+
+  if (discoveryLevel === 'familiar') {
+    artistRatio = 0.60;
+    spotifyRatio = 0.40;
+    discoveryRatio = 0.00;
+  } else if (discoveryLevel === 'adventurous') {
+    artistRatio = 0.70;
+    spotifyRatio = 0.10;
+    discoveryRatio = 0.20;
+  }
+
+  // Calculate quota numbers
+  let targetArtist = Math.round(limit * artistRatio);
+  let targetDiscovery = Math.round(limit * discoveryRatio);
+  let targetSpotify = limit - targetArtist - targetDiscovery;
+
+  const usedTrackIds = new Set<string>(excludeTrackIds);
+  const artistCounts = new Map<string, number>();
+  const maxPerArtist = 3; // Allow up to 3 tracks per artist for diversity
+
+  function pickTracksFromPool(pool: RecommendedTrack[], targetCount: number): RecommendedTrack[] {
+    const picked: RecommendedTrack[] = [];
+    for (const rec of pool) {
+      if (picked.length >= targetCount) break;
+      if (usedTrackIds.has(rec.track.id)) continue;
+
+      const artist = rec.track.artist.split(',')[0].trim().toLowerCase();
+      const currentCount = artistCounts.get(artist) ?? 0;
+      if (currentCount >= maxPerArtist) continue;
+
+      usedTrackIds.add(rec.track.id);
+      artistCounts.set(artist, currentCount + 1);
+      picked.push(rec);
+    }
+    return picked;
+  }
+
+  const selectedArtist = pickTracksFromPool(artistPool, targetArtist);
+  const selectedSpotify = pickTracksFromPool(spotifyPool, targetSpotify);
+  const selectedDiscovery = pickTracksFromPool(discoveryPool, targetDiscovery);
+
+  // Backfill if any pool was short of its quota
+  const remainingNeeded = limit - (selectedArtist.length + selectedSpotify.length + selectedDiscovery.length);
+  if (remainingNeeded > 0) {
+    const backfillArtist = pickTracksFromPool(artistPool, remainingNeeded);
+    selectedArtist.push(...backfillArtist);
+    const stillNeeded1 = limit - (selectedArtist.length + selectedSpotify.length + selectedDiscovery.length);
+    if (stillNeeded1 > 0) {
+      const backfillSpotify = pickTracksFromPool(spotifyPool, stillNeeded1);
+      selectedSpotify.push(...backfillSpotify);
+      const stillNeeded2 = limit - (selectedArtist.length + selectedSpotify.length + selectedDiscovery.length);
+      if (stillNeeded2 > 0) {
+        const backfillDisc = pickTracksFromPool(discoveryPool, stillNeeded2);
+        selectedDiscovery.push(...backfillDisc);
+      }
+    }
+  }
+
+  // Interleave proportionally for a smooth, natural playlist flow
+  const result: RecommendedTrack[] = [];
+  let aIdx = 0, sIdx = 0, dIdx = 0;
+
+  // Interleaving cadence: 2 Artist, 1 Spotify, 2 Artist, 1 Spotify... inserting Discovery every ~6-10 tracks
+  while (result.length < limit && (aIdx < selectedArtist.length || sIdx < selectedSpotify.length || dIdx < selectedDiscovery.length)) {
+    if (aIdx < selectedArtist.length && result.length < limit) result.push(selectedArtist[aIdx++]);
+    if (aIdx < selectedArtist.length && result.length < limit) result.push(selectedArtist[aIdx++]);
+
+    if (sIdx < selectedSpotify.length && result.length < limit) result.push(selectedSpotify[sIdx++]);
+
+    if (dIdx < selectedDiscovery.length && (result.length % 5 === 0 || aIdx >= selectedArtist.length) && result.length < limit) {
+      result.push(selectedDiscovery[dIdx++]);
+    }
+  }
+
+  // Append any leftovers
+  while (result.length < limit && aIdx < selectedArtist.length) result.push(selectedArtist[aIdx++]);
+  while (result.length < limit && sIdx < selectedSpotify.length) result.push(selectedSpotify[sIdx++]);
+  while (result.length < limit && dIdx < selectedDiscovery.length) result.push(selectedDiscovery[dIdx++]);
+
+  return result.slice(0, limit);
 }
 
 // VIP SMART RECOMMENDATIONS (Top-Level Orchestrator)
 
 /**
  * Get advanced personalized recommendations for VIP users.
- * Orchestrates all 5 layers + scoring + diversity + blending.
+ * Orchestrates survey artist matching, Spotify listening data, and discovery in exact proportions,
+ * while preventing same-day duplicate recommendations.
  *
  * @param mood - Current mood type
  * @param moodScore - Mood intensity (1-10)
- * @param localTracks - Local library tracks for Layer 1
+ * @param localTracks - Local library tracks for fallback
  * @param userId - Current user ID
  * @param spotifyToken - Valid Spotify access token
  * @param userPlaylists - User's Spotify playlists for Layer 5
  * @param preferences - User's music preferences from survey (null if not set)
- * @param limit - Max results to return
+ * @param limit - Max results to return (default: 20)
  */
 export async function getVIPSmartRecommendations(
   mood: MoodType,
@@ -1274,72 +1707,83 @@ export async function getVIPSmartRecommendations(
   spotifyToken: string,
   userPlaylists: SpotifyPlaylist[],
   preferences: MusicPreferences | null,
-  limit: number = 12,
+  limit: number = 20,
   options: RecommendationRequestOptions = {},
+  spotifyUserData?: SpotifyUserDataSnapshot,
 ): Promise<RecommendedTrack[]> {
   try {
-    // Compute context
     const timeContext = getTimeOfDay();
     const trajectory = computeMoodTrajectory(userId, moodScore);
+    const discoveryLevel = preferences?.discoveryLevel || 'balanced';
 
-    // Layer 1: Rule-based (sync, instant)
-    const ruleBasedRecs = getRuleBasedRecommendations(mood, localTracks, 8);
+    // 1. Load today's recommendation history to prevent recommending the same songs on the same day
+    const todayHistory = getTodayRecommendedHistory(userId);
+    const excludedIds = new Set<string>([
+      ...Array.from(todayHistory.seenIds),
+      ...(options.excludeTrackIds ?? []),
+    ]);
 
-    // Layer 2: Personal history (sync, instant)
-    const personalRecs = getPersonalRecommendations(mood, localTracks, userId, 5);
+    // 2. Determine survey artist names (with fallback to Spotify top artists)
+    let artistNames = (preferences?.favoriteArtistNames || []).filter(Boolean);
+    if (artistNames.length === 0 && spotifyUserData && spotifyUserData.topArtistsShort.length > 0) {
+      artistNames = spotifyUserData.topArtistsShort.map(a => a.name);
+    }
+    if (artistNames.length === 0) {
+      // Fallback to mood genre artists
+      const profile = MOOD_GENRE_MAP[mood];
+      artistNames = profile.keywords.slice(0, 5);
+    }
 
-    // Layers 3, 4, 5: Async Spotify-powered (parallel)
-    const [searchResults, discoveryResults, playlistResults] = await Promise.all([
-      getPreferenceAwareSearchResults(
-        spotifyToken, mood, moodScore, preferences, userId, timeContext, trajectory, options.refreshSeed
+    const excludedArtistsSet = new Set(artistNames.map(name => name.toLowerCase().trim()));
+    if (spotifyUserData) {
+      spotifyUserData.topArtistsShort.forEach(a => excludedArtistsSet.add(a.name.toLowerCase().trim()));
+    }
+
+    // 3. Fetch the 3 core pools in parallel, passing today's seen history for strict deduplication
+    const [artistPool, spotifyPool, discoveryPool] = await Promise.all([
+      fetchSurveyArtistMoodTracks(
+        spotifyToken, mood, moodScore, artistNames, preferences, userId, timeContext, trajectory,
+        options.refreshSeed, todayHistory.seenIds, todayHistory.seenFingerprints
       ).catch(e => {
-        console.warn('[Recommendations] Layer 3 (search) failed:', e);
+        console.warn('[Recommendations] Survey artist pool failed:', e);
         return [] as RecommendedTrack[];
       }),
-      getArtistDiscoveryTracks(
-        spotifyToken, mood, moodScore, preferences, userId, timeContext, trajectory, options.refreshSeed
+      Promise.resolve(
+        fetchSpotifyUserMoodTracks(
+          spotifyUserData, mood, moodScore, preferences, userId, timeContext, trajectory,
+          todayHistory.seenIds, todayHistory.seenFingerprints
+        )
+      ),
+      fetchDiscoveryMoodTracks(
+        spotifyToken, mood, moodScore, excludedArtistsSet, preferences, userId, timeContext, trajectory,
+        options.refreshSeed, todayHistory.seenIds, todayHistory.seenFingerprints
       ).catch(e => {
-        console.warn('[Recommendations] Layer 4 (discovery) failed:', e);
-        return [] as RecommendedTrack[];
-      }),
-      minePlaylistsForMood(
-        spotifyToken, userPlaylists, mood, moodScore, preferences, userId, timeContext, trajectory
-      ).catch(e => {
-        console.warn('[Recommendations] Layer 5 (playlist mining) failed:', e);
+        console.warn('[Recommendations] Discovery pool failed:', e);
         return [] as RecommendedTrack[];
       }),
     ]);
 
-    // Smart blend all layers — prioritize online/Spotify tracks over local static files
-    const hasOnlineTracks = searchResults.length > 0 || discoveryResults.length > 0 || playlistResults.length > 0;
-    const onlineRuleFallback = hasOnlineTracks ? [] : ruleBasedRecs;
-
-    const excluded = new Set(options.excludeTrackIds ?? []);
-    const withoutVisibleTracks = (tracks: RecommendedTrack[]) =>
-      tracks.filter(rec => !excluded.has(rec.track.id));
-
-    const blended = smartBlend(
-      withoutVisibleTracks(personalRecs),
-      withoutVisibleTracks(searchResults),
-      withoutVisibleTracks(discoveryResults),
-      withoutVisibleTracks(playlistResults),
-      withoutVisibleTracks(onlineRuleFallback),
-      limit * 3,
+    // 4. Proportionate blending based on discoveryLevel
+    const blended = proportionateBlend(
+      artistPool,
+      spotifyPool,
+      discoveryPool,
+      discoveryLevel,
+      limit,
+      excludedIds
     );
 
-    // Enforce diversity
-    const diversified = enforceDiversity(blended, limit);
+    if (blended.length > 0) {
+      // Record today's recommended tracks in SQLite so they won't repeat on the same day
+      recordDailyRecommendedTracks(userId, blended);
 
-    // Guarantee 100% Spotify/online streaming music when online results exist
-    const finalRecs = hasOnlineTracks
-      ? diversified.filter(r => r.track.category === 'spotify' || r.track.id.startsWith('spotify_'))
-      : diversified;
+      _lastRecommendedTrackIds = blended.map(r => r.track.id.replace('spotify_', ''));
+      _lastRecommendedAt = Date.now();
+      return blended;
+    }
 
-    // Update cache tracking
-    _lastRecommendedTrackIds = finalRecs.map(r => r.track.id.replace('spotify_', ''));
-    _lastRecommendedAt = Date.now();
-
-    return finalRecs.length > 0 ? finalRecs : diversified;
+    // Fallback: rule based
+    return getRuleBasedRecommendations(mood, localTracks, limit);
   } catch (e) {
     console.error('[Recommendations] VIP engine failed, falling back:', e);
     return getSmartRecommendations(mood, localTracks, userId, limit, options);
@@ -1389,5 +1833,132 @@ export function getMoodGenreDistribution(
     );
   } catch {
     return [];
+  }
+}
+
+// CONTINUATION BATCH (Infinite Playback)
+
+/**
+ * Generate a continuation batch of recommendations based on listening signals.
+ * Analyzes which tracks the user completed vs skipped in the previous batch
+ * to refine the next set of recommendations.
+ *
+ * @param completedTrackIds - Track IDs the user listened through (>85% played)
+ * @param skippedTrackIds - Track IDs the user skipped (<15% played)
+ * @param allPreviousTrackIds - All tracks shown so far (to exclude duplicates)
+ */
+export async function generateContinuationBatch(
+  mood: MoodType,
+  moodScore: number,
+  completedTrackIds: string[],
+  skippedTrackIds: string[],
+  allPreviousTrackIds: string[],
+  userId: string,
+  spotifyToken: string,
+  userPlaylists: SpotifyPlaylist[],
+  preferences: MusicPreferences | null,
+  spotifyUserData?: SpotifyUserDataSnapshot,
+  limit: number = 18,
+): Promise<RecommendedTrack[]> {
+  try {
+    // Generate a fresh batch using the main engine with all previous tracks excluded
+    const baseResults = await getVIPSmartRecommendations(
+      mood,
+      moodScore,
+      [], // no local tracks for continuation
+      userId,
+      spotifyToken,
+      userPlaylists,
+      preferences,
+      limit * 2, // over-fetch to allow filtering
+      {
+        excludeTrackIds: allPreviousTrackIds,
+        refreshSeed: Date.now(), // force fresh search results
+      },
+      spotifyUserData,
+    );
+
+    if (baseResults.length === 0) return [];
+
+    // Extract artist/genre signals from completed and skipped tracks
+    const completedArtists = new Set<string>();
+    const skippedArtists = new Set<string>();
+
+    for (const trackId of completedTrackIds) {
+      try {
+        const tag = queryFirst<{ artist_name: string }>(
+          'SELECT artist_name FROM mood_music_tags WHERE track_id = ?',
+          [trackId]
+        );
+        if (tag) completedArtists.add(tag.artist_name.toLowerCase());
+      } catch { /* non-critical */ }
+    }
+
+    for (const trackId of skippedTrackIds) {
+      try {
+        const tag = queryFirst<{ artist_name: string }>(
+          'SELECT artist_name FROM mood_music_tags WHERE track_id = ?',
+          [trackId]
+        );
+        if (tag) skippedArtists.add(tag.artist_name.toLowerCase());
+      } catch { /* non-critical */ }
+    }
+
+    // Re-score based on listening signals
+    const rescored = baseResults.map(rec => {
+      let bonus = 0;
+      const artist = rec.track.artist.split(',')[0].trim().toLowerCase();
+
+      // Boost artists from completed tracks
+      if (completedArtists.has(artist)) bonus += 15;
+
+      // Penalize artists from skipped tracks
+      if (skippedArtists.has(artist)) bonus -= 20;
+
+      return {
+        ...rec,
+        score: Math.max(0, Math.min(100, rec.score + bonus)),
+      };
+    });
+
+    // Sort by adjusted score and enforce diversity
+    rescored.sort((a, b) => b.score - a.score);
+
+    // Filter out tracks from heavily-skipped artists (3+ skips)
+    const skippedArtistCounts = new Map<string, number>();
+    for (const trackId of skippedTrackIds) {
+      try {
+        const tag = queryFirst<{ artist_name: string }>(
+          'SELECT artist_name FROM mood_music_tags WHERE track_id = ?',
+          [trackId]
+        );
+        if (tag) {
+          const name = tag.artist_name.toLowerCase();
+          skippedArtistCounts.set(name, (skippedArtistCounts.get(name) ?? 0) + 1);
+        }
+      } catch { /* non-critical */ }
+    }
+
+    const heavilySkippedArtists = new Set(
+      Array.from(skippedArtistCounts.entries())
+        .filter(([, count]) => count >= 2)
+        .map(([name]) => name)
+    );
+
+    const filtered = rescored.filter(rec => {
+      const artist = rec.track.artist.split(',')[0].trim().toLowerCase();
+      return !heavilySkippedArtists.has(artist);
+    });
+
+    return enforceDiversity(filtered, limit);
+  } catch (e) {
+    console.error('[Recommendations] Continuation batch failed:', e);
+    // Fallback: just get a fresh batch with exclusions
+    return getVIPSmartRecommendations(
+      mood, moodScore, [], userId, spotifyToken, userPlaylists,
+      preferences, limit,
+      { excludeTrackIds: allPreviousTrackIds, refreshSeed: Date.now() },
+      spotifyUserData,
+    );
   }
 }

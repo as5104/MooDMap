@@ -8,7 +8,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -408,13 +408,16 @@ const CategoriesView = React.memo(({
   onCategoryPress,
   onSettingsPress,
   onTrackPress,
+  onOpenRecommended,
 }: {
   onCategoryPress: (slug: string, label: string) => void;
   onSettingsPress: () => void;
   onTrackPress: (track: Track, tracks: Track[]) => void;
+  onOpenRecommended: () => void;
 }) => {
   const isVIP = useTierStore((s) => s.isVIP);
-  const { isConnected: spotifyConnected, getVIPRecommendations } = useSpotify();
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'local' | 'spotify' | 'curated'>('all');
+  const { isConnected: spotifyConnected, getVIPRecommendations, connect: connectSpotify, isConnecting: isSpotifyConnecting } = useSpotify();
   const todayMood = useAppStore((s) => s.todayMood);
   const user = useAppStore((s) => s.user);
   const moodRecommendationSession = useAppStore((s) => s.moodRecommendationSession);
@@ -449,7 +452,7 @@ const CategoriesView = React.memo(({
         const vipRecs = await getVIPRecommendations(
           todayMood.moodType as any,
           todayMood.moodScore ?? 7,
-          8,
+          20,
           options,
         );
         if (isMounted && vipRecs && vipRecs.length > 0) {
@@ -469,7 +472,7 @@ const CategoriesView = React.memo(({
           todayMood.moodType as any,
           TRACKS_LIBRARY,
           user?.id ?? null,
-          6,
+          20,
           options,
         );
         if (isMounted) {
@@ -496,21 +499,49 @@ const CategoriesView = React.memo(({
   }, [todayMood, user?.id, isVIP, spotifyConnected, getVIPRecommendations, moodRefreshCycle, moodRecommendationSession, setMoodRecommendationSession]);
 
   const categories = useMemo(() => {
-    const list = [...CATEGORIES_LIST];
-    if (isVIP && spotifyConnected) {
-      list.splice(1, 0, {
-        slug: 'spotify',
-        label: 'Spotify Library',
-        subtitle: 'Connected',
-        cover: 'spotify',
-        height: 180,
-      });
+    let list: any[] = [];
+    if (selectedFilter === 'all') {
+      list = [...CATEGORIES_LIST];
+      if (isVIP && spotifyConnected) {
+        list.splice(1, 0, {
+          slug: 'spotify',
+          label: 'Spotify Library',
+          subtitle: 'Connected',
+          cover: 'spotify',
+          height: 180,
+        });
+      }
+    } else if (selectedFilter === 'local') {
+      list = CATEGORIES_LIST.filter(c => c.slug === 'local');
+    } else if (selectedFilter === 'spotify') {
+      if (isVIP && spotifyConnected) {
+        list = [
+          {
+            slug: 'spotify',
+            label: 'Spotify Library',
+            subtitle: 'Connected',
+            cover: 'spotify',
+            height: 220,
+          },
+        ];
+      } else {
+        list = [];
+      }
+    } else if (selectedFilter === 'curated') {
+      list = CATEGORIES_LIST.filter(c => c.slug !== 'local');
     }
     return list;
-  }, [isVIP, spotifyConnected]);
+  }, [selectedFilter, isVIP, spotifyConnected]);
 
   const leftCol = useMemo(() => categories.filter((_, i) => i % 2 === 0), [categories]);
   const rightCol = useMemo(() => categories.filter((_, i) => i % 2 === 1), [categories]);
+
+  const filterChips = useMemo(() => [
+    { key: 'all', label: 'All' },
+    { key: 'local', label: 'Local' },
+    { key: 'spotify', label: 'Spotify' },
+    { key: 'curated', label: 'Curated' },
+  ] as const, []);
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -527,62 +558,82 @@ const CategoriesView = React.memo(({
 
       {/* Filter Scroll */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={{ gap: Spacing.sm }}>
-        {['All', 'Trending', 'New Artist', 'New Release'].map((filter, i) => (
-          <Pressable
-            key={filter}
-            style={[styles.filterChip, i === 0 && styles.activeFilterChip]}
-            onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-          >
-            <Text style={[styles.filterChipText, i === 0 && styles.activeFilterChipText]}>
-              {filter}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      {/* FOR YOUR MOOD SECTION */}
-      {todayMood && moodRecs.length > 0 && (
-        <View style={styles.musicRecsSection}>
-          <View style={styles.musicRecsHeader}>
-            <Feather
-              name={(MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') as any}
-              size={14}
-              color={Colors.mood[todayMood.moodType] ?? Colors.accent.primary}
-            />
-            <Text style={styles.musicRecsTitle}>
-              {MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood'}
-            </Text>
-            <View style={[styles.musicRecsMoodBadge, { backgroundColor: (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) + '15' }]}>
-              <Text style={[styles.musicRecsMoodText, { color: Colors.mood[todayMood.moodType] ?? Colors.accent.primary }]}>
-                {todayMood.moodType.toUpperCase()}
-              </Text>
-            </View>
+        {filterChips.map((chip) => {
+          const isActive = selectedFilter === chip.key;
+          return (
             <Pressable
-              style={styles.musicRecsRefreshButton}
-              disabled={isRefreshingMoodRecs}
+              key={chip.key}
+              style={[styles.filterChip, isActive && styles.activeFilterChip]}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setIsRefreshingMoodRecs(true);
-                setMoodRefreshCycle(cycle => cycle + 1);
+                setSelectedFilter(chip.key as any);
               }}
-              hitSlop={10}
             >
-              {isRefreshingMoodRecs ? (
-                <ActivityIndicator size="small" color={Colors.accent.primary} />
-              ) : (
-                <Feather name="refresh-cw" size={15} color={Colors.accent.primary} />
-              )}
+              <Text style={[styles.filterChipText, isActive && styles.activeFilterChipText]}>
+                {chip.label}
+              </Text>
             </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      {/* FOR YOUR MOOD SECTION (Shown on All or Spotify tab if connected) */}
+      {todayMood && moodRecs.length > 0 && (selectedFilter === 'all' || (selectedFilter === 'spotify' && isVIP && spotifyConnected)) && (
+        <View style={styles.musicRecsSection}>
+          <View style={styles.musicRecsHeader}>
+            <Pressable
+              style={styles.musicRecsHeaderLeft}
+              onPress={onOpenRecommended}
+            >
+              <Feather
+                name={(MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') as any}
+                size={16}
+                color={Colors.mood[todayMood.moodType] ?? Colors.accent.primary}
+              />
+              <Text style={styles.musicRecsTitle} numberOfLines={1}>
+                {MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood'}
+              </Text>
+              <View style={[
+                styles.musicRecsMoodBadge,
+                {
+                  backgroundColor: (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) + '18',
+                  borderColor: (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) + '35',
+                }
+              ]}>
+                <Text style={[styles.musicRecsMoodText, { color: Colors.mood[todayMood.moodType] ?? Colors.accent.primary }]}>
+                  {todayMood.moodType.toUpperCase()}
+                </Text>
+              </View>
+            </Pressable>
+
+            <View style={styles.musicRecsActions}>
+              <Pressable
+                style={styles.musicRecsRefreshButton}
+                disabled={isRefreshingMoodRecs}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setIsRefreshingMoodRecs(true);
+                  setMoodRefreshCycle(cycle => cycle + 1);
+                }}
+                hitSlop={8}
+              >
+                {isRefreshingMoodRecs ? (
+                  <ActivityIndicator size="small" color={Colors.accent.primary} />
+                ) : (
+                  <Feather name="refresh-cw" size={13} color={Colors.text.secondary} />
+                )}
+              </Pressable>
+            </View>
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.md }}>
-            {moodRecs.map((rec) => (
+            {moodRecs.slice(0, 10).map((rec) => (
               <Pressable
                 key={rec.track.id}
                 style={styles.musicRecCard}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onTrackPress(rec.track, [rec.track]);
+                  onTrackPress(rec.track, moodRecs.map(r => r.track));
                 }}
               >
                 <View style={[
@@ -605,82 +656,189 @@ const CategoriesView = React.memo(({
               </Pressable>
             ))}
           </ScrollView>
+
+          {/* Full-width pill See All button at bottom */}
+          <Pressable
+            style={styles.musicRecsBottomSeeAllButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onOpenRecommended();
+            }}
+          >
+            <Text style={styles.musicRecsBottomSeeAllText}>See All Recommended Songs</Text>
+            <Feather name="arrow-right" size={14} color="#03070E" />
+          </Pressable>
         </View>
       )}
 
-      {/* Bento Grid */}
-      <View style={styles.bentoGridRow}>
-        <View style={styles.bentoColumn}>
-          {leftCol.map((cat) => (
-            <AnimatedPressable
-              key={cat.slug}
-              style={[
-                styles.bentoCard,
-                { height: cat.height },
-                cat.slug === 'spotify' && styles.spotifyPremiumCard
-              ]}
-              onPress={() => onCategoryPress(cat.slug, cat.label)}
-            >
-              <MusicCover cover={cat.slug} style={StyleSheet.absoluteFill} showIcon={false} borderRadius={Radius.lg} />
-              <View style={styles.bentoBgIcon}>
-                <Feather name={getCategoryIcon(cat.slug)} size={80} color="rgba(255, 255, 255, 0.05)" />
-              </View>
-              <View style={styles.bentoGradient}>
-                {cat.slug === 'spotify' ? (
-                  <View style={styles.spotifyPremiumBadge}>
-                    <Feather name="award" size={10} color="#FFD166" />
-                    <Text style={styles.spotifyPremiumBadgeText}>VIP Premium</Text>
-                  </View>
-                ) : cat.badge ? (
-                  <View style={styles.bentoBadge}>
-                    <Text style={styles.bentoBadgeText}>{cat.badge}</Text>
-                  </View>
-                ) : null}
-                <View style={{ flex: 1 }} />
-                <View style={styles.bentoFooter}>
-                  <Text numberOfLines={1} style={styles.bentoTitle}>{cat.label}</Text>
-                  <Text style={[styles.bentoSubtitle, cat.slug === 'spotify' && { color: '#FFD166' }]}>{cat.subtitle}</Text>
+      {/* SPOTIFY TAB: VIP NOT UNLOCKED PROMPT */}
+      {selectedFilter === 'spotify' && !isVIP && (
+        <GlassCard intensity="strong" padding="lg" style={styles.spotifyGateCard}>
+          <View style={styles.spotifyGateIconWrapper}>
+            <Feather name="award" size={32} color="#FFD166" />
+          </View>
+          <Text style={styles.spotifyGateTitle}>VIP Access Required</Text>
+          <Text style={styles.spotifyGateSubtitle}>
+            Spotify integration and smart mood-based recommendations are exclusive VIP features. Apply for VIP access in your profile to unlock Spotify.
+          </Text>
+          <Pressable
+            style={styles.spotifyGateButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push('/(tabs)/profile');
+            }}
+          >
+            <Feather name="star" size={16} color="#03070E" />
+            <Text style={styles.spotifyGateButtonText}>Apply for VIP Access</Text>
+          </Pressable>
+        </GlassCard>
+      )}
+
+      {/* SPOTIFY TAB: VIP GRANTED BUT SPOTIFY NOT CONNECTED PROMPT */}
+      {selectedFilter === 'spotify' && isVIP && !spotifyConnected && (
+        <GlassCard intensity="strong" padding="lg" style={styles.spotifyGateCard}>
+          <View style={[styles.spotifyGateIconWrapper, { backgroundColor: 'rgba(29, 185, 84, 0.15)', borderColor: 'rgba(29, 185, 84, 0.3)' }]}>
+            <Feather name="music" size={32} color="#1DB954" />
+          </View>
+          <Text style={styles.spotifyGateTitle}>Connect to Spotify</Text>
+          <Text style={styles.spotifyGateSubtitle}>
+            Link your Spotify account to listen to your personal playlists, saved library, and personalized mood recommendations.
+          </Text>
+          <Pressable
+            style={[styles.spotifyGateButton, { backgroundColor: '#1DB954' }]}
+            disabled={isSpotifyConnecting}
+            onPress={async () => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              try {
+                await connectSpotify();
+              } catch (err) {
+                console.warn('[CategoriesView] Failed to connect Spotify:', err);
+              }
+            }}
+          >
+            {isSpotifyConnecting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Feather name="link" size={16} color="#FFFFFF" />
+                <Text style={[styles.spotifyGateButtonText, { color: '#FFFFFF' }]}>Connect Spotify Account</Text>
+              </>
+            )}
+          </Pressable>
+        </GlassCard>
+      )}
+
+      {/* Categories Grid or Single Featured Card */}
+      {categories.length === 1 ? (
+        <View style={{ width: '100%' }}>
+          <AnimatedPressable
+            key={categories[0].slug}
+            style={[
+              styles.bentoCard,
+              { height: 220, width: '100%' },
+              categories[0].slug === 'spotify' && styles.spotifyPremiumCard
+            ]}
+            onPress={() => onCategoryPress(categories[0].slug, categories[0].label)}
+          >
+            <MusicCover cover={categories[0].slug} style={StyleSheet.absoluteFill} showIcon={false} borderRadius={Radius.lg} />
+            <View style={styles.bentoBgIcon}>
+              <Feather name={getCategoryIcon(categories[0].slug)} size={110} color="rgba(255, 255, 255, 0.05)" />
+            </View>
+            <View style={styles.bentoGradient}>
+              {categories[0].slug === 'spotify' ? (
+                <View style={styles.spotifyPremiumBadge}>
+                  <Feather name="award" size={10} color="#FFD166" />
+                  <Text style={styles.spotifyPremiumBadgeText}>VIP Premium</Text>
                 </View>
-              </View>
-            </AnimatedPressable>
-          ))}
-        </View>
-        <View style={styles.bentoColumn}>
-          {rightCol.map((cat) => (
-            <AnimatedPressable
-              key={cat.slug}
-              style={[
-                styles.bentoCard,
-                { height: cat.height },
-                cat.slug === 'spotify' && styles.spotifyPremiumCard
-              ]}
-              onPress={() => onCategoryPress(cat.slug, cat.label)}
-            >
-              <MusicCover cover={cat.slug} style={StyleSheet.absoluteFill} showIcon={false} borderRadius={Radius.lg} />
-              <View style={styles.bentoBgIcon}>
-                <Feather name={getCategoryIcon(cat.slug)} size={80} color="rgba(255, 255, 255, 0.05)" />
-              </View>
-              <View style={styles.bentoGradient}>
-                {cat.slug === 'spotify' ? (
-                  <View style={styles.spotifyPremiumBadge}>
-                    <Feather name="award" size={10} color="#FFD166" />
-                    <Text style={styles.spotifyPremiumBadgeText}>VIP Premium</Text>
-                  </View>
-                ) : cat.badge ? (
-                  <View style={styles.bentoBadge}>
-                    <Text style={styles.bentoBadgeText}>{cat.badge}</Text>
-                  </View>
-                ) : null}
-                <View style={{ flex: 1 }} />
-                <View style={styles.bentoFooter}>
-                  <Text numberOfLines={1} style={styles.bentoTitle}>{cat.label}</Text>
-                  <Text style={[styles.bentoSubtitle, cat.slug === 'spotify' && { color: '#FFD166' }]}>{cat.subtitle}</Text>
+              ) : categories[0].badge ? (
+                <View style={styles.bentoBadge}>
+                  <Text style={styles.bentoBadgeText}>{categories[0].badge}</Text>
                 </View>
+              ) : null}
+              <View style={{ flex: 1 }} />
+              <View style={styles.bentoFooter}>
+                <Text numberOfLines={1} style={styles.bentoTitle}>{categories[0].label}</Text>
+                <Text style={[styles.bentoSubtitle, categories[0].slug === 'spotify' && { color: '#FFD166' }]}>
+                  {categories[0].subtitle}
+                </Text>
               </View>
-            </AnimatedPressable>
-          ))}
+            </View>
+          </AnimatedPressable>
         </View>
-      </View>
+      ) : categories.length > 1 ? (
+        <View style={styles.bentoGridRow}>
+          <View style={styles.bentoColumn}>
+            {leftCol.map((cat) => (
+              <AnimatedPressable
+                key={cat.slug}
+                style={[
+                  styles.bentoCard,
+                  { height: cat.height },
+                  cat.slug === 'spotify' && styles.spotifyPremiumCard
+                ]}
+                onPress={() => onCategoryPress(cat.slug, cat.label)}
+              >
+                <MusicCover cover={cat.slug} style={StyleSheet.absoluteFill} showIcon={false} borderRadius={Radius.lg} />
+                <View style={styles.bentoBgIcon}>
+                  <Feather name={getCategoryIcon(cat.slug)} size={80} color="rgba(255, 255, 255, 0.05)" />
+                </View>
+                <View style={styles.bentoGradient}>
+                  {cat.slug === 'spotify' ? (
+                    <View style={styles.spotifyPremiumBadge}>
+                      <Feather name="award" size={10} color="#FFD166" />
+                      <Text style={styles.spotifyPremiumBadgeText}>VIP Premium</Text>
+                    </View>
+                  ) : cat.badge ? (
+                    <View style={styles.bentoBadge}>
+                      <Text style={styles.bentoBadgeText}>{cat.badge}</Text>
+                    </View>
+                  ) : null}
+                  <View style={{ flex: 1 }} />
+                  <View style={styles.bentoFooter}>
+                    <Text numberOfLines={1} style={styles.bentoTitle}>{cat.label}</Text>
+                    <Text style={[styles.bentoSubtitle, cat.slug === 'spotify' && { color: '#FFD166' }]}>{cat.subtitle}</Text>
+                  </View>
+                </View>
+              </AnimatedPressable>
+            ))}
+          </View>
+          <View style={styles.bentoColumn}>
+            {rightCol.map((cat) => (
+              <AnimatedPressable
+                key={cat.slug}
+                style={[
+                  styles.bentoCard,
+                  { height: cat.height },
+                  cat.slug === 'spotify' && styles.spotifyPremiumCard
+                ]}
+                onPress={() => onCategoryPress(cat.slug, cat.label)}
+              >
+                <MusicCover cover={cat.slug} style={StyleSheet.absoluteFill} showIcon={false} borderRadius={Radius.lg} />
+                <View style={styles.bentoBgIcon}>
+                  <Feather name={getCategoryIcon(cat.slug)} size={80} color="rgba(255, 255, 255, 0.05)" />
+                </View>
+                <View style={styles.bentoGradient}>
+                  {cat.slug === 'spotify' ? (
+                    <View style={styles.spotifyPremiumBadge}>
+                      <Feather name="award" size={10} color="#FFD166" />
+                      <Text style={styles.spotifyPremiumBadgeText}>VIP Premium</Text>
+                    </View>
+                  ) : cat.badge ? (
+                    <View style={styles.bentoBadge}>
+                      <Text style={styles.bentoBadgeText}>{cat.badge}</Text>
+                    </View>
+                  ) : null}
+                  <View style={{ flex: 1 }} />
+                  <View style={styles.bentoFooter}>
+                    <Text numberOfLines={1} style={styles.bentoTitle}>{cat.label}</Text>
+                    <Text style={[styles.bentoSubtitle, cat.slug === 'spotify' && { color: '#FFD166' }]}>{cat.subtitle}</Text>
+                  </View>
+                </View>
+              </AnimatedPressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
     </ScrollView>
   );
 });
@@ -1663,6 +1821,779 @@ const PlayingSongIndicator = React.memo(({
   );
 });
 PlayingSongIndicator.displayName = 'PlayingSongIndicator';
+
+const RecommendedListView = React.memo(({
+  onGoBack,
+  onTrackPress,
+  onSettingsPress,
+  onShowQueue,
+}: {
+  onGoBack: () => void;
+  onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => void;
+  onSettingsPress: () => void;
+  onShowQueue: () => void;
+}) => {
+  const isVIP = useTierStore((s) => s.isVIP);
+  const spotifyConnected = useTierStore((s) => s.spotifyConnected);
+  const {
+    getVIPRecommendations,
+    getContinuationBatch,
+    reportTrackSkip,
+    reportTrackCompletion,
+    addToQueue: spotifyAddToQueueHook,
+  } = useSpotify();
+
+  const {
+    currentTrack,
+    isPlaying,
+    favorites,
+    toggleFavorite,
+    addToQueue: localAddToQueue,
+    setQueue: setMusicQueue,
+  } = useMusic();
+  const playbackTime = usePlaybackTime();
+
+  const todayMood = useAppStore((s) => s.todayMood);
+  const user = useAppStore((s) => s.user);
+  const moodRecommendationSession = useAppStore((s) => s.moodRecommendationSession);
+  const setMoodRecommendationSession = useAppStore((s) => s.setMoodRecommendationSession);
+
+  const [recommendedRecs, setRecommendedRecs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // 3-dot menu states & animations
+  const [menuTrack, setMenuTrack] = useState<any | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuSlideAnim = useRef(new RNAnimated.Value(220)).current;
+  const menuOpacityAnim = useRef(new RNAnimated.Value(0)).current;
+
+  // Signal tracking sets
+  const completedTrackIdsRef = useRef<Set<string>>(new Set(moodRecommendationSession?.completedTrackIds ?? []));
+  const skippedTrackIdsRef = useRef<Set<string>>(new Set(moodRecommendationSession?.skippedTrackIds ?? []));
+  const allSeenTrackIdsRef = useRef<Set<string>>(new Set(moodRecommendationSession?.seenTrackIds ?? []));
+  const lastTrackRef = useRef<{ id: string; startTime: number; lastTime: number; duration: number } | null>(null);
+
+  // Toast states
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<'success' | 'warning' | 'error'>('success');
+  const toastOpacity = useRef(new RNAnimated.Value(0)).current;
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((message: string, type: 'success' | 'warning' | 'error' = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMsg(message);
+    setToastType(type);
+    toastOpacity.setValue(0);
+    RNAnimated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    toastTimerRef.current = setTimeout(() => {
+      RNAnimated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+        setToastMsg(null);
+      });
+    }, 2000);
+  }, [toastOpacity]);
+
+  const handleOpenMenu = useCallback((track: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setMenuTrack(track);
+    setShowMenu(true);
+  }, []);
+
+  const handleCloseMenu = useCallback((onComplete?: () => void) => {
+    RNAnimated.parallel([
+      RNAnimated.timing(menuOpacityAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
+      RNAnimated.timing(menuSlideAnim, { toValue: 220, duration: 180, useNativeDriver: true }),
+    ]).start(() => {
+      setShowMenu(false);
+      if (onComplete) onComplete();
+    });
+  }, [menuOpacityAnim, menuSlideAnim]);
+
+  useEffect(() => {
+    if (showMenu) {
+      menuSlideAnim.setValue(220);
+      menuOpacityAnim.setValue(0);
+      RNAnimated.parallel([
+        RNAnimated.timing(menuOpacityAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+        RNAnimated.spring(menuSlideAnim, { toValue: 0, tension: 75, friction: 12, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [showMenu, menuSlideAnim, menuOpacityAnim]);
+
+  // Load initial recommendation batch (20 songs)
+  const loadRecommendations = useCallback(async (forceFresh: boolean = false) => {
+    if (!todayMood) return;
+    const moodKey = `${user?.id ?? 'guest'}:${todayMood.id}`;
+    const cached = useAppStore.getState().moodRecommendationSession;
+
+    if (!forceFresh && cached?.key === moodKey && cached.tracks.length > 0) {
+      setRecommendedRecs(cached.tracks);
+      allSeenTrackIdsRef.current = new Set(cached.seenTrackIds);
+      completedTrackIdsRef.current = new Set(cached.completedTrackIds ?? []);
+      skippedTrackIdsRef.current = new Set(cached.skippedTrackIds ?? []);
+      return;
+    }
+
+    if (forceFresh) setRefreshing(true);
+    else setLoading(true);
+
+    try {
+      const options = forceFresh ? {
+        excludeTrackIds: Array.from(allSeenTrackIdsRef.current),
+        refreshSeed: Date.now(),
+      } : {};
+
+      const vipRecs = await getVIPRecommendations(
+        todayMood.moodType as any,
+        todayMood.moodScore ?? 7,
+        20,
+        options
+      );
+
+      const recs = vipRecs.length > 0
+        ? vipRecs
+        : getSmartRecommendations(
+            todayMood.moodType as any,
+            TRACKS_LIBRARY,
+            user?.id ?? null,
+            20,
+            options
+          );
+
+      if (recs && recs.length > 0) {
+        const seen = Array.from(new Set([
+          ...(cached?.key === moodKey ? cached.seenTrackIds : []),
+          ...recs.map(r => r.track.id),
+        ]));
+        setRecommendedRecs(recs);
+        allSeenTrackIdsRef.current = new Set(seen);
+        setMoodRecommendationSession({
+          key: moodKey,
+          tracks: recs,
+          seenTrackIds: seen,
+          completedTrackIds: Array.from(completedTrackIdsRef.current),
+          skippedTrackIds: Array.from(skippedTrackIdsRef.current),
+        });
+      }
+    } catch (e) {
+      console.warn('[RecommendedListView] Failed to load recommendations:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [todayMood, user?.id, getVIPRecommendations, setMoodRecommendationSession]);
+
+  useEffect(() => {
+    loadRecommendations(false);
+  }, [loadRecommendations]);
+
+  // Real-time track skip / completion tracking
+  useEffect(() => {
+    if (!currentTrack) return;
+    const prev = lastTrackRef.current;
+    const now = Date.now();
+
+    if (prev && prev.id !== currentTrack.id && todayMood) {
+      // Previous track finished or was switched
+      const durationSec = prev.duration > 0 ? prev.duration : 180;
+      const playedRatio = prev.lastTime / durationSec;
+      const rawId = prev.id.replace('spotify_', '');
+
+      if (playedRatio >= 0.85) {
+        completedTrackIdsRef.current.add(rawId);
+        reportTrackCompletion(rawId, todayMood.moodType as any);
+      } else if (playedRatio < 0.15 || (now - prev.startTime < 30000 && playedRatio < 0.3)) {
+        skippedTrackIdsRef.current.add(rawId);
+        reportTrackSkip(rawId, todayMood.moodType as any);
+      }
+
+      // Sync session signals
+      const moodKey = `${user?.id ?? 'guest'}:${todayMood.id}`;
+      const cached = useAppStore.getState().moodRecommendationSession;
+      if (cached?.key === moodKey) {
+        setMoodRecommendationSession({
+          ...cached,
+          completedTrackIds: Array.from(completedTrackIdsRef.current),
+          skippedTrackIds: Array.from(skippedTrackIdsRef.current),
+        });
+      }
+    }
+
+    lastTrackRef.current = {
+      id: currentTrack.id,
+      startTime: now,
+      lastTime: playbackTime.currentTime || 0,
+      duration: playbackTime.duration || currentTrack.durationSec || 180,
+    };
+  }, [currentTrack?.id, playbackTime.currentTime, playbackTime.duration, todayMood, user?.id, reportTrackCompletion, reportTrackSkip, setMoodRecommendationSession]);
+
+  // Infinite continuation batch loader
+  const loadMoreRecommendations = useCallback(async () => {
+    if (loadingMore || loading || !todayMood || recommendedRecs.length === 0) return;
+    setLoadingMore(true);
+
+    try {
+      const moreRecs = await getContinuationBatch(
+        todayMood.moodType as any,
+        todayMood.moodScore ?? 7,
+        Array.from(completedTrackIdsRef.current),
+        Array.from(skippedTrackIdsRef.current),
+        Array.from(allSeenTrackIdsRef.current),
+        20,
+      );
+
+      if (moreRecs && moreRecs.length > 0) {
+        // Filter out any duplicates already present
+        const currentIds = new Set(recommendedRecs.map(r => r.track.id));
+        const filteredNew = moreRecs.filter(r => !currentIds.has(r.track.id));
+
+        if (filteredNew.length > 0) {
+          const updatedRecs = [...recommendedRecs, ...filteredNew];
+          const newSeen = Array.from(new Set([
+            ...Array.from(allSeenTrackIdsRef.current),
+            ...filteredNew.map(r => r.track.id),
+          ]));
+
+          setRecommendedRecs(updatedRecs);
+          allSeenTrackIdsRef.current = new Set(newSeen);
+
+          const moodKey = `${user?.id ?? 'guest'}:${todayMood.id}`;
+          setMoodRecommendationSession({
+            key: moodKey,
+            tracks: updatedRecs,
+            seenTrackIds: newSeen,
+            completedTrackIds: Array.from(completedTrackIdsRef.current),
+            skippedTrackIds: Array.from(skippedTrackIdsRef.current),
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[RecommendedListView] Failed to load continuation batch:', e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, loading, todayMood, recommendedRecs, getContinuationBatch, user?.id, setMoodRecommendationSession]);
+
+  // Filtered tracks for search
+  const filteredRecs = useMemo(() => {
+    if (!searchQuery.trim()) return recommendedRecs;
+    const q = searchQuery.toLowerCase().trim();
+    return recommendedRecs.filter(r =>
+      r.track.title.toLowerCase().includes(q) ||
+      r.track.artist.toLowerCase().includes(q) ||
+      (r.reason && r.reason.toLowerCase().includes(q))
+    );
+  }, [recommendedRecs, searchQuery]);
+
+  const allTracks = useMemo(() => filteredRecs.map(r => r.track), [filteredRecs]);
+
+  // Shuffle play
+  const handleShufflePlay = useCallback(() => {
+    if (allTracks.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const shuffled = [...allTracks];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    onTrackPress(shuffled[0], shuffled, true, undefined, shuffled[0].url);
+  }, [allTracks, onTrackPress]);
+
+  // Play all
+  const handlePlayAll = useCallback(() => {
+    if (allTracks.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onTrackPress(allTracks[0], allTracks, false, undefined, allTracks[0].url);
+  }, [allTracks, onTrackPress]);
+
+  // Indicator helper states & refs
+  const scrollYShared = useSharedValue(0);
+  const isScrollingShared = useSharedValue(false);
+  const [listHeight, setListHeight] = useState(0);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleScroll = useCallback((event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    scrollYShared.value = y;
+    isScrollingShared.value = true;
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
+      isScrollingShared.value = false;
+    }, 400);
+  }, [scrollYShared, isScrollingShared]);
+
+  const handleLayout = useCallback((event: any) => {
+    setListHeight(event.nativeEvent.layout.height);
+  }, []);
+
+  const currentPlayingIndex = useMemo(() => {
+    if (!currentTrack) return -1;
+    return filteredRecs.findIndex(r => r.track.id === currentTrack.id);
+  }, [currentTrack, filteredRecs]);
+
+  const getItemLayout = useCallback((data: any, index: number) => ({
+    length: 86,
+    offset: 86 * index,
+    index,
+  }), []);
+
+  const moodColor = todayMood ? (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) : Colors.accent.primary;
+  const moodLabel = todayMood ? (MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood') : 'Recommended Music';
+  const moodIcon = todayMood ? (MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') : 'music';
+
+  const renderRecommendedItem = useCallback(({ item: rec, index }: { item: any; index: number }) => {
+    const track = rec.track;
+    const isCurrent = currentTrack?.id === track.id;
+    return (
+      <GlassCard
+        intensity="subtle"
+        padding="none"
+        style={[
+          styles.recommendedTrackItem,
+          isCurrent && [styles.activeTrackItem, { borderColor: moodColor + '40', backgroundColor: 'rgba(255, 255, 255, 0.08)' }]
+        ]}
+        onPress={() => {
+          onTrackPress(track, allTracks, false, undefined, track.url);
+        }}
+      >
+        <View style={styles.recommendedTrackItemInner}>
+          <MusicCover cover={track.cover} style={styles.recommendedTrackCover} iconSize={16} />
+          <View style={styles.recommendedTrackDetails}>
+            <Text numberOfLines={1} style={[styles.recommendedTrackName, isCurrent && { color: moodColor }]}>
+              {track.title}
+            </Text>
+            <Text numberOfLines={1} style={styles.recommendedTrackArtist}>
+              {track.artist}
+            </Text>
+            {rec.reason ? (
+              <View style={styles.recommendedReasonBadge}>
+                <Feather
+                  name={
+                    rec.source === 'familiar' ? 'heart' :
+                    rec.source === 'personal' ? 'user' :
+                    rec.source === 'playlist' ? 'disc' :
+                    rec.source === 'discovery' ? 'compass' : 'star'
+                  }
+                  size={10}
+                  color={moodColor}
+                />
+                <Text style={[styles.recommendedReasonText, { color: moodColor }]} numberOfLines={1}>
+                  {rec.reason}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={styles.recommendedTrackActions}>
+            <Text style={styles.recommendedTrackDuration}>{track.duration}</Text>
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); handleOpenMenu(rec); }}
+              hitSlop={12}
+              style={styles.trackMoreBtn}
+            >
+              <Feather name="more-vertical" size={20} color="rgba(255, 255, 255, 0.5)" />
+            </Pressable>
+          </View>
+        </View>
+      </GlassCard>
+    );
+  }, [currentTrack?.id, allTracks, onTrackPress, moodColor, handleOpenMenu]);
+
+  return (
+    <View style={{ flex: 1 }}>
+      {/* Header */}
+      <View style={styles.navigationHeader}>
+        <View style={styles.absoluteTitleContainer} pointerEvents="none">
+          <Text style={styles.navigationTitleText} numberOfLines={1}>
+            {moodLabel}
+          </Text>
+        </View>
+
+        <View style={{ width: 96, alignItems: 'flex-start' }}>
+          <Pressable style={styles.closeBtn} onPress={onGoBack}>
+            <Feather name="chevron-left" size={24} color={Colors.text.primary} />
+          </Pressable>
+        </View>
+
+        <View style={{ width: 96, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: Spacing.sm }}>
+          <Pressable
+            style={styles.closeBtn}
+            onPress={() => loadRecommendations(true)}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color={moodColor} />
+            ) : (
+              <Feather name="refresh-cw" size={18} color={moodColor} />
+            )}
+          </Pressable>
+          <Pressable style={styles.closeBtn} onPress={onSettingsPress}>
+            <Feather name="settings" size={20} color={Colors.text.primary} />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Solid Vibrant Mood Hero Card */}
+      {todayMood && (
+        <View style={[
+          styles.recommendedMoodBanner,
+          {
+            backgroundColor: moodColor,
+            shadowColor: moodColor,
+          }
+        ]}>
+          <View style={styles.recommendedMoodIconWrap}>
+            <Feather name={moodIcon as any} size={20} color="#0A0A0C" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+              <Text style={styles.recommendedMoodTitle}>{moodLabel}</Text>
+              <View style={styles.recommendedMoodBadge}>
+                <Text style={styles.recommendedMoodBadgeText}>
+                  {todayMood.moodType.toUpperCase()}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.recommendedMoodSubtitle}>
+              {recommendedRecs.length} tracks • Fresh mix crafted for your vibe
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Search Bar */}
+      <View style={[styles.searchBar, { borderColor: moodColor + '30', borderWidth: 1 }]}>
+        <Feather name="search" size={16} color="rgba(255,255,255,0.4)" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search within recommendations..."
+          placeholderTextColor="rgba(255,255,255,0.4)"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+            <Feather name="x" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
+          </Pressable>
+        )}
+      </View>
+
+      {/* Action Buttons Row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-between', gap: 8, paddingHorizontal: Spacing.sm, marginBottom: Spacing.md }}>
+        {/* Categories Back Button */}
+        <View style={{ flex: 1 }}>
+          <Pressable
+            style={{
+              width: '100%',
+              height: 38,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#FFFFFF',
+              borderRadius: Radius.md,
+              gap: 6,
+            }}
+            onPress={onGoBack}
+          >
+            <Feather name="arrow-left" size={14} color="#000000" />
+            <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+              Music Hub
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Current Queue List Button */}
+        <View style={{ flex: 1 }}>
+          <Pressable
+            style={{
+              width: '100%',
+              height: 38,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#A3E635',
+              borderRadius: Radius.md,
+              gap: 6,
+            }}
+            onPress={onShowQueue}
+          >
+            <Feather name="list" size={14} color="#000000" />
+            <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+              Queue
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Shuffle Play Button */}
+        <View style={{ flex: 1 }}>
+          <Pressable
+            style={{
+              width: '100%',
+              height: 38,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: moodColor,
+              borderRadius: Radius.md,
+              gap: 6,
+              opacity: filteredRecs.length > 0 ? 1 : 0.5,
+            }}
+            onPress={handleShufflePlay}
+            disabled={filteredRecs.length === 0}
+          >
+            <Feather name="shuffle" size={14} color="#000000" />
+            <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
+              Shuffle
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Main Track List */}
+      {loading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={moodColor} />
+          <Text style={[styles.emptyTracksDesc, { marginTop: Spacing.sm }]}>Crafting your personalized mood playlist...</Text>
+        </View>
+      ) : filteredRecs.length === 0 ? (
+        <View style={styles.centerContainer}>
+          <Feather name="music" size={48} color={Colors.text.secondary} />
+          <Text style={styles.emptyTracksTitle}>No Songs Found</Text>
+          <Text style={styles.emptyTracksDesc}>
+            {searchQuery.trim() !== '' ? 'No recommendations match your search.' : 'Log a mood to get personalized music.'}
+          </Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1, position: 'relative' }} onLayout={handleLayout}>
+          <FlatList
+            data={filteredRecs}
+            keyExtractor={(item, index) => `${item.track.id}-${index}`}
+            renderItem={renderRecommendedItem}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listScroll}
+            initialNumToRender={15}
+            maxToRenderPerBatch={15}
+            windowSize={10}
+            getItemLayout={getItemLayout}
+            removeClippedSubviews={true}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            ListFooterComponent={
+              <View style={{ paddingVertical: Spacing.xl, alignItems: 'center', justifyContent: 'center' }}>
+                {loadingMore ? (
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingVertical: 12,
+                    paddingHorizontal: 22,
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    borderRadius: Radius.pill,
+                    borderWidth: 1,
+                    borderColor: moodColor + '35',
+                  }}>
+                    <ActivityIndicator size="small" color={moodColor} />
+                    <Text style={{ fontFamily: Fonts.bodyMedium, fontSize: FontSizes.caption, color: Colors.text.primary }}>
+                      Loading more songs...
+                    </Text>
+                  </View>
+                ) : filteredRecs.length > 0 ? (
+                  <Pressable
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                      borderWidth: 1,
+                      borderColor: moodColor + '40',
+                      borderRadius: Radius.pill,
+                      paddingVertical: 12,
+                      paddingHorizontal: 24,
+                    }}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      loadMoreRecommendations();
+                    }}
+                  >
+                    <Feather name="plus" size={16} color={moodColor} />
+                    <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: Colors.text.primary }}>
+                      Load More Songs
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            }
+          />
+          <PlayingSongIndicator
+            scrollY={scrollYShared}
+            currentPlayingIndex={currentPlayingIndex}
+            isScrolling={isScrollingShared}
+            listHeight={listHeight}
+          />
+        </View>
+      )}
+
+      {/* Track 3-dot Options Sheet */}
+      <Modal
+        visible={showMenu && !!menuTrack}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={() => handleCloseMenu()}
+      >
+        <RNAnimated.View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.65)', justifyContent: 'flex-end', opacity: menuOpacityAnim }}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => handleCloseMenu()} />
+          <RNAnimated.View
+            style={{
+              width: '100%',
+              paddingHorizontal: 14,
+              paddingBottom: 110,
+              transform: [{ translateY: menuSlideAnim }],
+            }}
+            pointerEvents="box-none"
+          >
+            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)' }]}>
+              {/* Track header */}
+              <View style={styles.menuHeader}>
+                <MusicCover cover={menuTrack?.track?.cover} style={[styles.menuTrackCover, { borderRadius: 12 }]} iconSize={14} />
+                <View style={{ flex: 1 }}>
+                  <Text numberOfLines={1} style={styles.menuTrackTitle}>{menuTrack?.track?.title}</Text>
+                  <Text numberOfLines={1} style={styles.menuTrackArtist}>{menuTrack?.track?.artist}</Text>
+                </View>
+              </View>
+
+              <View style={styles.menuDivider} />
+
+              {/* Add to Queue */}
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  if (!menuTrack?.track) return;
+                  const targetTrack = menuTrack.track;
+                  handleCloseMenu(async () => {
+                    try {
+                      if (targetTrack.url?.startsWith('spotify:')) {
+                        await spotifyAddToQueueHook(targetTrack.url);
+                        showToast('Added to Queue');
+
+                        // Timed re-fetch of Spotify's live queue so our in-app queue list stays consistent
+                        setTimeout(async () => {
+                          try {
+                            const { useTierStore } = require('../stores/tierStore');
+                            const token = await useTierStore.getState().getValidAccessToken();
+                            if (token) {
+                              const { getQueue } = require('../services/spotify');
+                              const { parseSpotifyQueueHelper } = require('../context/MusicContext');
+                              const queueData = await getQueue(token);
+                              if (queueData) {
+                                const combinedQueue = parseSpotifyQueueHelper(queueData);
+                                setMusicQueue(combinedQueue);
+                              }
+                            }
+                          } catch (syncErr) {
+                            console.warn('[RecommendedListView] Failed to sync updated Spotify queue:', syncErr);
+                          }
+                        }, 1200);
+                      } else {
+                        localAddToQueue(targetTrack);
+                        showToast('Added to Queue');
+                      }
+                    } catch {
+                      showToast('Could not add to queue — open Spotify and play something first', 'error');
+                    }
+                  });
+                }}
+              >
+                <Feather name="plus-circle" size={18} color="#FFF" />
+                <Text style={styles.menuOptionText}>Add to Queue</Text>
+              </Pressable>
+
+              {/* Add / Remove Favourite */}
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  if (!menuTrack?.track) return;
+                  const trackId = menuTrack.track.id;
+                  handleCloseMenu(() => {
+                    const wasFav = favorites.includes(trackId);
+                    toggleFavorite(trackId);
+                    showToast(wasFav ? 'Removed from Favourites' : 'Added to Favourites');
+                  });
+                }}
+              >
+                <Feather
+                  name="heart"
+                  size={18}
+                  color={menuTrack?.track && favorites.includes(menuTrack.track.id) ? Colors.error : '#FFF'}
+                  fill={menuTrack?.track && favorites.includes(menuTrack.track.id) ? Colors.error : 'transparent'}
+                />
+                <Text style={styles.menuOptionText}>
+                  {menuTrack?.track && favorites.includes(menuTrack.track.id) ? 'Remove from Favourites' : 'Add to Favourites'}
+                </Text>
+              </Pressable>
+            </GlassCard>
+          </RNAnimated.View>
+        </RNAnimated.View>
+      </Modal>
+
+      {/* Local toast */}
+      {toastMsg && (
+        <RNAnimated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            bottom: 130,
+            left: -SCREEN_PADDING,
+            right: -SCREEN_PADDING,
+            alignItems: 'center',
+            zIndex: 999999,
+            opacity: toastOpacity,
+          }}
+        >
+          <View style={{
+            backgroundColor: 'rgba(30, 30, 36, 0.95)',
+            paddingVertical: 10,
+            paddingHorizontal: 20,
+            borderRadius: 9999,
+            borderWidth: 1,
+            borderColor: toastType === 'error'
+              ? 'rgba(255, 107, 107, 0.25)'
+              : toastType === 'warning'
+                ? 'rgba(255, 190, 106, 0.25)'
+                : 'rgba(141, 233, 29, 0.25)',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 6,
+            maxWidth: '85%',
+          }}>
+            <Feather
+              name={toastType === 'success' ? 'check-circle' : 'alert-circle'}
+              size={14}
+              color={toastType === 'error'
+                ? Colors.error
+                : toastType === 'warning'
+                  ? Colors.warning
+                  : Colors.accent.primary}
+            />
+            <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption, flexShrink: 1 }}>
+              {toastMsg}
+            </Text>
+          </View>
+        </RNAnimated.View>
+      )}
+    </View>
+  );
+});
+RecommendedListView.displayName = 'RecommendedListView';
 
 const ListView = React.memo(({
   category,
@@ -3530,6 +4461,7 @@ SpotifySettingsPopup.displayName = 'SpotifySettingsPopup';
 export default function MusicScreen() {
   const insets = useSafeAreaInsets();
   const paddingTop = Math.max(insets.top, Spacing.lg);
+  const params = useLocalSearchParams<{ view?: string }>();
 
   const {
     currentTrack,
@@ -3585,9 +4517,20 @@ export default function MusicScreen() {
   }, []);
 
   // Internal navigation state
-  const [view, setView] = useState<'categories' | 'list' | 'player'>('categories');
+  const [view, setView] = useState<'categories' | 'list' | 'recommended' | 'player'>(
+    params.view === 'recommended' ? 'recommended' : 'categories'
+  );
+  const previousViewRef = useRef<'categories' | 'list' | 'recommended'>('categories');
   const [selectedCategory, setSelectedCategory] = useState<string>('midnight');
   const [activeCategoryLabel, setActiveCategoryLabel] = useState<string>('Midnight Vibes');
+
+  // Sync route params with view
+  useEffect(() => {
+    if (params.view === 'recommended') {
+      previousViewRef.current = 'categories';
+      setView('recommended');
+    }
+  }, [params.view]);
 
   // New states for popup modals
   const [showQueuePopup, setShowQueuePopup] = useState(false);
@@ -3637,42 +4580,56 @@ export default function MusicScreen() {
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-  const viewIndex = useSharedValue(0);
+  const viewIndex = useSharedValue(params.view === 'recommended' ? 1 : 0);
+  // Flag: when 1, the list view stays hidden during direct categories↔player jumps
+  const skipListView = useSharedValue(0);
 
   // State representing the active view (only updates after transition completes, or instantly on exit)
-  const [activeView, setActiveView] = useState<'categories' | 'list' | 'player'>('categories');
+  const [activeView, setActiveView] = useState<'categories' | 'list' | 'recommended' | 'player'>(
+    params.view === 'recommended' ? 'recommended' : 'categories'
+  );
 
   useEffect(() => {
     let target = 0;
     if (view === 'categories') target = 0;
-    else if (view === 'list') target = 1;
+    else if (view === 'list' || view === 'recommended') target = 1;
     else if (view === 'player') target = 2;
 
-    // Immediately update activeView to non-player if leaving the player to stop animations instantly
-    if (view !== 'player') {
+    // Immediately update activeView when entering the list/recommended layer or staying on categories.
+    if (view === 'list' || view === 'recommended') {
+      setActiveView(view);
+    } else if (view === 'categories' && (activeView === 'categories' || activeView === 'player')) {
+      // Only set immediately if we weren't coming from list/recommended
       setActiveView(view);
     }
+
+    // Detect direct jumps that skip the list layer (categories↔player)
+    const currentVal = viewIndex.value;
+    const isDirectJump = (currentVal <= 0.1 && target === 2) || (currentVal >= 1.9 && target === 0);
+    if (isDirectJump) {
+      skipListView.value = 1;
+    }
+
+    const onFinish = (finished?: boolean) => {
+      'worklet';
+      if (finished) {
+        skipListView.value = 0;
+        runOnJS(setActiveView)(view);
+      }
+    };
 
     if (viewIndex.value >= 1.9 && target < 2) {
       // Exiting Player View: Use crisp, smooth timing transition with zero spring tail crawl
       viewIndex.value = withTiming(target, {
         duration: 260,
         easing: Easing.out(Easing.quad),
-      }, (finished) => {
-        if (finished) {
-          runOnJS(setActiveView)(view);
-        }
-      });
+      }, onFinish);
     } else {
       viewIndex.value = withSpring(target, {
         damping: 24,
         stiffness: 140,
         mass: 0.8,
-      }, (finished) => {
-        if (finished) {
-          runOnJS(setActiveView)(view);
-        }
-      });
+      }, onFinish);
     }
   }, [view]);
 
@@ -3692,6 +4649,19 @@ export default function MusicScreen() {
   });
 
   const listStyle = useAnimatedStyle(() => {
+    // Hide the list container entirely during direct categories↔player transitions
+    if (skipListView.value === 1) {
+      return {
+        transform: [{ translateX: SCREEN_WIDTH }, { scale: 1 }],
+        opacity: 0,
+        position: 'absolute',
+        top: paddingTop,
+        left: SCREEN_PADDING,
+        right: SCREEN_PADDING,
+        bottom: 0,
+        display: 'none',
+      };
+    }
     const translateX = (1 - viewIndex.value) * SCREEN_WIDTH;
     const scale = viewIndex.value > 1 ? 1 - (viewIndex.value - 1) * 0.05 : 1;
     const opacity = viewIndex.value <= 1 ? viewIndex.value : 2 - viewIndex.value;
@@ -3744,9 +4714,15 @@ export default function MusicScreen() {
   useEffect(() => {
     const onBackPress = () => {
       if (view === 'player') {
-        setView('list');
+        const prev = previousViewRef.current;
+        // If previous was 'list' but no category was explicitly selected, skip to categories
+        if (prev === 'list' && selectedCategory === 'midnight' && activeCategoryLabel === 'Midnight Vibes') {
+          setView('categories');
+        } else {
+          setView(prev);
+        }
         return true;
-      } else if (view === 'list') {
+      } else if (view === 'list' || view === 'recommended') {
         setView('categories');
         return true;
       }
@@ -3755,17 +4731,26 @@ export default function MusicScreen() {
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => backHandler.remove();
-  }, [view]);
-
+  }, [view, selectedCategory, activeCategoryLabel]);
 
   const handleCategoryPress = useCallback((cat: string, label: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedCategory(cat);
     setActiveCategoryLabel(label);
+    previousViewRef.current = 'list';
     setView('list');
   }, []);
 
+  const handleOpenRecommended = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    previousViewRef.current = 'categories';
+    setView('recommended');
+  }, []);
+
   const handleTrackPress = useCallback((track: Track, tracksInCat: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => {
+    if (view !== 'player') {
+      previousViewRef.current = view;
+    }
     if (!isShuffle && currentTrack?.id === track.id) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       if (isPlaying) {
@@ -3780,18 +4765,25 @@ export default function MusicScreen() {
     setQueue(slicedTracks, 0);
     play(track, contextUri, offsetUri, isShuffle, undefined, _isFromSearch);
     setView('player');
-  }, [play, setQueue, currentTrack?.id, isPlaying, pause, resume]);
+  }, [play, setQueue, currentTrack?.id, isPlaying, pause, resume, view]);
 
   const handleGoBack = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (view === 'player') {
-      setView('list');
-    } else if (view === 'list') {
+      // Go back to whichever view was open before the player
+      const prev = previousViewRef.current;
+      // If previous was 'list' but no category was explicitly selected, skip to categories
+      if (prev === 'list' && selectedCategory === 'midnight' && activeCategoryLabel === 'Midnight Vibes') {
+        setView('categories');
+      } else {
+        setView(prev);
+      }
+    } else if (view === 'list' || view === 'recommended') {
       setView('categories');
     } else {
       router.back();
     }
-  }, [view]);
+  }, [view, selectedCategory, activeCategoryLabel]);
 
   const handleShowQueue = useCallback(() => {
     setShowQueuePopup(true);
@@ -3802,8 +4794,11 @@ export default function MusicScreen() {
   }, []);
 
   const handleMiniPlayerPress = useCallback(() => {
+    if (view !== 'player') {
+      previousViewRef.current = view;
+    }
     setView('player');
-  }, []);
+  }, [view]);
 
   return (
     <GradientBackground variant="glow">
@@ -3816,10 +4811,18 @@ export default function MusicScreen() {
             onCategoryPress={handleCategoryPress}
             onSettingsPress={handleShowSettings}
             onTrackPress={handleTrackPress}
+            onOpenRecommended={handleOpenRecommended}
           />
         </Animated.View>
-        <Animated.View style={listStyle} pointerEvents={view === 'list' ? 'auto' : 'none'}>
-          {selectedCategory === 'spotify' ? (
+        <Animated.View style={listStyle} pointerEvents={(view === 'list' || view === 'recommended') ? 'auto' : 'none'}>
+          {(activeView === 'recommended' || view === 'recommended') ? (
+            <RecommendedListView
+              onGoBack={handleGoBack}
+              onTrackPress={handleTrackPress}
+              onSettingsPress={handleOpenSpotifySettings}
+              onShowQueue={handleShowQueue}
+            />
+          ) : selectedCategory === 'spotify' ? (
             <SpotifyListView
               onGoBack={handleGoBack}
               onTrackPress={handleTrackPress}
@@ -5263,32 +6266,122 @@ const styles = StyleSheet.create({
   musicRecsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    justifyContent: 'space-between',
     marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  musicRecsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs + 2,
+    flex: 1,
+    marginRight: Spacing.xs,
   },
   musicRecsTitle: {
     fontFamily: Fonts.subheading,
     fontSize: FontSizes.body,
     color: Colors.text.primary,
+    fontWeight: '700',
   },
   musicRecsMoodBadge: {
-    paddingHorizontal: Spacing.sm,
+    paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: Radius.pill,
-    marginLeft: 'auto',
+    borderRadius: Radius.xs,
+    borderWidth: 1,
   },
   musicRecsMoodText: {
     fontFamily: Fonts.bodyBold,
-    fontSize: FontSizes.tiny - 1,
-    letterSpacing: 1,
+    fontSize: 9.5,
+    letterSpacing: 0.8,
+  },
+  musicRecsActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs + 2,
+    flexShrink: 0,
   },
   musicRecsRefreshButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(190, 255, 108, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  musicRecsBottomSeeAllButton: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: '#8DE91D',
+    paddingVertical: Spacing.md - 2,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: Radius.pill,
+    marginTop: Spacing.md + 2,
+  },
+  musicRecsBottomSeeAllText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.bodySmall,
+    color: '#03070E',
+    letterSpacing: 0.3,
+  },
+  spotifyGateCard: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xxl,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: Radius.xl,
+    marginVertical: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: 'rgba(18, 22, 28, 0.75)',
+  },
+  spotifyGateIconWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 209, 102, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 209, 102, 0.35)',
+    marginBottom: Spacing.md,
+  },
+  spotifyGateTitle: {
+    fontFamily: Fonts.subheading,
+    fontSize: FontSizes.h3,
+    color: Colors.text.primary,
+    marginBottom: Spacing.xs,
+    textAlign: 'center',
+    fontWeight: '700',
+  },
+  spotifyGateSubtitle: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.sm,
+  },
+  spotifyGateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: '#FFD166',
+    paddingVertical: Spacing.md - 2,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: Radius.pill,
+    minWidth: 200,
+  },
+  spotifyGateButtonText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.bodySmall,
+    color: '#03070E',
+    letterSpacing: 0.3,
   },
   musicRecCard: {
     width: 90,
@@ -5454,4 +6547,104 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     justifyContent: 'flex-end',
   },
+  recommendedMoodBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 14,
+    marginBottom: Spacing.md,
+    borderRadius: 22,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  recommendedMoodIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recommendedMoodTitle: {
+    fontFamily: Fonts.heading,
+    fontSize: 17,
+    color: '#0A0A0C',
+  },
+  recommendedMoodSubtitle: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: 'rgba(10, 10, 12, 0.75)',
+    marginTop: 2,
+  },
+  recommendedMoodBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+  },
+  recommendedMoodBadgeText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 10,
+    letterSpacing: 0.8,
+    color: '#0A0A0C',
+  },
+  recommendedTrackItem: {
+    height: 78,
+    borderRadius: 18,
+  },
+  recommendedTrackItemInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: '100%',
+    paddingHorizontal: 14,
+  },
+  recommendedTrackCover: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: Colors.background.elevated,
+    marginRight: 12,
+  },
+  recommendedTrackDetails: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  recommendedTrackName: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 14.5,
+    color: '#FFFFFF',
+  },
+  recommendedTrackArtist: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12.5,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 1,
+  },
+  recommendedTrackActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginLeft: 8,
+  },
+  recommendedTrackDuration: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.tiny,
+    color: 'rgba(255, 255, 255, 0.45)',
+  },
+  recommendedReasonBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  recommendedReasonText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 10.5,
+    letterSpacing: 0.1,
+  },
 });
+

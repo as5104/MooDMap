@@ -95,3 +95,20 @@ export const recommendationSignals = sqliteTable('recommendation_signals', {
   signalType: text('signal_type').notNull(), // 'skip' | 'complete'
   createdAt: text('created_at').notNull(),
 });
+
+// Spotify User Data Cache (daily snapshot of user's listening data)
+export const spotifyUserDataCache = sqliteTable('spotify_user_data_cache', {
+  userId: text('user_id').primaryKey(),
+  data: text('data').notNull(), // JSON blob of SpotifyUserDataSnapshot
+  fetchedAt: text('fetched_at').notNull(), // ISO timestamp
+});
+
+export const dailyRecommendedTracks = sqliteTable('daily_recommended_tracks', {
+  id: text('id').primaryKey(),
+  userId: text('user_id'),
+  trackId: text('track_id').notNull(),
+  trackTitle: text('track_title').notNull(),
+  artistName: text('artist_name').notNull(),
+  date: text('date').notNull(), // YYYY-MM-DD
+  createdAt: text('created_at').notNull(),
+});

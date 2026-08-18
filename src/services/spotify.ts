@@ -430,7 +430,7 @@ export async function getPlaylistTracks(
   let allTracks: SpotifyTrack[] = [];
   let offset = 0;
   const pageSize = 100; // Spotify limit per request is 100
-  
+
   try {
     while (allTracks.length < limit) {
       const currentLimit = Math.min(pageSize, limit - allTracks.length);
@@ -442,27 +442,27 @@ export async function getPlaylistTracks(
         accessToken,
         `/playlists/${playlistId}/items?limit=${currentLimit}&offset=${offset}`
       );
-      
+
       if (!data || !data.items || data.items.length === 0) {
         break;
       }
-      
+
       const tracks = data.items
         .map((item) => item.track ?? item.item)
         .filter(Boolean) as SpotifyTrack[];
-        
+
       allTracks = allTracks.concat(tracks);
-      
+
       if (!data.next || allTracks.length >= data.total) {
         break;
       }
-      
+
       offset += pageSize;
     }
   } catch (err) {
     console.warn(`[Spotify] Error fetching paginated playlist tracks for ${playlistId}:`, err);
   }
-  
+
   return allTracks;
 }
 

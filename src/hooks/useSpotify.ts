@@ -4,49 +4,53 @@
  * VIP tier gating, OAuth flow management via expo-auth-session
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { AppState, Linking } from 'react-native';
-import * as AuthSession from 'expo-auth-session';
-import * as Haptics from 'expo-haptics';
-import { useTierStore } from '@/stores/tierStore';
+import type { MoodType } from '@/constants/moods';
 import { useMusic } from '@/context/MusicContext';
+import { getMusicPreferences } from '@/services/musicPreferenceService';
 import {
-  SPOTIFY_DISCOVERY,
-  getAuthRequestConfig,
-  exchangeCodeForTokens,
-  getCurrentUser,
-  getCurrentlyPlaying,
-  getUserPlaylists,
-  getTopTracks,
-  getTopArtists,
-  getRecentlyPlayed,
-  searchTracks,
-  searchArtists,
-  getMultipleArtists,
-  searchForMood,
-  play as spotifyPlay,
-  pause as spotifyPause,
-  nextTrack as spotifyNext,
-  previousTrack as spotifyPrev,
-  addToQueue as spotifyAddToQueue,
-  formatDuration as spotifyFormatDuration,
-  getBestImage as spotifyGetBestImage,
-  type SpotifyUser,
-  type SpotifyCurrentTrack,
-  type SpotifyPlaylist,
-  type SpotifyTrack,
-  type SpotifyArtist,
-  type SpotifyPlayHistory,
-} from '@/services/spotify';
-import {
+  generateContinuationBatch,
   getVIPSmartRecommendations,
   recordRecommendationSignal,
   type RecommendationRequestOptions,
   type RecommendedTrack,
 } from '@/services/recommendationEngine';
-import { getMusicPreferences } from '@/services/musicPreferenceService';
-import type { MoodType } from '@/constants/moods';
+import {
+  SPOTIFY_DISCOVERY,
+  exchangeCodeForTokens,
+  getAuthRequestConfig,
+  getCurrentUser,
+  getCurrentlyPlaying,
+  getRecentlyPlayed,
+  getTopArtists,
+  getTopTracks,
+  getUserPlaylists,
+  searchArtists,
+  searchForMood,
+  searchTracks,
+  addToQueue as spotifyAddToQueue,
+  formatDuration as spotifyFormatDuration,
+  getBestImage as spotifyGetBestImage,
+  nextTrack as spotifyNext,
+  pause as spotifyPause,
+  play as spotifyPlay,
+  previousTrack as spotifyPrev,
+  type SpotifyArtist,
+  type SpotifyCurrentTrack,
+  type SpotifyPlayHistory,
+  type SpotifyPlaylist,
+  type SpotifyTrack,
+  type SpotifyUser
+} from '@/services/spotify';
+import {
+  getLatestSpotifyUserData,
+  refreshSpotifyUserData
+} from '@/services/spotifyDataCacheService';
 import { useAppStore } from '@/stores/appStore';
+import { useTierStore } from '@/stores/tierStore';
+import * as AuthSession from 'expo-auth-session';
+import * as Haptics from 'expo-haptics';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Linking } from 'react-native';
 
 
 // Types
@@ -93,8 +97,17 @@ interface UseSpotifyReturn {
     limit?: number,
     options?: RecommendationRequestOptions,
   ) => Promise<RecommendedTrack[]>;
+  getContinuationBatch: (
+    mood: MoodType,
+    moodScore: number,
+    completedTrackIds: string[],
+    skippedTrackIds: string[],
+    allPreviousTrackIds: string[],
+    limit?: number,
+  ) => Promise<RecommendedTrack[]>;
   reportTrackSkip: (trackId: string, mood: MoodType) => void;
   reportTrackCompletion: (trackId: string, mood: MoodType) => void;
+  refreshDailySpotifyData: () => Promise<void>;
 }
 
 // Now Playing Poll Interval
@@ -177,6 +190,14 @@ export function useSpotify(): UseSpotifyReturn {
           if (user) setSpotifyUser(user);
           const data = await getUserPlaylists(token);
           if (data) setPlaylists(data);
+
+          // Trigger daily Spotify user data cache refresh
+          const appUser = useAppStore.getState().user;
+          if (appUser?.id) {
+            refreshSpotifyUserData(appUser.id, token).catch(e =>
+              console.warn('[useSpotify] Daily data cache refresh failed:', e)
+            );
+          }
         }
       } catch (err) {
         console.warn('[useSpotify] Failed to load user profile & playlists on connect:', err);
@@ -201,7 +222,7 @@ export function useSpotify(): UseSpotifyReturn {
         if (current && current.item) {
           const progressSec = current.progress_ms / 1000;
           const durationSec = current.item.duration_ms / 1000;
-          
+
           const trackInfo = {
             id: 'spotify_' + current.item.id,
             title: current.item.name,
@@ -263,9 +284,9 @@ export function useSpotify(): UseSpotifyReturn {
             if (token) {
               getUserPlaylists(token).then(data => {
                 if (data && data.length > 0) setPlaylists(data);
-              }).catch(() => {});
+              }).catch(() => { });
             }
-          }).catch(() => {});
+          }).catch(() => { });
         }
 
         if (pollRef.current) {
@@ -399,7 +420,7 @@ export function useSpotify(): UseSpotifyReturn {
         .replace('spotify:track:', 'https://open.spotify.com/track/')
         .replace('spotify:playlist:', 'https://open.spotify.com/playlist/')
         .replace('spotify:album:', 'https://open.spotify.com/album/');
-      Linking.openURL(webUrl).catch(() => {});
+      Linking.openURL(webUrl).catch(() => { });
     });
   }, []);
 
@@ -623,6 +644,11 @@ export function useSpotify(): UseSpotifyReturn {
           token = '';
         }
 
+        // Get cached Spotify user data for smarter recommendations
+        const spotifyUserData = userId
+          ? getLatestSpotifyUserData(userId)
+          : null;
+
         const TRACKS_LIBRARY = require('@/context/MusicContext').TRACKS_LIBRARY ?? [];
 
         return await getVIPSmartRecommendations(
@@ -635,6 +661,7 @@ export function useSpotify(): UseSpotifyReturn {
           prefs,
           limit,
           options,
+          spotifyUserData ?? undefined,
         );
       } catch (err) {
         console.warn('[useSpotify] getVIPRecommendations error:', err);
@@ -643,6 +670,65 @@ export function useSpotify(): UseSpotifyReturn {
     },
     [getValidAccessToken, playlists]
   );
+
+  const getContinuationBatch = useCallback(
+    async (
+      mood: MoodType,
+      moodScore: number,
+      completedTrackIds: string[],
+      skippedTrackIds: string[],
+      allPreviousTrackIds: string[],
+      limit: number = 18,
+    ): Promise<RecommendedTrack[]> => {
+      try {
+        const user = useAppStore.getState().user;
+        const userId = user?.id ?? null;
+        const prefs = userId ? getMusicPreferences(userId) : null;
+
+        let token = '';
+        try {
+          token = (await getValidAccessToken()) || '';
+        } catch {
+          token = '';
+        }
+
+        const spotifyUserData = userId
+          ? getLatestSpotifyUserData(userId)
+          : null;
+
+        return await generateContinuationBatch(
+          mood,
+          moodScore,
+          completedTrackIds,
+          skippedTrackIds,
+          allPreviousTrackIds,
+          userId ?? 'guest',
+          token,
+          playlists || [],
+          prefs,
+          spotifyUserData ?? undefined,
+          limit,
+        );
+      } catch (err) {
+        console.warn('[useSpotify] getContinuationBatch error:', err);
+        return [];
+      }
+    },
+    [getValidAccessToken, playlists]
+  );
+
+  const refreshDailySpotifyData = useCallback(async () => {
+    try {
+      const user = useAppStore.getState().user;
+      if (!user?.id) return;
+      const token = await getValidAccessToken();
+      if (token) {
+        await refreshSpotifyUserData(user.id, token);
+      }
+    } catch (e) {
+      console.warn('[useSpotify] refreshDailySpotifyData error:', e);
+    }
+  }, [getValidAccessToken]);
 
   const reportTrackSkip = useCallback(
     (trackId: string, mood: MoodType) => {
@@ -694,7 +780,9 @@ export function useSpotify(): UseSpotifyReturn {
     searchArtistsForSurvey,
     loadTopArtistsForSurvey,
     getVIPRecommendations,
+    getContinuationBatch,
     reportTrackSkip,
     reportTrackCompletion,
+    refreshDailySpotifyData,
   };
 }

@@ -16,8 +16,12 @@ export interface MoodRecommendationSession {
   /** User + mood-log identity; prevents one mood's mix leaking into another. */
   key: string;
   tracks: RecommendedTrack[];
-  /** Every track shown by refreshes in this session, used to prevent repeats. */
+  /** Every track shown by refreshes/pagination in this session, used to prevent repeats. */
   seenTrackIds: string[];
+  /** Tracks the user listened to completion (>85%). */
+  completedTrackIds?: string[];
+  /** Tracks the user skipped quickly (<15%). */
+  skippedTrackIds?: string[];
 }
 
 interface TodayMood {

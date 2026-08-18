@@ -162,9 +162,27 @@ export const initializeDatabase = async (): Promise<void> => {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS spotify_user_data_cache (
+        user_id TEXT PRIMARY KEY NOT NULL,
+        data TEXT NOT NULL,
+        fetched_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS daily_recommended_tracks (
+        id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT,
+        track_id TEXT NOT NULL,
+        track_title TEXT NOT NULL,
+        artist_name TEXT NOT NULL,
+        date TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_recsig_user ON recommendation_signals(user_id);
       CREATE INDEX IF NOT EXISTS idx_recsig_track ON recommendation_signals(track_id);
       CREATE INDEX IF NOT EXISTS idx_recsig_mood ON recommendation_signals(mood_type);
+      CREATE INDEX IF NOT EXISTS idx_drt_user_date ON daily_recommended_tracks(user_id, date);
+      CREATE INDEX IF NOT EXISTS idx_drt_track ON daily_recommended_tracks(track_id);
     `);
 
     // Run safe migrations for existing tables
