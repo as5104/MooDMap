@@ -104,6 +104,7 @@ interface UseSpotifyReturn {
     skippedTrackIds: string[],
     allPreviousTrackIds: string[],
     limit?: number,
+    previousArtistNames?: string[],
   ) => Promise<RecommendedTrack[]>;
   reportTrackSkip: (trackId: string, mood: MoodType) => void;
   reportTrackCompletion: (trackId: string, mood: MoodType) => void;
@@ -312,7 +313,7 @@ export function useSpotify(): UseSpotifyReturn {
       }
       sub.remove();
     };
-  }, [isVIP, spotifyConnected, refreshNowPlaying, currentTrack?.id, isPlaying, nowPlaying?.is_playing]);
+  }, [isVIP, spotifyConnected, refreshNowPlaying, currentTrack?.id, isPlaying]);
 
   // Trigger immediate refresh when the playback timer reaches the end of the song
   useEffect(() => {
@@ -648,7 +649,7 @@ export function useSpotify(): UseSpotifyReturn {
     async (
       mood: MoodType,
       moodScore: number = 7,
-      limit: number = 12,
+      limit: number = 20,
       options: RecommendationRequestOptions = {},
     ): Promise<RecommendedTrack[]> => {
       try {
@@ -664,9 +665,12 @@ export function useSpotify(): UseSpotifyReturn {
         }
 
         // Get cached Spotify user data for smarter recommendations
-        const spotifyUserData = userId
+        let spotifyUserData = userId
           ? getLatestSpotifyUserData(userId)
           : null;
+        if (!spotifyUserData && userId && token) {
+          spotifyUserData = await refreshSpotifyUserData(userId, token).catch(() => null);
+        }
 
         const TRACKS_LIBRARY = require('@/context/MusicContext').TRACKS_LIBRARY ?? [];
 
@@ -697,7 +701,8 @@ export function useSpotify(): UseSpotifyReturn {
       completedTrackIds: string[],
       skippedTrackIds: string[],
       allPreviousTrackIds: string[],
-      limit: number = 18,
+      limit: number = 20,
+      previousArtistNames: string[] = [],
     ): Promise<RecommendedTrack[]> => {
       try {
         const user = useAppStore.getState().user;
@@ -711,9 +716,12 @@ export function useSpotify(): UseSpotifyReturn {
           token = '';
         }
 
-        const spotifyUserData = userId
+        let spotifyUserData = userId
           ? getLatestSpotifyUserData(userId)
           : null;
+        if (!spotifyUserData && userId && token) {
+          spotifyUserData = await refreshSpotifyUserData(userId, token).catch(() => null);
+        }
 
         return await generateContinuationBatch(
           mood,
@@ -727,6 +735,7 @@ export function useSpotify(): UseSpotifyReturn {
           prefs,
           spotifyUserData ?? undefined,
           limit,
+          previousArtistNames,
         );
       } catch (err) {
         console.warn('[useSpotify] getContinuationBatch error:', err);

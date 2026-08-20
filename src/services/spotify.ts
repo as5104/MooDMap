@@ -513,7 +513,8 @@ export async function searchTracks(
   limit: number = 10,
   offset: number = 0,
 ): Promise<SpotifyTrack[]> {
-  const safeLimit = Number(limit) > 10 ? 20 : 10;
+  // Spotify Search API enforces max limit of 10 for standard developer applications
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
   const cleanQ = query.trim();
   if (!cleanQ) return [];
   const safeOffset = Math.max(0, Math.min(Math.floor(offset) || 0, 990));
@@ -550,10 +551,10 @@ export async function searchForMood(
 export async function searchArtists(
   accessToken: string,
   query: string,
-  limit: number = 20
+  limit: number = 10
 ): Promise<SpotifyArtist[]> {
-  // Spotify Search API allows up to 50 for type=artist
-  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
+  // Spotify Search API enforces max limit of 10 for standard developer applications
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
   const cleanQ = query.trim();
   if (!cleanQ) return [];
 
@@ -582,7 +583,7 @@ export async function getRelatedArtists(
 export async function getArtistTopTracks(
   accessToken: string,
   artistId: string,
-  market: string = 'from_token'
+  market: string = 'US'
 ): Promise<SpotifyTrack[]> {
   const data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
     accessToken,

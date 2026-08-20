@@ -448,7 +448,10 @@ const CategoriesView = React.memo(({
             ? moodRecommendationSession.seenTrackIds
             : [],
           refreshSeed: Date.now(),
-        } : {};
+          previousArtistNames: moodRecommendationSession?.sampledArtistNames || [],
+        } : {
+          previousArtistNames: moodRecommendationSession?.sampledArtistNames || [],
+        };
         const vipRecs = await getVIPRecommendations(
           todayMood.moodType as any,
           todayMood.moodScore ?? 7,
@@ -456,6 +459,12 @@ const CategoriesView = React.memo(({
           options,
         );
         if (isMounted && vipRecs && vipRecs.length > 0) {
+          const artistsFromRecs = Array.from(new Set(vipRecs.map(r => r.track.artist.split(',')[0].trim()))).filter(Boolean);
+          const sampledArtistNames = Array.from(new Set([
+            ...(moodRecommendationSession?.key === moodKey ? (moodRecommendationSession.sampledArtistNames || []) : []),
+            ...artistsFromRecs,
+          ])).slice(-30);
+
           setMoodRecs(vipRecs);
           setMoodRecommendationSession({
             key: moodKey,
@@ -464,6 +473,7 @@ const CategoriesView = React.memo(({
               ...(moodRecommendationSession?.key === moodKey ? moodRecommendationSession.seenTrackIds : []),
               ...vipRecs.map(rec => rec.track.id),
             ])),
+            sampledArtistNames,
           });
           return;
         }
@@ -1943,7 +1953,10 @@ const RecommendedListView = React.memo(({
       const options = forceFresh ? {
         excludeTrackIds: Array.from(allSeenTrackIdsRef.current),
         refreshSeed: Date.now(),
-      } : {};
+        previousArtistNames: cached?.sampledArtistNames || [],
+      } : {
+        previousArtistNames: cached?.sampledArtistNames || [],
+      };
 
       const vipRecs = await getVIPRecommendations(
         todayMood.moodType as any,
@@ -1967,12 +1980,19 @@ const RecommendedListView = React.memo(({
           ...(cached?.key === moodKey ? cached.seenTrackIds : []),
           ...recs.map(r => r.track.id),
         ]));
+        const artistsFromRecs = Array.from(new Set(recs.map(r => r.track.artist.split(',')[0].trim()))).filter(Boolean);
+        const sampledArtistNames = Array.from(new Set([
+          ...(cached?.key === moodKey ? (cached.sampledArtistNames || []) : []),
+          ...artistsFromRecs,
+        ])).slice(-30);
+
         setRecommendedRecs(recs);
         allSeenTrackIdsRef.current = new Set(seen);
         setMoodRecommendationSession({
           key: moodKey,
           tracks: recs,
           seenTrackIds: seen,
+          sampledArtistNames,
           completedTrackIds: Array.from(completedTrackIdsRef.current),
           skippedTrackIds: Array.from(skippedTrackIdsRef.current),
         });
@@ -2035,6 +2055,9 @@ const RecommendedListView = React.memo(({
     setLoadingMore(true);
 
     try {
+      const moodKey = `${user?.id ?? 'guest'}:${todayMood.id}`;
+      const cached = useAppStore.getState().moodRecommendationSession;
+
       const moreRecs = await getContinuationBatch(
         todayMood.moodType as any,
         todayMood.moodScore ?? 7,
@@ -2042,6 +2065,7 @@ const RecommendedListView = React.memo(({
         Array.from(skippedTrackIdsRef.current),
         Array.from(allSeenTrackIdsRef.current),
         20,
+        cached?.sampledArtistNames || [],
       );
 
       if (moreRecs && moreRecs.length > 0) {
@@ -2055,15 +2079,20 @@ const RecommendedListView = React.memo(({
             ...Array.from(allSeenTrackIdsRef.current),
             ...filteredNew.map(r => r.track.id),
           ]));
+          const artistsFromNew = Array.from(new Set(filteredNew.map(r => r.track.artist.split(',')[0].trim()))).filter(Boolean);
+          const updatedSampledArtists = Array.from(new Set([
+            ...(cached?.sampledArtistNames || []),
+            ...artistsFromNew,
+          ])).slice(-30);
 
           setRecommendedRecs(updatedRecs);
           allSeenTrackIdsRef.current = new Set(newSeen);
 
-          const moodKey = `${user?.id ?? 'guest'}:${todayMood.id}`;
           setMoodRecommendationSession({
             key: moodKey,
             tracks: updatedRecs,
             seenTrackIds: newSeen,
+            sampledArtistNames: updatedSampledArtists,
             completedTrackIds: Array.from(completedTrackIdsRef.current),
             skippedTrackIds: Array.from(skippedTrackIdsRef.current),
           });

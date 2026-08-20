@@ -18,6 +18,8 @@ export interface MoodRecommendationSession {
   tracks: RecommendedTrack[];
   /** Every track shown by refreshes/pagination in this session, used to prevent repeats. */
   seenTrackIds: string[];
+  /** Sampled survey artists used for current session recommendations. */
+  sampledArtistNames?: string[];
   /** Tracks the user listened to completion (>85%). */
   completedTrackIds?: string[];
   /** Tracks the user skipped quickly (<15%). */

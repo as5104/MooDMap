@@ -125,7 +125,10 @@ export default function HomeScreen() {
       const options = forceFresh ? {
         excludeTrackIds: Array.from(recommendedTrackHistoryRef.current),
         refreshSeed: Date.now(),
-      } : {};
+        previousArtistNames: cachedSession?.sampledArtistNames || [],
+      } : {
+        previousArtistNames: cachedSession?.sampledArtistNames || [],
+      };
       const vipRecs = await getVIPRecommendations(moodType, moodScoreValue, 20, options);
       const recs = vipRecs.length > 0
         ? vipRecs
@@ -136,9 +139,15 @@ export default function HomeScreen() {
           ...(cachedSession?.key === moodKey ? cachedSession.seenTrackIds : []),
           ...recs.map(rec => rec.track.id),
         ]));
+        const artistsFromRecs = Array.from(new Set(recs.map(r => r.track.artist.split(',')[0].trim()))).filter(Boolean);
+        const sampledArtistNames = Array.from(new Set([
+          ...(cachedSession?.key === moodKey ? (cachedSession.sampledArtistNames || []) : []),
+          ...artistsFromRecs,
+        ])).slice(-30);
+
         setMoodRecs(recs);
         recommendedTrackHistoryRef.current = new Set(seenTrackIds);
-        setMoodRecommendationSession({ key: moodKey, tracks: recs, seenTrackIds });
+        setMoodRecommendationSession({ key: moodKey, tracks: recs, seenTrackIds, sampledArtistNames });
       }
     } catch (error) {
       console.warn('[Home] Could not refresh mood recommendations:', error);
