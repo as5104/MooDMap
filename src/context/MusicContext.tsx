@@ -724,10 +724,19 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     const loadFavorites = async () => {
       try {
+        let list: string[] = [];
         const stored = await SecureStore.getItemAsync('music_favorites');
         if (stored) {
-          setFavorites(JSON.parse(stored));
+          list = JSON.parse(stored);
         }
+        try {
+          const { getComfortTracks } = require('../services/comfortBoxService');
+          const comfortList = getComfortTracks();
+          for (const ct of comfortList) {
+            if (!list.includes(ct.id)) list.push(ct.id);
+          }
+        } catch (_) {}
+        setFavorites(list);
       } catch (e) {
         console.error('[MusicContext] Failed to load favorites:', e);
       }
@@ -1667,8 +1676,11 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const toggleFavorite = useCallback(async (trackId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    let isNowComfort = false;
     setFavorites(prev => {
-      const updated = prev.includes(trackId)
+      const isFav = prev.includes(trackId);
+      isNowComfort = !isFav;
+      const updated = isFav
         ? prev.filter(id => id !== trackId)
         : [...prev, trackId];
       // Persist asynchronously — fire-and-forget inside updater to avoid stale closure
@@ -1677,6 +1689,35 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       return updated;
     });
+
+    // Also sync to Comfort Box (comfort_tracks database)
+    try {
+      const activeTrack = currentTrackRef.current?.id === trackId
+        ? currentTrackRef.current
+        : queueRef.current?.find(t => t.id === trackId);
+
+      if (activeTrack) {
+        const { useAppStore } = require('../stores/appStore');
+        const userId = useAppStore.getState().user?.id;
+        const { toggleTrackComfort } = require('../services/comfortBoxService');
+        toggleTrackComfort(
+          {
+            id: activeTrack.id,
+            title: activeTrack.title,
+            artist: activeTrack.artist,
+            source: activeTrack.category,
+            cover: activeTrack.cover,
+            url: activeTrack.url,
+            duration: activeTrack.duration,
+          },
+          isNowComfort,
+          userId
+        );
+        useAppStore.getState().refreshData();
+      }
+    } catch (err) {
+      console.warn('[MusicContext] Failed to sync comfort track on toggleFavorite:', err);
+    }
   }, []);
 
   const toggleShuffle = useCallback(() => {

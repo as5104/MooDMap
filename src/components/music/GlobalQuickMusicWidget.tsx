@@ -22,6 +22,8 @@ import { useMusic } from '@/context/MusicContext';
 import { MusicCover } from '@/components/music/MusicCover';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
+import { useAppStore } from '@/stores/appStore';
+import { toggleTrackComfort, isTrackComfort } from '@/services/comfortBoxService';
 
 interface GlobalQuickMusicWidgetProps {
   inline?: boolean;
@@ -31,6 +33,13 @@ export const GlobalQuickMusicWidget: React.FC<GlobalQuickMusicWidgetProps> = () 
   const insets = useSafeAreaInsets();
   const segments = useSegments();
   const { currentTrack, isPlaying, pause, resume, next, prev } = useMusic();
+  const user = useAppStore((s) => s.user);
+  const dataVersion = useAppStore((s) => s.dataVersion);
+  const refreshData = useAppStore((s) => s.refreshData);
+
+  const isComfort = useMemo(() => {
+    return currentTrack ? isTrackComfort(currentTrack.id) : false;
+  }, [currentTrack, dataVersion]);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -211,6 +220,35 @@ export const GlobalQuickMusicWidget: React.FC<GlobalQuickMusicWidgetProps> = () 
 
             {/* Right side: Quick Transport Buttons */}
             <View style={styles.controlsRow}>
+              <Pressable
+                onPress={() => {
+                  if (!currentTrack) return;
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  toggleTrackComfort(
+                    {
+                      id: currentTrack.id,
+                      title: currentTrack.title,
+                      artist: currentTrack.artist,
+                      source: currentTrack.category,
+                      cover: currentTrack.cover,
+                      url: currentTrack.url,
+                      duration: currentTrack.duration,
+                    },
+                    !isComfort,
+                    user?.id
+                  );
+                  refreshData();
+                }}
+                hitSlop={6}
+                style={styles.controlBtn}
+              >
+                <Feather
+                  name="heart"
+                  size={13}
+                  color={isComfort ? '#F472B6' : 'rgba(255,255,255,0.4)'}
+                />
+              </Pressable>
+
               <Pressable onPress={handlePrev} hitSlop={6} style={styles.controlBtn}>
                 <Feather name="skip-back" size={13} color="#FFFFFF" />
               </Pressable>

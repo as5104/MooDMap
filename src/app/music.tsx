@@ -34,6 +34,7 @@ import Animated, {
   Easing,
   runOnJS,
   SharedValue,
+  useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -55,6 +56,7 @@ import { getSmartRecommendations, MOOD_GENRE_MAP } from '../services/recommendat
 import { formatDuration as spotifyFormatDur, getBestImage as spotifyGetBestImage } from '../services/spotify';
 import { useAppStore } from '../stores/appStore';
 import { useTierStore } from '../stores/tierStore';
+import { isTrackComfort } from '../services/comfortBoxService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1080,6 +1082,33 @@ const SpotifyListView = React.memo(({
     return playlistTracks.findIndex(t => 'spotify_' + t.id === currentTrack.id);
   }, [currentTrack, playlistTracks]);
 
+  const flatListRef = useRef<FlatList>(null);
+
+  const scrollToPlaying = useCallback(() => {
+    if (currentPlayingIndex >= 0 && flatListRef.current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      try {
+        flatListRef.current.scrollToIndex({
+          index: currentPlayingIndex,
+          animated: true,
+          viewPosition: 0,
+        });
+      } catch {
+        flatListRef.current.scrollToOffset({
+          offset: Math.max(0, currentPlayingIndex * 76),
+          animated: true,
+        });
+      }
+    }
+  }, [currentPlayingIndex]);
+
+  const handleScrollToIndexFailed = useCallback((info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
+    flatListRef.current?.scrollToOffset({
+      offset: Math.max(0, info.index * 76),
+      animated: true,
+    });
+  }, []);
+
   const getItemLayout = useCallback((data: any, index: number) => ({
     length: 68 + 8, // item height (68) + gap (8)
     offset: (68 + 8) * index,
@@ -1446,6 +1475,7 @@ const SpotifyListView = React.memo(({
           ) : (
             <View style={{ flex: 1, position: 'relative' }} onLayout={handleLayout}>
               <FlatList
+                ref={flatListRef}
                 data={filteredPlaylistTracks}
                 keyExtractor={(item, index) => `${item.id}-${index}`}
                 renderItem={renderSpotifyTrackItem}
@@ -1455,6 +1485,7 @@ const SpotifyListView = React.memo(({
                 maxToRenderPerBatch={15}
                 windowSize={10}
                 getItemLayout={getItemLayout}
+                onScrollToIndexFailed={handleScrollToIndexFailed}
                 removeClippedSubviews={true}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
@@ -1464,6 +1495,9 @@ const SpotifyListView = React.memo(({
                 currentPlayingIndex={currentPlayingIndex}
                 isScrolling={isScrollingShared}
                 listHeight={listHeight}
+                itemHeight={68}
+                itemGap={8}
+                onPress={scrollToPlaying}
               />
             </View>
           )}
@@ -1761,72 +1795,133 @@ const PlayingSongIndicator = React.memo(({
   currentPlayingIndex,
   isScrolling,
   listHeight,
+  itemHeight = 68,
+  itemGap = 8,
+  onPress,
 }: {
   scrollY: SharedValue<number>;
   currentPlayingIndex: number;
   isScrolling: SharedValue<boolean>;
   listHeight: number;
+  itemHeight?: number;
+  itemGap?: number;
+  onPress?: () => void;
 }) => {
   const insets = useSafeAreaInsets();
   const { currentTrack } = useMusic();
 
-  const itemY = currentPlayingIndex * 76;
-  const itemHeight = 68;
-  const itemBottomY = itemY + itemHeight;
+  const itemStride = itemHeight + itemGap;
+  const itemTopY = currentPlayingIndex * itemStride;
+  const itemBottomY = itemTopY + itemHeight;
+
+  const opacityShared = useSharedValue(0);
+  const scaleShared = useSharedValue(0);
+  const pressScaleShared = useSharedValue(1);
+  const translateYShared = useSharedValue(14);
+  const rotationShared = useSharedValue(0);
+
+  useAnimatedReaction(
+    () => {
+      if (currentPlayingIndex < 0 || listHeight <= 0) {
+        return { visible: false, isAbove: true, translateY: 14, rot: 0 };
+      }
+
+      const currentScrollY = scrollY.value;
+      const isScrollActive = isScrolling.value;
+
+      const hasMiniPlayer = !!currentTrack;
+      const miniPlayerHeight = hasMiniPlayer
+        ? Math.max(insets.bottom, 16) + 60 + 20
+        : Math.max(insets.bottom, 12);
+      const visibleViewportHeight = listHeight - miniPlayerHeight;
+
+      const isAbove = itemBottomY < currentScrollY + 6;
+      const isBelow = itemTopY > currentScrollY + visibleViewportHeight - 6;
+      const isOutOfView = isAbove || isBelow;
+      const bottomPos = Math.max(14, visibleViewportHeight - 60);
+
+      return {
+        visible: isScrollActive && isOutOfView,
+        isAbove,
+        translateY: isAbove ? 14 : bottomPos,
+        rot: isAbove ? 0 : 180,
+      };
+    },
+    (res, prev) => {
+      const isJustAppearing = (!prev || !prev.visible) && res.visible;
+
+      if (!prev || res.visible !== prev.visible) {
+        if (res.visible) {
+          // Noticeable, tactile spring pop entrance
+          opacityShared.value = withTiming(1, { duration: 120 });
+          scaleShared.value = withSpring(1, {
+            damping: 9,
+            stiffness: 280,
+            mass: 0.55,
+          });
+        } else {
+          // Crisp exit animation
+          opacityShared.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.quad) });
+          scaleShared.value = withTiming(0.3, { duration: 150, easing: Easing.in(Easing.quad) });
+        }
+      }
+
+      if (isJustAppearing) {
+        // Start slightly outside bounds and spring-slide into view with a bounce
+        translateYShared.value = res.isAbove ? -10 : res.translateY + 20;
+        translateYShared.value = withSpring(res.translateY, {
+          damping: 10,
+          stiffness: 240,
+          mass: 0.6,
+        });
+      } else if (!prev || res.translateY !== prev.translateY) {
+        translateYShared.value = withSpring(res.translateY, {
+          damping: 14,
+          stiffness: 220,
+          mass: 0.7,
+        });
+      }
+
+      if (!prev || res.rot !== prev.rot) {
+        rotationShared.value = withTiming(res.rot, {
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+        });
+      }
+    },
+    [currentPlayingIndex, listHeight, currentTrack, insets.bottom, itemStride, itemHeight, itemTopY, itemBottomY]
+  );
 
   const animatedStyle = useAnimatedStyle(() => {
-    // If invalid index or layout, hide completely
-    if (currentPlayingIndex === -1 || listHeight <= 0) {
-      return {
-        opacity: 0,
-        transform: [{ scale: 0 }]
-      };
-    }
-
-    const currentScrollY = scrollY.value;
-    const isScrollActive = isScrolling.value;
-
-    const hasMiniPlayer = !!currentTrack;
-    // Calculate the actual visible viewport height, taking the mini player into account
-    // miniPlayer is at bottom: Math.max(insets.bottom, 16), has height ~60, plus 16px safe buffer
-    const miniPlayerHeight = hasMiniPlayer
-      ? Math.max(insets.bottom, 16) + 60 + 16
-      : 0;
-    const visibleViewportHeight = listHeight - miniPlayerHeight;
-
-    // Check if the playing track is above or below the visible viewport
-    const isAbove = itemBottomY < currentScrollY;
-    const isBelow = itemY > currentScrollY + visibleViewportHeight;
-    const isOutOfView = isAbove || isBelow;
-
-    // Determine target opacity: show only when scrolling and track is out of view
-    const targetOpacity = (isScrollActive && isOutOfView) ? 1 : 0;
-
-    // Position the arrow: top of list if track is above, bottom of list if track is below
-    const targetTranslateY = isAbove
-      ? 12
-      : (isBelow ? visibleViewportHeight - 76 : listHeight / 2);
-
-    // Rotation: 0 deg (pointing UP) if above, 180 deg (pointing DOWN) if below
-    const targetRotation = isAbove ? '0deg' : '180deg';
-
     return {
-      opacity: withTiming(targetOpacity, { duration: 150 }),
+      opacity: opacityShared.value,
       transform: [
-        { translateY: withSpring(targetTranslateY, { damping: 18, stiffness: 150 }) },
-        { scale: withSpring(targetOpacity, { damping: 15, stiffness: 180 }) },
-        { rotate: withTiming(targetRotation, { duration: 200 }) }
+        { translateY: translateYShared.value },
+        { scale: scaleShared.value * pressScaleShared.value },
+        { rotate: `${rotationShared.value}deg` }
       ]
     };
-  }, [currentPlayingIndex, listHeight, currentTrack, insets.bottom]);
+  });
 
-  if (currentPlayingIndex === -1 || listHeight <= 0) return null;
+  if (currentPlayingIndex < 0 || listHeight <= 0) return null;
 
   return (
-    <Animated.View style={[styles.songPointerWrapper, animatedStyle]} pointerEvents="none">
-      <BlurView intensity={35} tint="dark" style={styles.songPointerBlur}>
-        <Feather name="chevron-up" size={20} color={Colors.accent.primary} />
-      </BlurView>
+    <Animated.View style={[styles.songPointerWrapper, animatedStyle]}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => {
+          pressScaleShared.value = withSpring(0.9, { damping: 12, stiffness: 400 });
+        }}
+        onPressOut={() => {
+          pressScaleShared.value = withSpring(1, { damping: 10, stiffness: 300 });
+        }}
+        hitSlop={12}
+        style={{ width: '100%', height: '100%' }}
+      >
+        <BlurView intensity={45} tint="dark" style={styles.songPointerBlur}>
+          <Feather name="chevron-up" size={20} color={Colors.accent.primary} />
+        </BlurView>
+      </Pressable>
     </Animated.View>
   );
 });
@@ -2168,6 +2263,33 @@ const RecommendedListView = React.memo(({
     index,
   }), []);
 
+  const flatListRef = useRef<FlatList>(null);
+
+  const scrollToPlaying = useCallback(() => {
+    if (currentPlayingIndex >= 0 && flatListRef.current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      try {
+        flatListRef.current.scrollToIndex({
+          index: currentPlayingIndex,
+          animated: true,
+          viewPosition: 0,
+        });
+      } catch {
+        flatListRef.current.scrollToOffset({
+          offset: Math.max(0, currentPlayingIndex * 86),
+          animated: true,
+        });
+      }
+    }
+  }, [currentPlayingIndex]);
+
+  const handleScrollToIndexFailed = useCallback((info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
+    flatListRef.current?.scrollToOffset({
+      offset: Math.max(0, info.index * 86),
+      animated: true,
+    });
+  }, []);
+
   const moodColor = todayMood ? (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) : Colors.accent.primary;
   const moodLabel = todayMood ? (MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.label ?? 'For Your Mood') : 'Recommended Music';
   const moodIcon = todayMood ? (MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') : 'music';
@@ -2398,6 +2520,7 @@ const RecommendedListView = React.memo(({
       ) : (
         <View style={{ flex: 1, position: 'relative' }} onLayout={handleLayout}>
           <FlatList
+            ref={flatListRef}
             data={filteredRecs}
             keyExtractor={(item, index) => `${item.track.id}-${index}`}
             renderItem={renderRecommendedItem}
@@ -2407,6 +2530,7 @@ const RecommendedListView = React.memo(({
             maxToRenderPerBatch={15}
             windowSize={10}
             getItemLayout={getItemLayout}
+            onScrollToIndexFailed={handleScrollToIndexFailed}
             removeClippedSubviews={true}
             onScroll={handleScroll}
             scrollEventThrottle={16}
@@ -2462,6 +2586,9 @@ const RecommendedListView = React.memo(({
             currentPlayingIndex={currentPlayingIndex}
             isScrolling={isScrollingShared}
             listHeight={listHeight}
+            itemHeight={78}
+            itemGap={8}
+            onPress={scrollToPlaying}
           />
         </View>
       )}
@@ -2832,6 +2959,33 @@ const ListView = React.memo(({
     );
   }, [currentTrack?.id, handleTrackItemPress, handleTrackMorePress]);
 
+  const flatListRef = useRef<FlatList>(null);
+
+  const scrollToPlaying = useCallback(() => {
+    if (currentPlayingIndex >= 0 && flatListRef.current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      try {
+        flatListRef.current.scrollToIndex({
+          index: currentPlayingIndex,
+          animated: true,
+          viewPosition: 0,
+        });
+      } catch {
+        flatListRef.current.scrollToOffset({
+          offset: Math.max(0, currentPlayingIndex * 76),
+          animated: true,
+        });
+      }
+    }
+  }, [currentPlayingIndex]);
+
+  const handleScrollToIndexFailed = useCallback((info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
+    flatListRef.current?.scrollToOffset({
+      offset: Math.max(0, info.index * 76),
+      animated: true,
+    });
+  }, []);
+
   const getItemLayout = useCallback((data: any, index: number) => ({
     length: 68 + 8, // item height (68) + gap (8)
     offset: (68 + 8) * index,
@@ -3151,6 +3305,7 @@ const ListView = React.memo(({
           ) : (
             <View style={{ flex: 1, position: 'relative' }} onLayout={handleLayout}>
               <FlatList
+                ref={flatListRef}
                 data={tracksListToRender}
                 keyExtractor={(item) => item.id}
                 renderItem={renderTrackItem}
@@ -3160,6 +3315,7 @@ const ListView = React.memo(({
                 maxToRenderPerBatch={15}
                 windowSize={10}
                 getItemLayout={getItemLayout}
+                onScrollToIndexFailed={handleScrollToIndexFailed}
                 removeClippedSubviews={true}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
@@ -3169,6 +3325,9 @@ const ListView = React.memo(({
                 currentPlayingIndex={currentPlayingIndex}
                 isScrolling={isScrollingShared}
                 listHeight={listHeight}
+                itemHeight={68}
+                itemGap={8}
+                onPress={scrollToPlaying}
               />
             </View>
           )}
@@ -3447,7 +3606,7 @@ const PlayerView = React.memo(({
   }));
   if (!currentTrack) return null;
 
-  const isCurrentFav = favorites.includes(currentTrack.id);
+  const isCurrentFav = favorites.includes(currentTrack.id) || isTrackComfort(currentTrack.id);
   const isPosterMode = playerViewMode === 'poster';
 
   return (
@@ -3740,7 +3899,7 @@ const PlayerView = React.memo(({
                 </Pressable>
               </View>
 
-              {/* Favourite row */}
+              {/* Favourite row — adds/removes track in Comfort Box */}
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
@@ -3752,11 +3911,10 @@ const PlayerView = React.memo(({
                 <Feather
                   name="heart"
                   size={18}
-                  color={isCurrentFav ? Colors.error : '#FFF'}
-                  fill={isCurrentFav ? Colors.error : 'transparent'}
+                  color={isCurrentFav ? '#F472B6' : '#FFF'}
                 />
-                <Text style={styles.menuOptionText}>
-                  {isCurrentFav ? 'Remove from Favourites' : 'Add to Favourites'}
+                <Text style={[styles.menuOptionText, isCurrentFav && { color: '#F472B6' }]}>
+                  {isCurrentFav ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
               </Pressable>
 
