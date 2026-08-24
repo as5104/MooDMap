@@ -1,5 +1,14 @@
 /**
- * MoodMap — Data Transfer Service
+ * MoodMap — Data Transfer Service (v3)
+ * Full backup & restore for:
+ * - Mood Entries (scores, metrics, tags, notes)
+ * - Journal Entries (freewrite & prompts)
+ * - Time Letters (future_self, past_self, someone, passwords & reveal dates)
+ * - Comfort Box (comfort journals & comfort audio tracks)
+ * - Memory Matrix Best Scores & User Settings
+ * - Streaks & Badges
+ * - Mood Music Tags & Music Preferences
+ * - Custom Profile Avatar
  */
 
 import { Share } from 'react-native';
@@ -9,67 +18,91 @@ import * as Sharing from 'expo-sharing';
 import { queryAll, queryFirst, execute } from '@/db/client';
 import { customAlert } from '@/components/ui';
 import { getCustomAvatarUri, saveCustomAvatar } from './profileService';
+import { getSetting, saveSetting } from './settingsService';
 
-const EXPORT_VERSION = 2;
+const EXPORT_VERSION = 3;
 
-interface ExportData {
+export interface ExportData {
   version: number;
   exportedAt: string;
   app: string;
   userId: string;
   data: {
     mood_entries: any[];
-    journal_entries: any[];
+    journal_entries: any[];          // subtype !== 'letter'
+    letters: any[];                  // subtype === 'letter' (Time Letters)
+    comfort_tracks: any[];           // Comfort Box saved songs
     streaks: any[];
     badges: any[];
-    user_settings: any[];
-    music_preferences: any[];          // v2+: music taste survey data
-    profile_picture_base64?: string;   // v2+: base64-encoded avatar image
-    profile_picture_ext?: string;      // v2+: file extension e.g. '.jpg'
+    user_settings: any[];            // Settings, Memory Matrix high score, custom timer
+    mood_music_tags?: any[];         // Mood-tagged tracks
+    music_preferences?: any[];       // VIP music taste preferences
+    profile_picture_base64?: string; // base64-encoded avatar image
+    profile_picture_ext?: string;    // file extension e.g. '.jpg'
   };
 }
 
 /**
- * Export all data for a user as a JSON file and share it.
+ * Export all data for a user as a structured JSON file and share it.
  */
 export async function exportUserData(userId: string): Promise<boolean> {
   try {
+    // 1. Mood entries
     const moodEntries = queryAll(
       'SELECT * FROM mood_entries WHERE user_id = ? ORDER BY date DESC',
       [userId]
     );
+
+    // 2. Regular journals (excluding time letters)
     const journalEntries = queryAll(
-      'SELECT * FROM journal_entries WHERE user_id = ? ORDER BY date DESC',
+      "SELECT * FROM journal_entries WHERE user_id = ? AND (subtype != 'letter' OR subtype IS NULL) ORDER BY date DESC",
       [userId]
     );
+
+    // 3. Time Letters
+    const letters = queryAll(
+      "SELECT * FROM journal_entries WHERE user_id = ? AND subtype = 'letter' ORDER BY date DESC",
+      [userId]
+    );
+
+    // 4. Comfort Tracks
+    const comfortTracks = queryAll(
+      'SELECT * FROM comfort_tracks WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
+
+    // 5. Streaks & Badges
     const streaks = queryAll('SELECT * FROM streaks WHERE user_id = ?', [userId]);
     const badges = queryAll('SELECT * FROM badges WHERE user_id = ?', [userId]);
+
+    // 6. User settings (Memory matrix best level, custom pause timer, preferences)
     const userSettings = queryAll('SELECT * FROM user_settings');
 
-    // v2: Music preferences (music taste survey)
+    // 7. Mood-music tags & Music preferences
+    const moodMusicTags = queryAll(
+      'SELECT * FROM mood_music_tags WHERE user_id = ?',
+      [userId]
+    );
     const musicPreferences = queryAll(
       'SELECT * FROM music_preferences WHERE user_id = ?',
       [userId]
     );
 
-    // v2: Profile picture — read as base64
+    // 8. Custom Profile picture — read as base64
     let profilePictureBase64: string | undefined;
     let profilePictureExt: string | undefined;
     try {
       const avatarUri = getCustomAvatarUri();
       if (avatarUri) {
-        // Detect extension
         const cleanUri = avatarUri.split('?')[0];
         const lastDot = cleanUri.lastIndexOf('.');
         profilePictureExt = lastDot !== -1 ? cleanUri.substring(lastDot).toLowerCase() : '.jpg';
 
-        // Read as base64 — try fast native bridge first
         try {
           profilePictureBase64 = await LegacyFileSystem.readAsStringAsync(avatarUri, {
             encoding: LegacyFileSystem.EncodingType.Base64,
           });
         } catch {
-          // Fallback to arrayBuffer if legacy fails
           try {
             const file = new File(avatarUri);
             if (file.exists) {
@@ -99,9 +132,12 @@ export async function exportUserData(userId: string): Promise<boolean> {
       data: {
         mood_entries: moodEntries,
         journal_entries: journalEntries,
+        letters: letters,
+        comfort_tracks: comfortTracks,
         streaks,
         badges,
         user_settings: userSettings,
+        mood_music_tags: moodMusicTags,
         music_preferences: musicPreferences,
         profile_picture_base64: profilePictureBase64,
         profile_picture_ext: profilePictureExt,
@@ -109,13 +145,18 @@ export async function exportUserData(userId: string): Promise<boolean> {
     };
 
     const totalItems =
-      moodEntries.length + journalEntries.length + streaks.length + badges.length;
+      moodEntries.length +
+      journalEntries.length +
+      letters.length +
+      comfortTracks.length +
+      streaks.length +
+      badges.length;
 
     const json = JSON.stringify(exportPayload, null, 2);
     const dateStr = new Date().toISOString().split('T')[0];
     const fileName = `moodmap-backup-${dateStr}.json`;
 
-    // Write to cache directory using new File API
+    // Write to cache directory using File API
     const file = new File(Paths.cache, fileName);
     if (file.exists) {
       file.delete();
@@ -134,9 +175,15 @@ export async function exportUserData(userId: string): Promise<boolean> {
       await Share.share({ message: json, title: fileName });
     }
 
+    const summaryParts: string[] = [];
+    if (moodEntries.length > 0) summaryParts.push(`${moodEntries.length} moods`);
+    if (journalEntries.length > 0) summaryParts.push(`${journalEntries.length} journals`);
+    if (letters.length > 0) summaryParts.push(`${letters.length} time letters`);
+    if (comfortTracks.length > 0) summaryParts.push(`${comfortTracks.length} comfort songs`);
+
     customAlert(
       'Export Complete',
-      `Exported ${totalItems} items (${moodEntries.length} moods, ${journalEntries.length} journals).`,
+      `Exported ${totalItems} items (${summaryParts.join(', ')}).`,
     );
     return true;
   } catch (error: any) {
@@ -148,12 +195,9 @@ export async function exportUserData(userId: string): Promise<boolean> {
 
 /**
  * Import data from a JSON backup file.
- * Merges with existing data — skips duplicates by ID.
- * Supports v1 (no music prefs/avatar) and v2+ backups.
  */
 export async function importUserData(currentUserId: string): Promise<boolean> {
   try {
-    // Use the new File.pickFileAsync API
     const result = await File.pickFileAsync({
       mimeTypes: ['application/json'],
     });
@@ -202,65 +246,202 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
     const {
       mood_entries = [],
       journal_entries = [],
+      letters = [],
+      comfort_tracks = [],
       streaks = [],
       badges = [],
+      user_settings = [],
+      mood_music_tags = [],
       music_preferences = [],
       profile_picture_base64,
       profile_picture_ext,
     } = parsed.data;
 
-    // Build summary for confirmation dialog
-    const totalImportItems = mood_entries.length + journal_entries.length;
+    // Detect if letters were embedded in journal_entries (v1/v2 legacy backups)
+    const separateJournals: any[] = [];
+    const separateLetters: any[] = [...letters];
+
+    for (const j of journal_entries) {
+      if (j.subtype === 'letter') {
+        // If not already in letters array, add it
+        if (!separateLetters.some((l) => l.id === j.id)) {
+          separateLetters.push(j);
+        }
+      } else {
+        separateJournals.push(j);
+      }
+    }
+
+    // Build rich summary for confirmation dialog
+    const summaryParts: string[] = [];
+    if (mood_entries.length > 0) summaryParts.push(`${mood_entries.length} moods`);
+    if (separateJournals.length > 0) summaryParts.push(`${separateJournals.length} journals`);
+    if (separateLetters.length > 0) summaryParts.push(`${separateLetters.length} time letters`);
+    if (comfort_tracks.length > 0) summaryParts.push(`${comfort_tracks.length} comfort songs`);
+    if (user_settings.length > 0) summaryParts.push(`user settings & scores`);
+
+    const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'backup data';
 
     return new Promise((resolve) => {
       customAlert(
         'Import Data',
-        `Found ${totalImportItems} items (${mood_entries.length} moods, ${journal_entries.length} journals).\n\nExisting data will be preserved. Continue?`,
+        `Found: ${summaryText}.\n\nExisting data and letter lock states will be preserved. Continue?`,
         [
           { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
           {
             text: 'Import',
             onPress: async () => {
               try {
-                let imported = 0;
+                let importedCount = 0;
 
+                // 1. Restore Mood Entries
                 for (const entry of mood_entries) {
                   const exists = queryAll('SELECT id FROM mood_entries WHERE id = ?', [entry.id]);
                   if (exists.length === 0) {
                     execute(
-                      `INSERT INTO mood_entries (id, created_at, updated_at, date, mood_type, mood_score, energy_level, stress_level, tags, note, time_of_day, user_id)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      `INSERT INTO mood_entries (
+                        id, created_at, updated_at, date, mood_type, mood_score,
+                        energy_level, stress_level, sleep_hours, sleep_quality,
+                        tags, note, time_of_day, user_id
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                       [
-                        entry.id, entry.created_at, entry.updated_at, entry.date,
-                        entry.mood_type, entry.mood_score, entry.energy_level,
-                        entry.stress_level, entry.tags, entry.note, entry.time_of_day,
+                        entry.id,
+                        entry.created_at,
+                        entry.updated_at,
+                        entry.date,
+                        entry.mood_type,
+                        entry.mood_score,
+                        entry.energy_level ?? null,
+                        entry.stress_level ?? null,
+                        entry.sleep_hours ?? null,
+                        entry.sleep_quality ?? null,
+                        entry.tags ? (typeof entry.tags === 'string' ? entry.tags : JSON.stringify(entry.tags)) : null,
+                        entry.note ?? null,
+                        entry.time_of_day ?? null,
                         currentUserId,
                       ]
                     );
-                    imported++;
+                    importedCount++;
                   }
                 }
 
-                for (const entry of journal_entries) {
+                // 2. Restore Journal Entries (with is_comfort and prompt details)
+                for (const entry of separateJournals) {
                   const exists = queryAll('SELECT id FROM journal_entries WHERE id = ?', [entry.id]);
                   if (exists.length === 0) {
                     execute(
-                      `INSERT INTO journal_entries (id, created_at, updated_at, date, title, content, mood_entry_id, prompt_used, images, user_id)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      `INSERT INTO journal_entries (
+                        id, created_at, updated_at, date, title, content,
+                        mood_entry_id, prompt_used, images, is_comfort,
+                        last_shown_at, subtype, recipient, recipient_name,
+                        reveal_at, lock_keyword, lock_hint, user_id
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                       [
-                        entry.id, entry.created_at, entry.updated_at, entry.date,
-                        entry.title, entry.content, entry.mood_entry_id,
-                        entry.prompt_used, entry.images,
+                        entry.id,
+                        entry.created_at,
+                        entry.updated_at,
+                        entry.date,
+                        entry.title ?? null,
+                        entry.content,
+                        entry.mood_entry_id ?? null,
+                        entry.prompt_used ?? null,
+                        entry.images ? (typeof entry.images === 'string' ? entry.images : JSON.stringify(entry.images)) : null,
+                        entry.is_comfort ? 1 : 0,
+                        entry.last_shown_at ?? null,
+                        'journal',
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
                         currentUserId,
                       ]
                     );
-                    imported++;
+                    importedCount++;
                   }
                 }
 
+                // 3. Restore Time Letters (Preserving exact reveal date, password lock & hints)
+                for (const letter of separateLetters) {
+                  const exists = queryAll('SELECT id FROM journal_entries WHERE id = ?', [letter.id]);
+                  if (exists.length === 0) {
+                    execute(
+                      `INSERT INTO journal_entries (
+                        id, created_at, updated_at, date, title, content,
+                        mood_entry_id, prompt_used, images, is_comfort,
+                        last_shown_at, subtype, recipient, recipient_name,
+                        reveal_at, lock_keyword, lock_hint, user_id
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      [
+                        letter.id,
+                        letter.created_at,
+                        letter.updated_at,
+                        letter.date,
+                        letter.title ?? null,
+                        letter.content,
+                        letter.mood_entry_id ?? null,
+                        letter.prompt_used ?? null,
+                        letter.images ? (typeof letter.images === 'string' ? letter.images : JSON.stringify(letter.images)) : null,
+                        letter.is_comfort ? 1 : 0,
+                        letter.last_shown_at ?? null,
+                        'letter',
+                        letter.recipient || 'future_self',
+                        letter.recipient_name ?? null,
+                        letter.reveal_at ?? null,
+                        letter.lock_keyword ?? null,
+                        letter.lock_hint ?? null,
+                        currentUserId,
+                      ]
+                    );
+                    importedCount++;
+                  }
+                }
+
+                // 4. Restore Comfort Tracks
+                for (const track of comfort_tracks) {
+                  const exists = queryAll('SELECT id FROM comfort_tracks WHERE id = ?', [track.id]);
+                  if (exists.length === 0) {
+                    execute(
+                      `INSERT INTO comfort_tracks (
+                        id, track_name, artist_name, track_source, album_art,
+                        audio_url, duration, is_comfort, last_shown_at, created_at, user_id
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      [
+                        track.id,
+                        track.track_name,
+                        track.artist_name,
+                        track.track_source,
+                        track.album_art ?? null,
+                        track.audio_url ?? null,
+                        track.duration ?? null,
+                        track.is_comfort ?? 1,
+                        track.last_shown_at ?? null,
+                        track.created_at ?? new Date().toISOString(),
+                        currentUserId,
+                      ]
+                    );
+                    importedCount++;
+                  }
+                }
+
+                // 5. Restore User Settings (Memory Matrix high score, custom timer, etc.)
+                for (const setting of user_settings) {
+                  if (setting.key && setting.value != null) {
+                    if (setting.key === 'memory_matrix_best_level') {
+                      const currentBest = parseInt(getSetting('memory_matrix_best_level', '1'), 10) || 1;
+                      const importedBest = parseInt(setting.value, 10) || 1;
+                      saveSetting('memory_matrix_best_level', String(Math.max(currentBest, importedBest)));
+                    } else {
+                      saveSetting(setting.key, String(setting.value));
+                    }
+                    importedCount++;
+                  }
+                }
+
+                // 6. Restore Streaks
                 for (const entry of streaks) {
                   const exists = queryAll(
-                    "SELECT id FROM streaks WHERE user_id = ? AND type = ?",
+                    'SELECT id FROM streaks WHERE user_id = ? AND type = ?',
                     [currentUserId, entry.type]
                   );
                   if (exists.length === 0) {
@@ -269,12 +450,15 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
                        VALUES (?, ?, ?, ?, ?, ?, ?)`,
                       [
                         `streak_${entry.type}_${currentUserId}`,
-                        entry.type, entry.current_streak, entry.longest_streak,
-                        entry.last_active_date, entry.total_entries,
+                        entry.type,
+                        entry.current_streak,
+                        entry.longest_streak,
+                        entry.last_active_date,
+                        entry.total_entries,
                         currentUserId,
                       ]
                     );
-                    imported++;
+                    importedCount++;
                   } else {
                     execute(
                       `UPDATE streaks SET
@@ -283,14 +467,18 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
                         total_entries = MAX(total_entries, ?)
                        WHERE user_id = ? AND type = ?`,
                       [
-                        entry.current_streak, entry.longest_streak,
-                        entry.total_entries, currentUserId, entry.type,
+                        entry.current_streak,
+                        entry.longest_streak,
+                        entry.total_entries,
+                        currentUserId,
+                        entry.type,
                       ]
                     );
-                    imported++;
+                    importedCount++;
                   }
                 }
 
+                // 7. Restore Badges
                 for (const entry of badges) {
                   const exists = queryAll(
                     'SELECT id FROM badges WHERE badge_key = ? AND user_id = ?',
@@ -302,17 +490,48 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
                        VALUES (?, ?, ?, ?, ?, ?)`,
                       [
                         `badge_${entry.badge_key}_${currentUserId}`,
-                        entry.badge_key, entry.unlocked_at,
-                        entry.progress, entry.target,
+                        entry.badge_key,
+                        entry.unlocked_at,
+                        entry.progress,
+                        entry.target,
                         currentUserId,
                       ]
                     );
-                    imported++;
+                    importedCount++;
                   }
                 }
 
-                // v2+: Restore music preferences (upsert)
-                if (music_preferences.length > 0) {
+                // 8. Restore Mood-Music Tags
+                if (mood_music_tags && mood_music_tags.length > 0) {
+                  for (const tag of mood_music_tags) {
+                    const exists = queryAll('SELECT id FROM mood_music_tags WHERE id = ?', [tag.id]);
+                    if (exists.length === 0) {
+                      execute(
+                        `INSERT INTO mood_music_tags (
+                          id, mood_entry_id, mood_type, track_id, track_name,
+                          artist_name, track_source, album_art, play_count, last_played_at, user_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        [
+                          tag.id,
+                          tag.mood_entry_id ?? null,
+                          tag.mood_type,
+                          tag.track_id,
+                          tag.track_name,
+                          tag.artist_name,
+                          tag.track_source,
+                          tag.album_art ?? null,
+                          tag.play_count ?? 1,
+                          tag.last_played_at ?? new Date().toISOString(),
+                          currentUserId,
+                        ]
+                      );
+                      importedCount++;
+                    }
+                  }
+                }
+
+                // 9. Restore Music Preferences (VIP users)
+                if (music_preferences && music_preferences.length > 0) {
                   for (const pref of music_preferences) {
                     try {
                       execute(
@@ -320,43 +539,41 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
                          VALUES (?, ?, ?)`,
                         [currentUserId, pref.preferences, pref.updated_at ?? new Date().toISOString()]
                       );
-                      imported++;
+                      importedCount++;
                     } catch (prefErr) {
                       console.warn('[Import] Failed to restore music preferences:', prefErr);
                     }
                   }
                 }
 
-                // v2+: Restore profile picture
+                // 10. Restore Profile Picture
                 if (profile_picture_base64 && profile_picture_ext) {
                   try {
-                    // Decode base64 back to a temp file
                     const tempFileName = `import_avatar_${Date.now()}${profile_picture_ext}`;
                     const tempFile = new File(Paths.cache, tempFileName);
 
-                    // Write base64 string directly using legacy API (supports base64 write)
                     await LegacyFileSystem.writeAsStringAsync(
                       tempFile.uri,
                       profile_picture_base64,
                       { encoding: LegacyFileSystem.EncodingType.Base64 }
                     );
 
-                    // Save through profileService (handles extension, directory, settings key)
                     const mimeType =
-                      profile_picture_ext === '.png' ? 'image/png'
-                        : profile_picture_ext === '.webp' ? 'image/webp'
+                      profile_picture_ext === '.png'
+                        ? 'image/png'
+                        : profile_picture_ext === '.webp'
+                          ? 'image/webp'
                           : 'image/jpeg';
                     await saveCustomAvatar(tempFile.uri, mimeType, profile_picture_ext);
 
-                    // Clean up temp file
                     try { tempFile.delete(); } catch { /* ignore */ }
+                    importedCount++;
                   } catch (avatarErr) {
                     console.warn('[Import] Failed to restore profile picture:', avatarErr);
-                    // Non-fatal — rest of import still succeeds
                   }
                 }
 
-                customAlert('Import Complete', `Imported ${imported} items.`);
+                customAlert('Import Complete', `Successfully imported ${importedCount} items.`);
                 resolve(true);
               } catch (err: any) {
                 console.error('[Import] Failed:', err);

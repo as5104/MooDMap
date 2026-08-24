@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -75,9 +76,16 @@ export function UpdateModal({ visible, updateInfo, onDismiss }: UpdateModalProps
               <Feather name="file-text" size={14} color="rgba(255,255,255,0.6)" />
               <Text style={styles.notesHeader}>What&apos;s New</Text>
             </View>
-            <Text style={styles.notesText} numberOfLines={4}>
-              {updateInfo.releaseNotes || 'Includes performance updates, bug fixes, and user experience enhancements.'}
-            </Text>
+            <ScrollView
+              style={styles.notesScroll}
+              contentContainerStyle={styles.notesScrollContent}
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+            >
+              <Text style={styles.notesText}>
+                {updateInfo.releaseNotes || 'Includes performance updates, bug fixes, and user experience enhancements.'}
+              </Text>
+            </ScrollView>
           </View>
 
           {/* Download Progress Bar when downloading */}
@@ -176,6 +184,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.6)',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  notesScroll: {
+    maxHeight: 140,
+  },
+  notesScrollContent: {
+    paddingVertical: 2,
   },
   notesText: {
     fontFamily: Fonts.body,

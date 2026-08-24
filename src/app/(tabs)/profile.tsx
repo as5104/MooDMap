@@ -14,6 +14,7 @@ import {
   Platform,
   Image,
   Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import Animated, {
@@ -896,95 +897,116 @@ export default function ProfileScreen() {
       <Modal
         transparent
         animationType="fade"
+        statusBarTranslucent
         visible={showEditModal}
         onRequestClose={() => !isSavingProfile && setShowEditModal(false)}
       >
         <View style={styles.editOverlay}>
-          <GlassCard intensity="strong" padding="lg" style={styles.editModalCard}>
-            {/* Header */}
-            <View style={styles.editHeader}>
-              <Text style={styles.editTitle}>Edit Profile</Text>
-              <Pressable
-                onPress={() => !isSavingProfile && setShowEditModal(false)}
-                hitSlop={12}
-              >
-                <Feather name="x" size={20} color="rgba(255,255,255,0.6)" />
-              </Pressable>
-            </View>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => !isSavingProfile && setShowEditModal(false)}
+          />
 
-            {/* Avatar Preview & Actions */}
-            <View style={styles.editAvatarSection}>
-              <View style={styles.editAvatarPreview}>
-                {modalPreviewAvatarUrl ? (
-                  <Image
-                    source={{ uri: modalPreviewAvatarUrl }}
-                    style={styles.editAvatarImg}
-                  />
-                ) : (
-                  <View style={[styles.avatar, styles.editAvatarFallback]}>
-                    <Text style={[styles.avatarText, { fontSize: 28 }]}>
-                      {(editName || firstName).charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.editAvatarBtnRow}>
-                <Pressable style={styles.editPhotoBtn} onPress={handlePickAvatar}>
-                  <Feather name="camera" size={14} color={Colors.accent.primary} />
-                  <Text style={styles.editPhotoBtnText}>Change Photo</Text>
-                </Pressable>
-                {(pendingAvatarAction === 'set' || (Boolean(customAvatarUri) && pendingAvatarAction !== 'remove')) && (
-                  <Pressable style={styles.editPhotoBtn} onPress={handleRemoveAvatar}>
-                    <Feather name="trash-2" size={14} color={Colors.accent.coral} />
-                    <Text style={[styles.editPhotoBtnText, { color: Colors.accent.coral }]}>Remove</Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+            style={styles.editKeyboardAvoid}
+            pointerEvents="box-none"
+          >
+            <ScrollView
+              contentContainerStyle={styles.editScrollContainer}
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              pointerEvents="box-none"
+            >
+              <GlassCard intensity="strong" padding="lg" style={styles.editModalCard}>
+                {/* Header */}
+                <View style={styles.editHeader}>
+                  <Text style={styles.editTitle}>Edit Profile</Text>
+                  <Pressable
+                    onPress={() => !isSavingProfile && setShowEditModal(false)}
+                    hitSlop={12}
+                  >
+                    <Feather name="x" size={20} color="rgba(255,255,255,0.6)" />
                   </Pressable>
-                )}
-              </View>
-              <Text style={styles.editPhotoHint}>
-                JPEG, PNG, or WebP • Max 5 MB
-              </Text>
-            </View>
+                </View>
 
-            {/* Name Input */}
-            <View style={styles.editInputGroup}>
-              <Text style={styles.editLabel}>Display Name</Text>
-              <TextInput
-                style={styles.editInput}
-                value={editName}
-                onChangeText={setEditName}
-                placeholder="Your name"
-                placeholderTextColor="rgba(255,255,255,0.3)"
-                maxLength={30}
-                autoCapitalize="words"
-                editable={!isSavingProfile}
-              />
-            </View>
+                {/* Avatar Preview & Actions */}
+                <View style={styles.editAvatarSection}>
+                  <View style={styles.editAvatarPreview}>
+                    {modalPreviewAvatarUrl ? (
+                      <Image
+                        source={{ uri: modalPreviewAvatarUrl }}
+                        style={styles.editAvatarImg}
+                      />
+                    ) : (
+                      <View style={[styles.avatar, styles.editAvatarFallback]}>
+                        <Text style={[styles.avatarText, { fontSize: 28 }]}>
+                          {(editName || firstName).charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.editAvatarBtnRow}>
+                    <Pressable style={styles.editPhotoBtn} onPress={handlePickAvatar}>
+                      <Feather name="camera" size={14} color={Colors.accent.primary} />
+                      <Text style={styles.editPhotoBtnText}>Change Photo</Text>
+                    </Pressable>
+                    {(pendingAvatarAction === 'set' || (Boolean(customAvatarUri) && pendingAvatarAction !== 'remove')) && (
+                      <Pressable style={styles.editPhotoBtn} onPress={handleRemoveAvatar}>
+                        <Feather name="trash-2" size={14} color={Colors.accent.coral} />
+                        <Text style={[styles.editPhotoBtnText, { color: Colors.accent.coral }]}>Remove</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  <Text style={styles.editPhotoHint}>
+                    JPEG, PNG, or WebP • Max 5 MB
+                  </Text>
+                </View>
 
-            {/* Actions */}
-            <View style={styles.editBtnRow}>
-              <Pressable
-                style={styles.editCancelBtn}
-                onPress={() => setShowEditModal(false)}
-                disabled={isSavingProfile}
-              >
-                <Text style={styles.editCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.editSaveBtn, isSavingProfile && { opacity: 0.6 }]}
-                onPress={handleSaveProfile}
-                disabled={isSavingProfile}
-              >
-                {isSavingProfile ? (
-                  <ActivityIndicator size="small" color="#000" />
-                ) : (
-                  <>
-                    <Feather name="check" size={16} color="#000" />
-                    <Text style={styles.editSaveText}>Save</Text>
-                  </>
-                )}
-              </Pressable>
-            </View>
-          </GlassCard>
+                {/* Name Input */}
+                <View style={styles.editInputGroup}>
+                  <Text style={styles.editLabel}>Display Name</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editName}
+                    onChangeText={setEditName}
+                    placeholder="Your name"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    maxLength={30}
+                    autoCapitalize="words"
+                    editable={!isSavingProfile}
+                  />
+                </View>
+
+                {/* Actions */}
+                <View style={styles.editBtnRow}>
+                  <Pressable
+                    style={styles.editCancelBtn}
+                    onPress={() => setShowEditModal(false)}
+                    disabled={isSavingProfile}
+                  >
+                    <Text style={styles.editCancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.editSaveBtn, isSavingProfile && { opacity: 0.6 }]}
+                    onPress={handleSaveProfile}
+                    disabled={isSavingProfile}
+                  >
+                    {isSavingProfile ? (
+                      <ActivityIndicator size="small" color="#000" />
+                    ) : (
+                      <>
+                        <Feather name="check" size={16} color="#000" />
+                        <Text style={styles.editSaveText}>Save</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              </GlassCard>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </GradientBackground>
@@ -1512,9 +1534,16 @@ const styles = StyleSheet.create({
   editOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
+  },
+  editKeyboardAvoid: {
+    flex: 1,
+  },
+  editScrollContainer: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xl,
   },
   editModalCard: {
     width: '100%',

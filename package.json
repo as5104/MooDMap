@@ -1,7 +1,7 @@
 {
   "name": "moodmap",
   "main": "expo-router/entry",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",
     "@expo-google-fonts/sora": "^0.4.2",
