@@ -12,7 +12,8 @@ export type SuggestionType =
   | 'breathing' | 'calming_music' | 'reflection'
   | 'gratitude' | 'grounding' | 'pause_timer'
   | 'rest' | 'productivity' | 'meditation'
-  | 'share_win';
+  | 'share_win' | 'memory_matrix' | 'letters'
+  | 'comfort_box' | 'journal';
 
 export interface MoodDefinition {
   type: MoodType;

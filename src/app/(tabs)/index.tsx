@@ -5,6 +5,7 @@
 import { MusicCover } from '@/components/music/MusicCover';
 import { GlassCard, GradientBackground, JournalIllustration, MetricCard, MoodHistoryIllustration, WeeklyMoodRow } from '@/components/ui';
 import { MoodFace } from '@/components/ui/MoodFace';
+import { DailyWisdomDeck } from '@/components/home/DailyWisdomDeck';
 import { Colors } from '@/constants/colors';
 import { Radius, Shadows, Spacing, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
 import { MOOD_MAP, type MoodType } from '@/constants/moods';
@@ -14,6 +15,7 @@ import { Fonts, FontSizes } from '@/constants/typography';
 import { TRACKS_LIBRARY, useMusic } from '@/context/MusicContext';
 import { useSpotify } from '@/hooks/useSpotify';
 import { getJournalCount, getLatestJournal, type JournalEntryRow } from '@/services/journalService';
+import { recordPracticeToday } from '@/services/settingsService';
 import {
   computeCompositeScorePercent,
   formatMoodNote,
@@ -227,7 +229,7 @@ export default function HomeScreen() {
   );
 
   const currentMood = todayMood ? MOOD_MAP[todayMood.moodType] : null;
-  const suggestion = todayMood ? getSuggestion(todayMood.moodType, todayMood.stressLevel) : null;
+  const suggestion = todayMood ? getSuggestion(todayMood.moodType, todayMood.stressLevel, todayMood.energyLevel) : null;
 
   // Quick insight data
   const insightInfo = useMemo(() => {
@@ -535,6 +537,9 @@ export default function HomeScreen() {
           </GlassCard>
         )}
 
+        {/* Daily Mindful Insights & Wisdom Deck */}
+        <DailyWisdomDeck todayMood={todayMood} />
+
         {/* Mood History */}
         <View style={styles.sectionRow}>
           <View style={styles.sectionTitleRow}>
@@ -725,7 +730,7 @@ export default function HomeScreen() {
             <View style={styles.sectionRow}>
               <View style={styles.sectionTitleRow}>
                 <Feather name="star" size={15} color={Colors.accent.amber} />
-                <Text style={styles.sectionTitleInline}>Recommended</Text>
+                <Text style={styles.sectionTitleInline}>Recommended for You</Text>
               </View>
             </View>
             <GlassCard
@@ -733,11 +738,14 @@ export default function HomeScreen() {
               padding="lg"
               style={styles.recCard}
               onPress={() => {
-                if (suggestion.route) router.push(suggestion.route as any);
+                if (suggestion.route) {
+                  recordPracticeToday();
+                  router.push(suggestion.route as any);
+                }
               }}
             >
               <View style={styles.recRow}>
-                <View style={[styles.recIconBg, { backgroundColor: suggestion.color + '18' }]}>
+                <View style={[styles.recIconBg, { backgroundColor: `${suggestion.color}20` }]}>
                   <Feather
                     name={suggestion.icon as any}
                     size={22}
@@ -745,8 +753,15 @@ export default function HomeScreen() {
                   />
                 </View>
                 <View style={styles.recContent}>
-                  <Text style={styles.recTitle}>{suggestion.title}</Text>
-                  <Text style={styles.recSubtitle}>{suggestion.subtitle}</Text>
+                  <View style={styles.recHeaderLine}>
+                    <Text style={styles.recTitle}>{suggestion.title}</Text>
+                    {suggestion.badge && (
+                      <View style={[styles.recBadge, { backgroundColor: `${suggestion.color}18`, borderColor: `${suggestion.color}35` }]}>
+                        <Text style={[styles.recBadgeText, { color: suggestion.color }]}>{suggestion.badge}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.recSubtitle} numberOfLines={2}>{suggestion.subtitle}</Text>
                 </View>
                 <Feather name="chevron-right" size={18} color={Colors.text.tertiary} />
               </View>
@@ -1424,16 +1439,36 @@ const styles = StyleSheet.create({
     marginRight: Spacing.lg,
   },
   recContent: { flex: 1 },
+  recHeaderLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
   recTitle: {
     fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.body,
     color: Colors.text.primary,
-    marginBottom: 2,
+    flex: 1,
+    marginRight: 6,
+  },
+  recBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+  },
+  recBadgeText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.tiny - 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   recSubtitle: {
     fontFamily: Fonts.body,
-    fontSize: FontSizes.bodySmall,
+    fontSize: FontSizes.caption,
     color: Colors.text.secondary,
+    lineHeight: 16,
   },
 
   // Recent Journal
