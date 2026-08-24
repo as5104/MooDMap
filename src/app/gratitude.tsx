@@ -1,64 +1,190 @@
 /**
- * MoodMap — Gratitude Prompt
+ * MoodMap — Gratitude Studio
  */
 
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { GradientBackground, GlassCard, Button } from '@/components/ui';
+import { GradientBackground, Button, SwipableCardDeck, type BaseDeckCard } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, SCREEN_PADDING } from '@/constants/layout';
 import { useAppStore } from '@/stores/appStore';
 import { saveJournalEntry } from '@/services/journalService';
 
+const PROMPTS_POOL = [
+  'A person whose presence brought you peace, warmth, or comfort today',
+  'A small sensory pleasure (warm drink, gentle breeze, soothing song)',
+  'Something difficult you handled with grace, patience, or resilience',
+  'A moment today where you felt completely at ease and grounded',
+  'A physical space or cozy shelter where you feel safe and relaxed',
+  'An unexpected kindness, smile, or message you received recently',
+  'Something about your body or mind that you deeply appreciate',
+];
+
+interface GratitudeCard extends BaseDeckCard {
+  id: number;
+  title: string;
+  badge: string;
+  solidColor: string;
+  baseRotation: number;
+  watermarkIcon: keyof typeof Feather.glyphMap;
+  prompt: string;
+  text: string;
+}
+
 export default function GratitudeScreen() {
   const insets = useSafeAreaInsets();
   const user = useAppStore((s) => s.user);
   const refreshData = useAppStore((s) => s.refreshData);
-  const [items, setItems] = useState(['', '', '']);
-  const [saved, setSaved] = useState(false);
 
-  const updateItem = (index: number, text: string) => {
-    const newItems = [...items];
-    newItems[index] = text;
-    setItems(newItems);
-  };
+  const [cards, setCards] = useState<GratitudeCard[]>([
+    {
+      id: 1,
+      title: 'First Blessing',
+      badge: 'Anchor 1',
+      solidColor: '#B45309', // Deep Amber
+      baseRotation: -4,
+      watermarkIcon: 'sun',
+      prompt: PROMPTS_POOL[0],
+      text: '',
+    },
+    {
+      id: 2,
+      title: 'Second Blessing',
+      badge: 'Anchor 2',
+      solidColor: '#047857', // Rich Emerald
+      baseRotation: 4.5,
+      watermarkIcon: 'feather',
+      prompt: PROMPTS_POOL[1],
+      text: '',
+    },
+    {
+      id: 3,
+      title: 'Third Blessing',
+      badge: 'Anchor 3',
+      solidColor: '#4338CA', // Royal Indigo
+      baseRotation: -3,
+      watermarkIcon: 'heart',
+      prompt: PROMPTS_POOL[2],
+      text: '',
+    },
+  ]);
 
-  const filledCount = items.filter((i) => i.trim().length > 0).length;
-  const canSave = filledCount > 0;
+  const [isSaved, setIsSaved] = useState(false);
+
+  const updateCardText = useCallback((text: string, cardId: number) => {
+    setCards((prev) =>
+      prev.map((c) => (c.id === cardId ? { ...c, text } : c))
+    );
+  }, []);
+
+  const shufflePrompt = useCallback((cardId: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const randomIndex = Math.floor(Math.random() * PROMPTS_POOL.length);
+    setCards((prev) =>
+      prev.map((c) =>
+        c.id === cardId ? { ...c, prompt: PROMPTS_POOL[randomIndex] } : c
+      )
+    );
+  }, []);
+
+  const filledCount = cards.filter((c) => c.text.trim().length > 0).length;
+  const hasAnyInput = filledCount > 0;
 
   const handleSave = () => {
-    if (!canSave) return;
+    if (!hasAnyInput) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    const gratitudeEntries = items
-      .filter((i) => i.trim().length > 0)
-      .map((i, idx) => `${idx + 1}. ${i.trim()}`)
-      .join('\n');
-
-    const content = `Today I'm grateful for:\n\n${gratitudeEntries}`;
+    const formattedList = cards
+      .filter((c) => c.text.trim().length > 0)
+      .map((c) => `• ${c.title}: "${c.text.trim()}" (Prompt: ${c.prompt})`)
+      .join('\n\n');
 
     saveJournalEntry({
-      title: 'Gratitude',
-      content,
-      promptUsed: 'gratitude_activity',
+      title: 'Daily Gratitude Deck',
+      content: `Today's Gratitude Deck:\n\n${formattedList}`,
+      promptUsed: 'gratitude_deck_studio',
       userId: user?.id,
     });
 
     refreshData();
-    setSaved(true);
+    setIsSaved(true);
   };
 
-  const LABELS = [
-    { num: '1', placeholder: 'Something that made you smile...', color: '#FFD166' },
-    { num: '2', placeholder: 'Someone you appreciate...', color: '#6BCB77' },
-    { num: '3', placeholder: 'A small joy or comfort...', color: '#C59CFF' },
-  ];
+  const renderGratitudeCard = (
+    card: GratitudeCard,
+    isTop: boolean,
+    onNext: () => void,
+    onPrev: () => void
+  ) => {
+    return (
+      <View style={[styles.portraitCard, { backgroundColor: card.solidColor }]}>
+        {/* Background Watermark Icon */}
+        <View style={styles.watermarkIconContainer} pointerEvents="none">
+          <Feather name={card.watermarkIcon} size={130} color="rgba(255, 255, 255, 0.12)" />
+        </View>
+
+        {/* Card Top Pill & Shuffle */}
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.badgePillInner}>
+            <Feather name="heart" size={12} color="#FFFFFF" />
+            <Text style={styles.badgePillInnerText}>{card.badge}</Text>
+          </View>
+          <Pressable
+            style={styles.shuffleBtn}
+            onPress={() => shufflePrompt(card.id)}
+          >
+            <Feather name="refresh-cw" size={13} color="#FFFFFF" />
+            <Text style={styles.shuffleBtnText}>Shuffle Idea</Text>
+          </Pressable>
+        </View>
+
+        {/* Prompt Question */}
+        <View style={styles.promptWrapper}>
+          <Text style={styles.promptTitle}>{card.title}</Text>
+          <Text style={styles.promptText}>{card.prompt}</Text>
+        </View>
+
+        {/* Multi-Line Input Box */}
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.cardTextInput}
+            placeholder="Write your blessing or appreciation here..."
+            placeholderTextColor="rgba(255, 255, 255, 0.45)"
+            value={card.text}
+            onChangeText={(t) => updateCardText(t, card.id)}
+            multiline
+            maxLength={300}
+            textAlignVertical="top"
+          />
+        </View>
+
+        {/* Card Bottom Swipe Hint */}
+        <View style={styles.cardFooterRow}>
+          <Pressable onPress={onPrev} style={styles.cardNavBtn}>
+            <Feather name="chevron-left" size={16} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.swipeHintText}>👈 Swipe card to flip 👉</Text>
+          <Pressable onPress={onNext} style={styles.cardNavBtn}>
+            <Feather name="chevron-right" size={16} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <GradientBackground variant="glow">
@@ -66,101 +192,67 @@ export default function GratitudeScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={[styles.container, { paddingTop: insets.top + Spacing.lg }]}>
-          {/* Header */}
+        <View style={[styles.container, { paddingTop: insets.top + Spacing.md }]}>
+          {/* Centered Header */}
           <View style={styles.header}>
-            <Pressable style={styles.closeBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.back(); }}>
+            <Pressable
+              style={styles.closeBtn}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.back();
+              }}
+            >
               <Feather name="arrow-left" size={22} color={Colors.text.primary} />
             </Pressable>
-            <Text style={styles.headerTitle}>Gratitude</Text>
-            <View style={{ width: 44 }} />
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerTitle}>Gratitude Studio</Text>
+              <Text style={styles.headerSubtitle}>Swipable Long-Portrait Deck</Text>
+            </View>
+            <View style={styles.badgePill}>
+              <Text style={styles.badgePillText}>{filledCount}/3 Filled</Text>
+            </View>
           </View>
 
-          {!saved ? (
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Intro */}
-              <View style={styles.intro}>
-                <View style={styles.introIcon}>
-                  <Feather name="heart" size={24} color="#FFD166" />
-                </View>
-                <Text style={styles.introTitle}>What are you grateful for?</Text>
-                <Text style={styles.introSubtitle}>
-                  Taking a moment to appreciate the good things can uplift your mood and build resilience.
-                </Text>
-              </View>
+          {!isSaved ? (
+            <View style={styles.deckBody}>
+              {/* Reusable Stacked Cards Deck */}
+              <SwipableCardDeck
+                cards={cards}
+                renderCard={renderGratitudeCard}
+              />
 
-              {/* Input Cards */}
-              {LABELS.map((label, index) => (
-                <Animated.View key={index} entering={FadeInDown.delay(index * 100).duration(400)}>
-                  <GlassCard intensity="medium" padding="md" style={styles.inputCard}>
-                    <View style={styles.inputRow}>
-                      <View style={[styles.numBadge, { backgroundColor: `${label.color}18` }]}>
-                        <Text style={[styles.numText, { color: label.color }]}>{label.num}</Text>
-                      </View>
-                      <TextInput
-                        style={styles.input}
-                        placeholder={label.placeholder}
-                        placeholderTextColor="rgba(255,255,255,0.2)"
-                        value={items[index]}
-                        onChangeText={(text) => updateItem(index, text)}
-                        multiline
-                        maxLength={200}
-                      />
-                    </View>
-                  </GlassCard>
-                </Animated.View>
-              ))}
-
-              {/* Counter */}
-              <Text style={styles.counter}>{filledCount}/3 filled</Text>
-
-              {/* Save Button */}
-              <View style={styles.saveArea}>
+              {/* Bottom Deck Actions */}
+              <View style={[styles.bottomControls, { paddingBottom: insets.bottom + Spacing.md }]}>
                 <Button
-                  title="Save to Journal"
+                  title="Seal Deck to Journal"
                   variant="primary"
                   size="lg"
                   fullWidth
-                  disabled={!canSave}
                   onPress={handleSave}
-                  icon={<Feather name="bookmark" size={18} color={Colors.text.onAccent} />}
+                  disabled={!hasAnyInput}
                 />
               </View>
-
-              <View style={{ height: insets.bottom + 40 }} />
-            </ScrollView>
-          ) : (
-            <View style={styles.savedContent}>
-              <Animated.View entering={FadeInDown.duration(500)} style={styles.savedInner}>
-                <View style={styles.savedCircle}>
-                  <Feather name="check" size={36} color={Colors.accent.primary} />
-                </View>
-                <Text style={styles.savedTitle}>Gratitude saved</Text>
-                <Text style={styles.savedSubtitle}>
-                  Your gratitude entry has been added to your journal. Keep cultivating appreciation.
-                </Text>
-                <View style={[styles.doneActions, { marginTop: Spacing.xxxl }]}>
-                  <Button
-                    title="Write More"
-                    variant="ghost"
-                    size="md"
-                    style={{ flex: 1 }}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setItems(['', '', '']);
-                      setSaved(false);
-                    }}
-                  />
-                  <Button
-                    title="Done"
-                    variant="primary"
-                    size="md"
-                    style={{ flex: 1 }}
-                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.back(); }}
-                  />
-                </View>
-              </Animated.View>
             </View>
+          ) : (
+            <Animated.View entering={FadeInDown.duration(400)} style={styles.doneContainer}>
+              <View style={styles.doneIconBg}>
+                <Feather name="heart" size={44} color="#FFFFFF" />
+              </View>
+              <Text style={styles.doneTitle}>Gratitude Deck Sealed</Text>
+              <Text style={styles.doneSubtitle}>
+                {filledCount} reflection cards were anchored in your SQLite journal. Take a slow breath and feel the abundance within you.
+              </Text>
+
+              <View style={{ width: '100%', marginTop: Spacing.xl }}>
+                <Button
+                  title="Return to Activities"
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  onPress={() => router.back()}
+                />
+              </View>
+            </Animated.View>
           )}
         </View>
       </KeyboardAvoidingView>
@@ -169,127 +261,208 @@ export default function GratitudeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: SCREEN_PADDING },
-
+  container: {
+    flex: 1,
+    paddingHorizontal: SCREEN_PADDING,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.xxl,
+    justifyContent: 'center',
+    position: 'relative',
+    height: 48,
+    marginBottom: Spacing.xs,
   },
   closeBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: Colors.background.card,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border.subtle,
+    position: 'absolute',
+    left: 0,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  headerCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: Fonts.subheading,
-    fontSize: FontSizes.h3,
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.body + 2,
     color: Colors.text.primary,
+  },
+  headerSubtitle: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.caption,
+    color: 'rgba(255, 255, 255, 0.75)',
+    marginTop: 1,
+  },
+  badgePill: {
+    position: 'absolute',
+    right: 0,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+    zIndex: 10,
+  },
+  badgePillText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.tiny,
+    color: '#F59E0B',
   },
 
-  intro: {
+  deckBody: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  portraitCard: {
+    flex: 1,
+    borderRadius: 28,
+    padding: Spacing.xl,
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  watermarkIconContainer: {
+    position: 'absolute',
+    right: -20,
+    bottom: -20,
+  },
+
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: Spacing.xxxl,
   },
-  introIcon: {
-    width: 56, height: 56, borderRadius: 18,
-    backgroundColor: 'rgba(255, 209, 102, 0.12)',
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: Spacing.lg,
+  badgePillInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
   },
-  introTitle: {
+  badgePillInnerText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.tiny,
+    color: '#FFFFFF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  shuffleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+  },
+  shuffleBtnText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: '#FFFFFF',
+  },
+
+  promptWrapper: {
+    marginVertical: Spacing.sm,
+  },
+  promptTitle: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h3,
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  promptText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall + 1,
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineHeight: 20,
+  },
+
+  inputContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
+    borderRadius: 20,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    marginVertical: Spacing.sm,
+  },
+  cardTextInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.body,
+    lineHeight: 22,
+  },
+
+  cardFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  cardNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swipeHintText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: 'rgba(255, 255, 255, 0.85)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  bottomControls: {
+    width: '100%',
+  },
+
+  doneContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+  },
+  doneIconBg: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: '#B45309',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xl,
+    shadowColor: '#B45309',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  doneTitle: {
     fontFamily: Fonts.heading,
     fontSize: FontSizes.h2,
-    color: Colors.text.primary,
+    color: '#FFFFFF',
     marginBottom: Spacing.sm,
     textAlign: 'center',
   },
-  introSubtitle: {
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.bodySmall,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 300,
-  },
-
-  inputCard: {
-    marginBottom: Spacing.md,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.md,
-  },
-  numBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  numText: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.body,
-  },
-  input: {
-    flex: 1,
-    fontFamily: Fonts.body,
-    fontSize: FontSizes.body,
-    color: Colors.text.primary,
-    minHeight: 44,
-    textAlignVertical: 'top',
-  },
-
-  counter: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: FontSizes.caption,
-    color: Colors.text.tertiary,
-    textAlign: 'center',
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.xl,
-  },
-
-  saveArea: {
-    marginBottom: Spacing.xxl,
-  },
-
-  savedContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 60,
-  },
-  savedInner: {
-    alignItems: 'center',
-    maxWidth: 300,
-  },
-  savedCircle: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: `${Colors.accent.primary}15`,
-    borderWidth: 2, borderColor: `${Colors.accent.primary}30`,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: Spacing.xxl,
-  },
-  savedTitle: {
-    fontFamily: Fonts.heading,
-    fontSize: FontSizes.h1,
-    color: Colors.text.primary,
-    marginBottom: Spacing.md,
-  },
-  savedSubtitle: {
+  doneSubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
     color: Colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 24,
-  },
-  doneActions: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    width: '100%',
+    lineHeight: 22,
   },
 });

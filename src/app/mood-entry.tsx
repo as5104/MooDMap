@@ -27,6 +27,8 @@ import { TAGS } from '@/constants/tags';
 import { useAppStore } from '@/stores/appStore';
 import { useMusic } from '@/context/MusicContext';
 import { saveMoodEntry, getWeeklyMoods, getMoodScoreForPeriod, getMoodStreak } from '@/services/moodService';
+import { getSurfacedComfortItem, type ComfortSurfacedItem } from '@/services/comfortBoxService';
+import { ComfortSurfacingModal } from '@/components/comfort/ComfortSurfacingModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOTAL_STEPS = 5;
@@ -271,6 +273,7 @@ export default function MoodEntryScreen() {
   const [selectedMCQOption, setSelectedMCQOption] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [surfacedComfortItem, setSurfacedComfortItem] = useState<ComfortSurfacedItem | null>(null);
 
   const triggerHaptic = () => {
     try {
@@ -457,12 +460,35 @@ export default function MoodEntryScreen() {
       }
 
       refreshData();
-
       setSaved(true);
 
-      setTimeout(() => {
-        router.back();
-      }, 1500);
+      // Check if this mood is low/distressed (score <= 4 or sad/anxious/tired/stressed/angry/overwhelmed)
+      const isDistressedMood =
+        selectedMood.score <= 4 ||
+        ['sad', 'anxious', 'tired', 'angry', 'overwhelmed', 'down', 'stressed'].includes(
+          selectedMood.type.toLowerCase()
+        );
+
+      let comfortAnchor: ComfortSurfacedItem | null = null;
+      if (isDistressedMood) {
+        try {
+          comfortAnchor = getSurfacedComfortItem(user?.id);
+        } catch (e) {
+          console.error('[MoodEntry] Failed to surface comfort item:', e);
+        }
+      }
+
+      if (comfortAnchor) {
+        // Show Comfort Box modal after brief celebration
+        setTimeout(() => {
+          setSurfacedComfortItem(comfortAnchor);
+        }, 1200);
+      } else {
+        // Standard auto-return
+        setTimeout(() => {
+          router.back();
+        }, 1500);
+      }
     } catch (error) {
       console.error('[MoodEntry] Save error:', error);
       customAlert('Error', 'Failed to save mood. Please try again.');
@@ -498,6 +524,16 @@ export default function MoodEntryScreen() {
             <Text style={styles.successXP}>+25 XP</Text>
           </View>
         </View>
+
+        {/* Comfort Box Popup for Low Mood Logs */}
+        {surfacedComfortItem && (
+          <ComfortSurfacingModal
+            visible={Boolean(surfacedComfortItem)}
+            initialItem={surfacedComfortItem}
+            userId={user?.id}
+            onClose={() => router.back()}
+          />
+        )}
       </Animated.View>
     );
   }

@@ -34,3 +34,19 @@ export function saveSetting(key: string, value: string): void {
     console.error(`[SettingsService] Failed to write key: ${key}`, error);
   }
 }
+
+/**
+  * Mark a mindful practice completed for today
+  */
+export function recordPracticeToday(): void {
+  const today = new Date().toISOString().split('T')[0];
+  saveSetting(`last_practice_date_${today}`, 'true');
+}
+
+/**
+  * Check if a mindful practice was completed today
+  */
+export function hasPracticeToday(): boolean {
+  const today = new Date().toISOString().split('T')[0];
+  return getSetting(`last_practice_date_${today}`, 'false') === 'true';
+}

@@ -1,80 +1,198 @@
 /**
- * MoodMap — Reflection Prompts
+ * MoodMap — Reflection Studio
  */
 
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { GradientBackground, GlassCard, Button } from '@/components/ui';
+import { GradientBackground, Button, SwipableCardDeck, type BaseDeckCard } from '@/components/ui';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, SCREEN_PADDING } from '@/constants/layout';
 import { useAppStore } from '@/stores/appStore';
 import { saveJournalEntry } from '@/services/journalService';
 
-const PROMPTS = [
-  'What brought you a moment of peace today?',
-  'If you could tell your younger self one thing, what would it be?',
-  'What is something you\'re learning about yourself lately?',
-  'What does your ideal day look like?',
-  'What are you holding onto that you could let go of?',
-  'Who has positively influenced your life recently?',
-  'What small thing made a big difference this week?',
-  'If your emotions could speak, what would they say right now?',
-  'What boundary do you need to set for yourself?',
-  'What are you most proud of accomplishing?',
-  'What would you do if you weren\'t afraid?',
-  'How have you grown in the past year?',
-  'What does self-care look like for you?',
-  'What is one thing you want to change about your routine?',
-  'What gives you energy and makes you feel alive?',
-  'What has been weighing on your mind?',
-  'What would you like to forgive yourself for?',
-  'What do you need more of in your life?',
-  'What moments from today are worth remembering?',
-  'How do you want to feel at the end of this week?',
-];
+const PROMPTS_BY_CATEGORY: Record<string, string[]> = {
+  'Self-Discovery': [
+    'What is something you are learning about yourself lately?',
+    'What would you do today if you had zero fear of failing?',
+    'How have you grown and shifted in the past year?',
+  ],
+  'Inner Peace': [
+    'What brought you a genuine moment of peace or comfort today?',
+    'What is a place or ritual where your mind feels completely safe?',
+    'What are you quietly proud of that went unnoticed by others?',
+  ],
+  'Letting Go': [
+    'What expectation or burden are you holding onto that you could release?',
+    'What gentle boundary do you need to set to protect your mental energy?',
+    'What is something from the past that you forgive yourself for?',
+  ],
+};
+
+interface ReflectionCard extends BaseDeckCard {
+  id: number;
+  category: string;
+  badge: string;
+  solidColor: string;
+  baseRotation: number;
+  watermarkIcon: keyof typeof Feather.glyphMap;
+  prompt: string;
+  text: string;
+}
 
 export default function ReflectionScreen() {
   const insets = useSafeAreaInsets();
   const user = useAppStore((s) => s.user);
   const refreshData = useAppStore((s) => s.refreshData);
-  const [promptIndex, setPromptIndex] = useState(() => Math.floor(Math.random() * PROMPTS.length));
-  const [response, setResponse] = useState('');
-  const [saved, setSaved] = useState(false);
 
-  const prompt = PROMPTS[promptIndex];
+  const [cards, setCards] = useState<ReflectionCard[]>([
+    {
+      id: 1,
+      category: 'Self-Discovery',
+      badge: 'Insight 1',
+      solidColor: '#0F766E', // Rich Teal
+      baseRotation: -4,
+      watermarkIcon: 'compass',
+      prompt: PROMPTS_BY_CATEGORY['Self-Discovery'][0],
+      text: '',
+    },
+    {
+      id: 2,
+      category: 'Inner Peace',
+      badge: 'Insight 2',
+      solidColor: '#6D28D9', // Deep Purple
+      baseRotation: 4.5,
+      watermarkIcon: 'sun',
+      prompt: PROMPTS_BY_CATEGORY['Inner Peace'][0],
+      text: '',
+    },
+    {
+      id: 3,
+      category: 'Letting Go',
+      badge: 'Insight 3',
+      solidColor: '#BE185D', // Crimson Pink
+      baseRotation: -3,
+      watermarkIcon: 'feather',
+      prompt: PROMPTS_BY_CATEGORY['Letting Go'][0],
+      text: '',
+    },
+  ]);
 
-  const shufflePrompt = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    let newIndex;
-    do {
-      newIndex = Math.floor(Math.random() * PROMPTS.length);
-    } while (newIndex === promptIndex && PROMPTS.length > 1);
-    setPromptIndex(newIndex);
-    setResponse('');
-    setSaved(false);
-  };
+  const [isSaved, setIsSaved] = useState(false);
+
+  const updateCardText = useCallback((text: string, cardId: number) => {
+    setCards((prev) =>
+      prev.map((c) => (c.id === cardId ? { ...c, text } : c))
+    );
+  }, []);
+
+  const shuffleCardPrompt = useCallback((cardId: number, category: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const pool = PROMPTS_BY_CATEGORY[category] || PROMPTS_BY_CATEGORY['Self-Discovery'];
+    const randomIndex = Math.floor(Math.random() * pool.length);
+    setCards((prev) =>
+      prev.map((c) =>
+        c.id === cardId ? { ...c, prompt: pool[randomIndex] } : c
+      )
+    );
+  }, []);
+
+  const filledCount = cards.filter((c) => c.text.trim().length > 0).length;
+  const hasAnyInput = filledCount > 0;
 
   const handleSave = () => {
-    if (!response.trim()) return;
+    if (!hasAnyInput) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    const content = `Reflection Prompt:\n"${prompt}"\n\nMy thoughts:\n${response.trim()}`;
+    const formattedList = cards
+      .filter((c) => c.text.trim().length > 0)
+      .map((c) => `• [${c.category}] "${c.prompt}"\n  Thoughts: "${c.text.trim()}"`)
+      .join('\n\n');
 
     saveJournalEntry({
-      title: 'Reflection',
-      content,
-      promptUsed: 'reflection_activity',
+      title: 'Daily Reflection Deck',
+      content: `Today's Reflections:\n\n${formattedList}`,
+      promptUsed: 'reflection_deck_studio',
       userId: user?.id,
     });
 
     refreshData();
-    setSaved(true);
+    setIsSaved(true);
+  };
+
+  const renderReflectionCard = (
+    card: ReflectionCard,
+    isTop: boolean,
+    onNext: () => void,
+    onPrev: () => void
+  ) => {
+    return (
+      <View style={[styles.portraitCard, { backgroundColor: card.solidColor }]}>
+        {/* Background Watermark Icon */}
+        <View style={styles.watermarkIconContainer} pointerEvents="none">
+          <Feather name={card.watermarkIcon} size={130} color="rgba(255, 255, 255, 0.12)" />
+        </View>
+
+        {/* Card Top Pill & Shuffle */}
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.badgePillInner}>
+            <Feather name="compass" size={12} color="#FFFFFF" />
+            <Text style={styles.badgePillInnerText}>{card.category}</Text>
+          </View>
+          <Pressable
+            style={styles.shuffleBtn}
+            onPress={() => shuffleCardPrompt(card.id, card.category)}
+          >
+            <Feather name="refresh-cw" size={13} color="#FFFFFF" />
+            <Text style={styles.shuffleBtnText}>Shuffle Idea</Text>
+          </Pressable>
+        </View>
+
+        {/* Prompt Question */}
+        <View style={styles.promptWrapper}>
+          <Text style={styles.promptTitle}>{card.badge}</Text>
+          <Text style={styles.promptText}>{card.prompt}</Text>
+        </View>
+
+        {/* Multi-Line Input Box */}
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.cardTextInput}
+            placeholder="Write your thoughts and reflections here..."
+            placeholderTextColor="rgba(255, 255, 255, 0.45)"
+            value={card.text}
+            onChangeText={(t) => updateCardText(t, card.id)}
+            multiline
+            maxLength={350}
+            textAlignVertical="top"
+          />
+        </View>
+
+        {/* Card Bottom Swipe Hint */}
+        <View style={styles.cardFooterRow}>
+          <Pressable onPress={onPrev} style={styles.cardNavBtn}>
+            <Feather name="chevron-left" size={16} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.swipeHintText}>👈 Swipe card to flip 👉</Text>
+          <Pressable onPress={onNext} style={styles.cardNavBtn}>
+            <Feather name="chevron-right" size={16} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </View>
+    );
   };
 
   return (
@@ -83,93 +201,67 @@ export default function ReflectionScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={[styles.container, { paddingTop: insets.top + Spacing.lg }]}>
-          {/* Header */}
+        <View style={[styles.container, { paddingTop: insets.top + Spacing.md }]}>
+          {/* Centered Header */}
           <View style={styles.header}>
-            <Pressable style={styles.closeBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.back(); }}>
+            <Pressable
+              style={styles.closeBtn}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.back();
+              }}
+            >
               <Feather name="arrow-left" size={22} color={Colors.text.primary} />
             </Pressable>
-            <Text style={styles.headerTitle}>Reflection</Text>
-            <Pressable style={styles.shuffleBtn} onPress={shufflePrompt}>
-              <Feather name="refresh-cw" size={18} color={Colors.accent.primary} />
-            </Pressable>
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerTitle}>Reflection Studio</Text>
+              <Text style={styles.headerSubtitle}>Swipable Self-Inquiry Deck</Text>
+            </View>
+            <View style={styles.badgePill}>
+              <Text style={styles.badgePillText}>{filledCount}/3 Filled</Text>
+            </View>
           </View>
 
-          {!saved ? (
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Prompt Card */}
-              <Animated.View key={promptIndex} entering={FadeInDown.duration(400)}>
-                <GlassCard intensity="medium" padding="lg" style={styles.promptCard}>
-                  <View style={styles.promptIconRow}>
-                    <View style={styles.promptIcon}>
-                      <Feather name="message-circle" size={20} color="#4ECDC4" />
-                    </View>
-                    <Text style={styles.promptLabel}>Today&apos;s Prompt</Text>
-                  </View>
-                  <Text style={styles.promptText}>{prompt}</Text>
-                </GlassCard>
-              </Animated.View>
+          {!isSaved ? (
+            <View style={styles.deckBody}>
+              {/* Reusable Stacked Cards Deck */}
+              <SwipableCardDeck
+                cards={cards}
+                renderCard={renderReflectionCard}
+              />
 
-              {/* Response Area */}
-              <GlassCard intensity="subtle" padding="lg" style={styles.responseCard}>
-                <TextInput
-                  style={styles.responseInput}
-                  placeholder="Write your thoughts here..."
-                  placeholderTextColor="rgba(255,255,255,0.2)"
-                  value={response}
-                  onChangeText={setResponse}
-                  multiline
-                  maxLength={2000}
-                  textAlignVertical="top"
-                />
-                <View style={styles.charCount}>
-                  <Text style={styles.charCountText}>{response.length}/2000</Text>
-                </View>
-              </GlassCard>
-
-              {/* Save Button */}
-              <View style={styles.saveArea}>
+              {/* Bottom Deck Actions */}
+              <View style={[styles.bottomControls, { paddingBottom: insets.bottom + Spacing.md }]}>
                 <Button
-                  title="Save to Journal"
+                  title="Seal Reflections to Journal"
                   variant="primary"
                   size="lg"
                   fullWidth
-                  disabled={!response.trim()}
                   onPress={handleSave}
-                  icon={<Feather name="bookmark" size={18} color={Colors.text.onAccent} />}
+                  disabled={!hasAnyInput}
                 />
               </View>
-
-              <View style={{ height: insets.bottom + 40 }} />
-            </ScrollView>
-          ) : (
-            <View style={styles.savedContent}>
-              <Animated.View entering={FadeInDown.duration(500)} style={styles.savedInner}>
-                <View style={styles.savedCircle}>
-                  <Feather name="check" size={36} color={Colors.accent.primary} />
-                </View>
-                <Text style={styles.savedTitle}>Reflection saved</Text>
-                <Text style={styles.savedSubtitle}>
-                  Your thoughts have been captured in your journal. Self-reflection is a powerful practice.
-                </Text>
-                <View style={[styles.doneActions, { marginTop: Spacing.xxxl }]}>
-                  <Button
-                    title="New Prompt"
-                    variant="ghost"
-                    size="md"
-                    style={{ flex: 1 }}
-                    onPress={shufflePrompt}
-                  />
-                  <Button
-                    title="Done"
-                    variant="primary"
-                    size="md"
-                    style={{ flex: 1 }}
-                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.back(); }}
-                  />
-                </View>
-              </Animated.View>
             </View>
+          ) : (
+            <Animated.View entering={FadeInDown.duration(400)} style={styles.doneContainer}>
+              <View style={styles.doneIconBg}>
+                <Feather name="compass" size={44} color="#FFFFFF" />
+              </View>
+              <Text style={styles.doneTitle}>Reflections Sealed</Text>
+              <Text style={styles.doneSubtitle}>
+                {filledCount} reflection insights were safely saved into your SQLite journal. Self-inquiry builds lasting emotional wisdom.
+              </Text>
+
+              <View style={{ width: '100%', marginTop: Spacing.xl }}>
+                <Button
+                  title="Return to Activities"
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  onPress={() => router.back()}
+                />
+              </View>
+            </Animated.View>
           )}
         </View>
       </KeyboardAvoidingView>
@@ -178,118 +270,208 @@ export default function ReflectionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: SCREEN_PADDING },
-
+  container: {
+    flex: 1,
+    paddingHorizontal: SCREEN_PADDING,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.xxl,
+    justifyContent: 'center',
+    position: 'relative',
+    height: 48,
+    marginBottom: Spacing.xs,
   },
   closeBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: Colors.background.card,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border.subtle,
+    position: 'absolute',
+    left: 0,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  headerCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontFamily: Fonts.subheading,
-    fontSize: FontSizes.h3,
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.body + 2,
     color: Colors.text.primary,
   },
-  shuffleBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: `${Colors.accent.primary}12`,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: `${Colors.accent.primary}20`,
+  headerSubtitle: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: FontSizes.caption,
+    color: 'rgba(255, 255, 255, 0.75)',
+    marginTop: 1,
+  },
+  badgePill: {
+    position: 'absolute',
+    right: 0,
+    backgroundColor: 'rgba(15, 118, 110, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 118, 110, 0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+    zIndex: 10,
+  },
+  badgePillText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.tiny,
+    color: '#14B8A6',
   },
 
-  promptCard: {
-    marginBottom: Spacing.xl,
+  deckBody: {
+    flex: 1,
+    justifyContent: 'space-between',
   },
-  promptIconRow: {
+  portraitCard: {
+    flex: 1,
+    borderRadius: 28,
+    padding: Spacing.xl,
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  watermarkIconContainer: {
+    position: 'absolute',
+    right: -20,
+    bottom: -20,
+  },
+
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  badgePillInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
   },
-  promptIcon: {
-    width: 36, height: 36, borderRadius: 12,
-    backgroundColor: 'rgba(78, 205, 196, 0.12)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  promptLabel: {
-    fontFamily: Fonts.bodySemiBold,
-    fontSize: FontSizes.caption,
-    color: Colors.text.secondary,
+  badgePillInnerText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: FontSizes.tiny,
+    color: '#FFFFFF',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  promptText: {
-    fontFamily: Fonts.subheading,
-    fontSize: FontSizes.h3,
-    color: Colors.text.primary,
-    lineHeight: 28,
+  shuffleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+  },
+  shuffleBtnText: {
+    fontFamily: Fonts.bodySemiBold,
+    fontSize: FontSizes.tiny,
+    color: '#FFFFFF',
   },
 
-  responseCard: {
-    marginBottom: Spacing.xl,
-    minHeight: 180,
+  promptWrapper: {
+    marginVertical: Spacing.sm,
   },
-  responseInput: {
+  promptTitle: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.h3,
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  promptText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.bodySmall + 1,
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineHeight: 20,
+  },
+
+  inputContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
+    borderRadius: 20,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    marginVertical: Spacing.sm,
+  },
+  cardTextInput: {
+    flex: 1,
+    color: '#FFFFFF',
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
-    color: Colors.text.primary,
-    minHeight: 140,
-    lineHeight: 24,
+    lineHeight: 22,
   },
-  charCount: {
-    alignItems: 'flex-end',
-    marginTop: Spacing.sm,
+
+  cardFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.18)',
   },
-  charCountText: {
-    fontFamily: Fonts.body,
+  cardNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swipeHintText: {
+    fontFamily: Fonts.bodySemiBold,
     fontSize: FontSizes.tiny,
-    color: Colors.text.tertiary,
+    color: 'rgba(255, 255, 255, 0.85)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 
-  saveArea: {
-    marginBottom: Spacing.xxl,
+  bottomControls: {
+    width: '100%',
   },
 
-  savedContent: {
+  doneContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: 60,
+    paddingHorizontal: Spacing.md,
   },
-  savedInner: {
+  doneIconBg: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: '#0F766E',
     alignItems: 'center',
-    maxWidth: 300,
+    justifyContent: 'center',
+    marginBottom: Spacing.xl,
+    shadowColor: '#0F766E',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  savedCircle: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: `${Colors.accent.primary}15`,
-    borderWidth: 2, borderColor: `${Colors.accent.primary}30`,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: Spacing.xxl,
-  },
-  savedTitle: {
+  doneTitle: {
     fontFamily: Fonts.heading,
-    fontSize: FontSizes.h1,
-    color: Colors.text.primary,
-    marginBottom: Spacing.md,
+    fontSize: FontSizes.h2,
+    color: '#FFFFFF',
+    marginBottom: Spacing.sm,
+    textAlign: 'center',
   },
-  savedSubtitle: {
+  doneSubtitle: {
     fontFamily: Fonts.body,
     fontSize: FontSizes.body,
     color: Colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 24,
-  },
-  doneActions: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    width: '100%',
+    lineHeight: 22,
   },
 });
