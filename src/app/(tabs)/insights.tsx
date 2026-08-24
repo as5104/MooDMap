@@ -10,13 +10,16 @@ import {
   ScrollView,
   Pressable,
   Animated,
+  Platform,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { GlobalQuickMusicWidget } from '@/components/music/GlobalQuickMusicWidget';
 import { GradientBackground, GlassCard, WeeklyMoodRow, InsightsIllustration } from '@/components/ui';
+import { WeeklyHighlightDeck } from '@/components/insights/WeeklyHighlightDeck';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { Spacing, Radius, TAB_BAR_HEIGHT, TAB_BAR_MARGIN } from '@/constants/layout';
@@ -70,7 +73,7 @@ const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 // Mood Calendar
 
-function MoodCalendar({ data, year, month }: { data: MoodCalendarItem[]; year: number; month: number }) {
+const MoodCalendar = React.memo(function MoodCalendar({ data, year, month }: { data: MoodCalendarItem[]; year: number; month: number }) {
   const firstDay = new Date(year, month, 1).getDay();
   const totalDays = new Date(year, month + 1, 0).getDate();
   const monthLabel = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -81,25 +84,29 @@ function MoodCalendar({ data, year, month }: { data: MoodCalendarItem[]; year: n
     return m;
   }, [data]);
 
-  const cells: React.ReactNode[] = [];
-  for (let i = 0; i < firstDay; i++) {
-    cells.push(<View key={`e-${i}`} style={calS.cell} />);
-  }
-  for (let day = 1; day <= totalDays; day++) {
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const entry = dataMap.get(dateStr);
-    const moodColor = entry ? (Colors.mood[entry.moodType] || Colors.text.tertiary) : undefined;
-    const isToday = dateStr === new Date().toISOString().split('T')[0];
+  const cells: React.ReactNode[] = useMemo(() => {
+    const list: React.ReactNode[] = [];
+    const todayStr = new Date().toISOString().split('T')[0];
+    for (let i = 0; i < firstDay; i++) {
+      list.push(<View key={`e-${i}`} style={calS.cell} />);
+    }
+    for (let day = 1; day <= totalDays; day++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const entry = dataMap.get(dateStr);
+      const moodColor = entry ? (Colors.mood[entry.moodType] || Colors.text.tertiary) : undefined;
+      const isToday = dateStr === todayStr;
 
-    cells.push(
-      <View key={dateStr} style={calS.cell}>
-        <View style={[calS.dayCircle, entry && { backgroundColor: moodColor + '25' }, isToday && !entry && calS.todayRing]}>
-          {entry && <View style={[calS.moodDot, { backgroundColor: moodColor }]} />}
-          <Text style={[calS.dayText, entry && { color: moodColor }, isToday && { color: Colors.accent.primary }]}>{day}</Text>
+      list.push(
+        <View key={dateStr} style={calS.cell}>
+          <View style={[calS.dayCircle, entry && { backgroundColor: moodColor + '25' }, isToday && !entry && calS.todayRing]}>
+            {entry && <View style={[calS.moodDot, { backgroundColor: moodColor }]} />}
+            <Text style={[calS.dayText, entry && { color: moodColor }, isToday && { color: Colors.accent.primary }]}>{day}</Text>
+          </View>
         </View>
-      </View>
-    );
-  }
+      );
+    }
+    return list;
+  }, [dataMap, firstDay, totalDays, year, month]);
 
   return (
     <View>
@@ -112,7 +119,7 @@ function MoodCalendar({ data, year, month }: { data: MoodCalendarItem[]; year: n
       <View style={calS.grid}>{cells}</View>
     </View>
   );
-}
+});
 
 // Main Screen
 
@@ -332,6 +339,10 @@ export default function InsightsScreen() {
           { paddingTop: insets.top + Spacing.lg, paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_MARGIN + Spacing.xxxl },
         ]}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        removeClippedSubviews={Platform.OS === 'android'}
+        overScrollMode="never"
+        nestedScrollEnabled
       >
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: Spacing.md }}>
@@ -456,18 +467,39 @@ export default function InsightsScreen() {
 
           {/* Avg Score (70%) */}
           <GlassCard intensity="medium" padding="lg" style={s.flex7}>
-            <View style={s.scoreIconRow}>
-              <View style={[s.iconBg, { backgroundColor: Colors.accent.amber + '18' }]}>
-                <Feather name="trending-up" size={16} color={Colors.accent.amber} />
+            <View style={s.avgScoreContentRow}>
+              <View style={s.avgScoreLeftCol}>
+                <View style={s.scoreIconRow}>
+                  <View style={[s.iconBg, { backgroundColor: Colors.accent.amber + '18' }]}>
+                    <Feather name="trending-up" size={16} color={Colors.accent.amber} />
+                  </View>
+                </View>
+                <Text style={[s.scoreValue, { color: Colors.text.primary }]}>
+                  {summary?.avgScore ? summary.avgScore.toFixed(1) : '—'}
+                </Text>
+                <Text style={s.scoreLabel}>Avg Score</Text>
+                <Text style={[s.scoreHint, { textAlign: 'left', marginTop: Spacing.sm }]} numberOfLines={1}>
+                  Scale out of 10
+                </Text>
               </View>
+
+              {/* Mood SVG based on Avg Score (< 6 = negative, 6..7.5 = neutral, > 7.5 = positive) */}
+              {hasData && summary?.avgScore != null && (
+                <View style={s.avgScoreSvgWrapper}>
+                  <Image
+                    source={
+                      summary.avgScore < 6
+                        ? require('../../../assets/images/negative.svg')
+                        : summary.avgScore <= 7.5
+                        ? require('../../../assets/images/nutral.svg')
+                        : require('../../../assets/images/positive.svg')
+                    }
+                    style={s.avgScoreSvgImage}
+                    contentFit="contain"
+                  />
+                </View>
+              )}
             </View>
-            <Text style={[s.scoreValue, { color: Colors.text.primary }]}>
-              {summary?.avgScore ? summary.avgScore.toFixed(1) : '—'}
-            </Text>
-            <Text style={s.scoreLabel}>Avg Score</Text>
-            <Text style={[s.scoreHint, { textAlign: 'left', marginTop: Spacing.sm }]} numberOfLines={1}>
-              Scale out of 10
-            </Text>
           </GlassCard>
         </View>
 
@@ -480,6 +512,19 @@ export default function InsightsScreen() {
             </View>
             <WeeklyMoodRow days={weeklyMoods.map((d) => ({ day: d.day, expression: d.expression, faceColor: d.faceColor, moodScore: d.moodScore }))} />
           </GlassCard>
+        )}
+
+        {/* Weekly / Period Highlight Cards Deck */}
+        {hasData && (
+          <WeeklyHighlightDeck
+            stats={stats}
+            summary={summary}
+            energyStress={energyStress}
+            weeklyMoods={weeklyMoods}
+            dayOfWeekData={dayOfWeekData}
+            tagFreq={tagFreq}
+            periodDays={PERIODS[renderedPeriod]?.days ?? 7}
+          />
         )}
 
         {/* ROW 4: Weekly Summary (60% width) + Energy & Stress Rings (40% width, separate stacked cards) */}
@@ -941,47 +986,50 @@ export default function InsightsScreen() {
           </>
         )}
 
-        {/* ROW 10: Recent Entries (full width) */}
+        {/* ROW 10: Recent Entries (Consolidated GlassCard) */}
         {history.length > 0 && (
-          <>
+          <View style={s.historySectionWrapper}>
             <View style={s.sectionHeader}>
               <Feather name="clock" size={14} color={Colors.text.secondary} />
               <Text style={s.sectionTitle}>Recent Entries</Text>
             </View>
-            {history.map((entry) => {
-              const mood = MOOD_MAP[entry.mood_type as MoodType];
-              const dateLabel = new Date(entry.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-              const moodColor = mood?.color ?? Colors.text.tertiary;
-              const compositeScore = computeCompositeScorePercent(
-                entry.mood_score,
-                entry.energy_level,
-                entry.stress_level,
-                entry.sleep_hours,
-                entry.sleep_quality,
-              );
-              const badgeColor = compositeScore >= 70 ? Colors.accent.primary : compositeScore >= 50 ? Colors.accent.amber : Colors.accent.coral;
-              return (
-                <GlassCard key={entry.id} intensity="medium" padding="md" style={s.historyCard}>
-                  <View style={s.historyRow}>
-                    <View style={[s.historyBar, { backgroundColor: moodColor }]} />
-                    <View style={s.historyMid}>
-                      <View style={s.historyTop}>
-                        {mood && <Feather name={mood.icon as any} size={13} color={moodColor} />}
-                        <Text style={s.historyLabel}>{mood?.label ?? entry.mood_type}</Text>
-                        <Text style={s.historyDate}>{dateLabel}</Text>
+            <GlassCard intensity="medium" padding="md" style={s.fullCard}>
+              {history.map((entry, idx) => {
+                const mood = MOOD_MAP[entry.mood_type as MoodType];
+                const dateLabel = new Date(entry.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const moodColor = mood?.color ?? Colors.text.tertiary;
+                const compositeScore = computeCompositeScorePercent(
+                  entry.mood_score,
+                  entry.energy_level,
+                  entry.stress_level,
+                  entry.sleep_hours,
+                  entry.sleep_quality,
+                );
+                const badgeColor = compositeScore >= 70 ? Colors.accent.primary : compositeScore >= 50 ? Colors.accent.amber : Colors.accent.coral;
+                return (
+                  <React.Fragment key={entry.id}>
+                    <View style={s.historyRow}>
+                      <View style={[s.historyBar, { backgroundColor: moodColor }]} />
+                      <View style={s.historyMid}>
+                        <View style={s.historyTop}>
+                          {mood && <Feather name={mood.icon as any} size={13} color={moodColor} />}
+                          <Text style={s.historyLabel}>{mood?.label ?? entry.mood_type}</Text>
+                          <Text style={s.historyDate}>{dateLabel}</Text>
+                        </View>
+                        <Text style={s.historyNote} numberOfLines={1}>{entry.note ? formatMoodNote(entry.note).slice(0, 60) : `Score: ${compositeScore}`}</Text>
                       </View>
-                      <Text style={s.historyNote} numberOfLines={1}>{entry.note ? formatMoodNote(entry.note).slice(0, 60) : `Score: ${compositeScore}`}</Text>
+                      <View style={[s.historyBadge, { borderColor: badgeColor }]}>
+                        <Text style={[s.historyBadgeText, { color: badgeColor }]}>
+                          {compositeScore}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={[s.historyBadge, { borderColor: badgeColor }]}>
-                      <Text style={[s.historyBadgeText, { color: badgeColor }]}>
-                        {compositeScore}
-                      </Text>
-                    </View>
-                  </View>
-                </GlassCard>
-              );
-            })}
-          </>
+                    {idx < history.length - 1 && <View style={s.historyDivider} />}
+                  </React.Fragment>
+                );
+              })}
+            </GlassCard>
+          </View>
         )}
 
         {/* Empty State */}
@@ -1130,12 +1178,39 @@ const s = StyleSheet.create({
   barLegendDot: { width: 6, height: 6, borderRadius: 3 },
   barLegendText: { fontFamily: Fonts.body, fontSize: FontSizes.tiny, color: Colors.text.secondary },
 
+  // Avg Score Horizontal Layout with Mood SVG
+  avgScoreContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  avgScoreLeftCol: {
+    flex: 1,
+  },
+  avgScoreSvgWrapper: {
+    width: 88,
+    height: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: Spacing.sm,
+  },
+  avgScoreSvgImage: {
+    width: 84,
+    height: 84,
+  },
+
   // Section headers
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.md, marginTop: Spacing.sm },
   sectionTitle: { fontFamily: Fonts.subheading, fontSize: FontSizes.h3, color: Colors.text.primary },
 
   // History entries
+  historySectionWrapper: { marginBottom: GAP },
   historyCard: { marginBottom: Spacing.sm },
+  historyDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    marginVertical: Spacing.md,
+  },
   historyRow: { flexDirection: 'row', alignItems: 'center' },
   historyBar: { width: 4, height: 38, borderRadius: 2, marginRight: Spacing.md },
   historyMid: { flex: 1 },
