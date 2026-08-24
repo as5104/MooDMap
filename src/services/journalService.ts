@@ -14,6 +14,12 @@ export interface JournalEntryInput {
   moodEntryId?: string;
   promptUsed?: string;
   userId?: string;
+  subtype?: 'journal' | 'letter';
+  recipient?: 'future_self' | 'past_self' | 'someone' | string;
+  recipientName?: string;
+  revealAt?: string; // ISO date string
+  lockKeyword?: string; // Secret passphrase
+  lockHint?: string; // Required hint
 }
 
 export interface JournalEntryRow {
@@ -26,6 +32,14 @@ export interface JournalEntryRow {
   mood_entry_id: string | null;
   prompt_used: string | null;
   images: string | null;
+  is_comfort?: number;
+  last_shown_at?: string | null;
+  subtype?: 'journal' | 'letter';
+  recipient?: 'future_self' | 'past_self' | 'someone' | string | null;
+  recipient_name?: string | null;
+  reveal_at?: string | null;
+  lock_keyword?: string | null;
+  lock_hint?: string | null;
   user_id: string | null;
 }
 
@@ -53,21 +67,29 @@ function getDateNDaysAgo(n: number): string {
 // Service Functions
 
 /**
- * Save a new journal entry
+ * Save a new journal entry or letter
  */
 export function saveJournalEntry(input: JournalEntryInput): JournalEntryRow {
   const now = new Date().toISOString();
   const today = getTodayDate();
   const id = generateId();
+  const subtype = input.subtype ?? 'journal';
+  const recipient = input.recipient ?? null;
+  const recipientName = input.recipientName ?? null;
+  const revealAt = input.revealAt ?? null;
+  const lockKeyword = input.lockKeyword ? input.lockKeyword.trim() : null;
+  const lockHint = input.lockHint ? input.lockHint.trim() : null;
 
   execute(
-    `INSERT INTO journal_entries (id, created_at, updated_at, date, title, content, mood_entry_id, prompt_used, images, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO journal_entries (id, created_at, updated_at, date, title, content, mood_entry_id, prompt_used, images, is_comfort, subtype, recipient, recipient_name, reveal_at, lock_keyword, lock_hint, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id, now, now, today,
       input.title ?? null, input.content,
       input.moodEntryId ?? null, input.promptUsed ?? null,
-      null, input.userId ?? null,
+      null, 0,
+      subtype, recipient, recipientName, revealAt, lockKeyword, lockHint,
+      input.userId ?? null,
     ]
   );
 
@@ -86,25 +108,142 @@ export function saveJournalEntry(input: JournalEntryInput): JournalEntryRow {
     mood_entry_id: input.moodEntryId ?? null,
     prompt_used: input.promptUsed ?? null,
     images: null,
+    is_comfort: 0,
+    subtype,
+    recipient,
+    recipient_name: recipientName,
+    reveal_at: revealAt,
+    lock_keyword: lockKeyword,
+    lock_hint: lockHint,
     user_id: input.userId ?? null,
   };
 }
 
 /**
- * Update an existing journal entry
+ * Update an existing journal entry or letter
  */
 export function updateJournalEntry(
   id: string,
-  input: { title?: string; content: string }
+  input: {
+    title?: string;
+    content: string;
+    subtype?: 'journal' | 'letter';
+    recipient?: string;
+    recipientName?: string;
+    revealAt?: string;
+    lockKeyword?: string;
+    lockHint?: string;
+  }
 ): JournalEntryRow | null {
   const now = new Date().toISOString();
 
   execute(
-    'UPDATE journal_entries SET title = ?, content = ?, updated_at = ? WHERE id = ?',
-    [input.title ?? null, input.content, now, id]
+    `UPDATE journal_entries 
+     SET title = ?, content = ?, updated_at = ?,
+         subtype = COALESCE(?, subtype),
+         recipient = COALESCE(?, recipient),
+         recipient_name = COALESCE(?, recipient_name),
+         reveal_at = COALESCE(?, reveal_at),
+         lock_keyword = COALESCE(?, lock_keyword),
+         lock_hint = COALESCE(?, lock_hint)
+     WHERE id = ?`,
+    [
+      input.title ?? null,
+      input.content,
+      now,
+      input.subtype ?? null,
+      input.recipient ?? null,
+      input.recipientName ?? null,
+      input.revealAt ?? null,
+      input.lockKeyword !== undefined ? input.lockKeyword : null,
+      input.lockHint !== undefined ? input.lockHint : null,
+      id,
+    ]
   );
 
   return getJournalEntryById(id);
+}
+
+/**
+ * Checks whether a letter is keyword-locked (for past_self or someone)
+ */
+export function isLetterKeywordLocked(entry: JournalEntryRow): boolean {
+  if (entry.subtype !== 'letter') return false;
+  return Boolean(entry.lock_keyword && entry.lock_keyword.trim().length > 0);
+}
+
+/**
+ * Verifies if user entered keyword matches the letter's password
+ */
+export function verifyLetterKeyword(entry: JournalEntryRow, inputKeyword: string): boolean {
+  if (!entry.lock_keyword) return true;
+  return entry.lock_keyword.trim().toLowerCase() === inputKeyword.trim().toLowerCase();
+}
+
+/**
+ * Checks whether a letter is currently sealed (reveal_at is in the future)
+ */
+export function isLetterSealed(entry: JournalEntryRow): boolean {
+  if (entry.subtype !== 'letter') return false;
+  if (!entry.reveal_at) return false;
+  const revealTime = new Date(entry.reveal_at).getTime();
+  return revealTime > Date.now();
+}
+
+/**
+ * Returns human-readable countdown and status for time-capsule letters
+ */
+export function getLetterCountdown(revealAt: string | null | undefined): {
+  text: string;
+  daysLeft: number;
+  isReady: boolean;
+} {
+  if (!revealAt) return { text: 'Delivered', daysLeft: 0, isReady: true };
+  const diffMs = new Date(revealAt).getTime() - Date.now();
+  if (diffMs <= 0) {
+    return { text: 'Ready to Open', daysLeft: 0, isReady: true };
+  }
+  const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  if (daysLeft === 1) {
+    return { text: 'Opens tomorrow', daysLeft: 1, isReady: false };
+  }
+  if (daysLeft < 30) {
+    return { text: `Opens in ${daysLeft} days`, daysLeft, isReady: false };
+  }
+  const monthsLeft = Math.round(daysLeft / 30);
+  return {
+    text: `Opens in ~${monthsLeft} ${monthsLeft === 1 ? 'month' : 'months'}`,
+    daysLeft,
+    isReady: false,
+  };
+}
+
+/**
+ * Get all letter entries (with optional filter)
+ */
+export function getLetters(
+  userId?: string,
+  filter: 'all' | 'future_self' | 'someone' | 'past_self' | 'sealed' | 'opened' = 'all'
+): JournalEntryRow[] {
+  let query = "SELECT * FROM journal_entries WHERE subtype = 'letter'";
+  const params: any[] = [];
+
+  if (userId) {
+    query += ' AND user_id = ?';
+    params.push(userId);
+  }
+
+  query += ' ORDER BY created_at DESC';
+  const allLetters = queryAll<JournalEntryRow>(query, params);
+
+  if (filter === 'all') return allLetters;
+  if (filter === 'future_self') return allLetters.filter((l) => l.recipient === 'future_self');
+  if (filter === 'someone') return allLetters.filter((l) => l.recipient === 'someone');
+  if (filter === 'past_self') return allLetters.filter((l) => l.recipient === 'past_self');
+  if (filter === 'sealed') return allLetters.filter(isLetterSealed);
+  if (filter === 'opened') return allLetters.filter((l) => !isLetterSealed(l) && l.recipient !== 'past_self');
+
+  return allLetters;
 }
 
 /**
@@ -142,6 +281,23 @@ export function getJournalCount(userId?: string, year?: number): number {
       );
 
   return result?.cnt ?? 0;
+}
+
+/**
+ * Check if a journal or letter was penned today
+ */
+export function hasTodayJournal(userId?: string): boolean {
+  const today = getTodayDate();
+  const result = userId
+    ? queryFirst<{ id: string }>(
+        'SELECT id FROM journal_entries WHERE date = ? AND user_id = ? LIMIT 1',
+        [today, userId]
+      )
+    : queryFirst<{ id: string }>(
+        'SELECT id FROM journal_entries WHERE date = ? LIMIT 1',
+        [today]
+      );
+  return !!result;
 }
 
 /**

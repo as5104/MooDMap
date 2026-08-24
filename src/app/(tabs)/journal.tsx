@@ -17,14 +17,20 @@ import {
   getJournalDotGrid,
   getRecentJournals,
   loadDraft,
+  isLetterSealed,
+  isLetterKeywordLocked,
+  getLetterCountdown,
   type JournalDotData,
   type JournalDraft,
   type JournalEntryRow,
 } from '@/services/journalService';
+import { LetterUnlockModal } from '@/components/letters/LetterUnlockModal';
 import { getTodayMood } from '@/services/moodService';
+import { toggleJournalComfort } from '@/services/comfortBoxService';
 import { useAppStore } from '@/stores/appStore';
 import { analyzeJournalSentiment } from '@/utils/sentimentAnalyzer';
 import { Feather } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -63,6 +69,7 @@ export default function JournalScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [moodPrompts, setMoodPrompts] = useState<JournalPrompt[]>([]);
   const [linkedMoods, setLinkedMoods] = useState<Record<string, { moodType: MoodType }>>({});
+  const [unlockModalEntry, setUnlockModalEntry] = useState<JournalEntryRow | null>(null);
 
   const loadData = useCallback(() => {
     if (!isAppReady) return;
@@ -210,28 +217,31 @@ export default function JournalScreen() {
         <View style={styles.gridCardContainer}>
           <GlassCard intensity="medium" padding="lg" style={styles.gridCard}>
             <View style={styles.dotGrid}>
-              {dotGrid.map((dot, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.dot,
-                    { backgroundColor: DOT_COLORS[dot.sentiment] },
-                  ]}
-                />
-              ))}
+              {dotGrid.map((dot, i) => {
+                const isSaved = dot.sentiment !== 'empty';
+                return (
+                  <View
+                    key={i}
+                    style={[
+                      styles.dot,
+                      {
+                        backgroundColor: isSaved
+                          ? Colors.accent.primary
+                          : 'rgba(255, 255, 255, 0.08)',
+                      },
+                    ]}
+                  />
+                );
+              })}
             </View>
             <View style={styles.legend}>
               <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: Colors.accent.coral }]} />
-                <Text style={styles.legendText}>Negative</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: Colors.accent.lavender }]} />
-                <Text style={styles.legendText}>Neutral</Text>
-              </View>
-              <View style={styles.legendItem}>
                 <View style={[styles.legendDot, { backgroundColor: Colors.accent.primary }]} />
-                <Text style={styles.legendText}>Positive</Text>
+                <Text style={styles.legendText}>Saved Journal</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: 'rgba(255, 255, 255, 0.12)' }]} />
+                <Text style={styles.legendText}>No Entry</Text>
               </View>
             </View>
           </GlassCard>
@@ -369,46 +379,182 @@ export default function JournalScreen() {
               linkedMood?.moodType ?? null,
             );
 
+            const isLetter = entry.subtype === 'letter';
+            const isSealed = isLetter && isLetterSealed(entry);
+            const isKeyLocked = isLetter && isLetterKeywordLocked(entry);
+            const countdown = isLetter ? getLetterCountdown(entry.reveal_at) : null;
+
+            const handlePress = () => {
+              if (isSealed) {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                customAlert(
+                  'Time Capsule Sealed',
+                  `This letter is sealed for your future self until ${new Date(entry.reveal_at!).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}. It will unlock automatically on that day.`
+                );
+              } else if (isKeyLocked) {
+                setUnlockModalEntry(entry);
+              } else {
+                router.push({
+                  pathname: '/journal-editor',
+                  params: { entryId: entry.id, mode: isLetter ? 'letter' : 'journal' },
+                });
+              }
+            };
+
             return (
               <Pressable
                 key={entry.id}
-                onPress={() =>
-                  router.push({
-                    pathname: '/journal-editor',
-                    params: { entryId: entry.id },
-                  })
-                }
+                onPress={handlePress}
                 onLongPress={() => handleDeleteEntry(entry.id, entry.title)}
                 delayLongPress={500}
               >
-                <GlassCard intensity="medium" padding="md" style={styles.entryCard}>
+                <GlassCard
+                  intensity="medium"
+                  padding="md"
+                  style={[
+                    styles.entryCard,
+                    isSealed && {
+                      backgroundColor: 'rgba(124, 58, 237, 0.12)',
+                      borderColor: 'rgba(192, 132, 252, 0.35)',
+                    },
+                    isKeyLocked && {
+                      backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                      borderColor: 'rgba(251, 191, 36, 0.35)',
+                    },
+                  ]}
+                >
                   <View style={styles.entryHeader}>
-                    <View style={[
-                      styles.sentimentBar,
-                      { backgroundColor: DOT_COLORS[sentiment] },
-                    ]} />
+                    <View
+                      style={[
+                        styles.sentimentBar,
+                        {
+                          backgroundColor: isSealed
+                            ? '#C084FC'
+                            : isKeyLocked
+                              ? '#FBBF24'
+                              : isLetter
+                                ? '#A855F7'
+                                : DOT_COLORS[sentiment],
+                        },
+                      ]}
+                    />
                     <View style={styles.entryContent}>
                       <View style={styles.entryDateRow}>
-                        <Text style={styles.entryDate}>{dateLabel}</Text>
-                        {moodDef && (
-                          <View style={styles.entryMoodChip}>
-                            <MoodFace
-                              expression={moodDef.expression}
-                              bgColor={moodDef.bgColor}
-                              faceColor={moodDef.faceColor}
-                              size="xs"
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={styles.entryDate}>{dateLabel}</Text>
+                          <Pressable
+                            hitSlop={8}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              toggleJournalComfort(entry.id, !entry.is_comfort);
+                              loadData();
+                            }}
+                          >
+                            <Feather
+                              name="heart"
+                              size={13}
+                              color={entry.is_comfort ? '#F472B6' : 'rgba(255, 255, 255, 0.25)'}
                             />
+                          </Pressable>
+                        </View>
+
+                        {/* Letter or Mood Badges */}
+                        {isLetter ? (
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                              backgroundColor: isSealed
+                                ? 'rgba(124, 58, 237, 0.25)'
+                                : isKeyLocked
+                                  ? 'rgba(245, 158, 11, 0.2)'
+                                  : 'rgba(124, 58, 237, 0.15)',
+                              paddingHorizontal: 7,
+                              paddingVertical: 2,
+                              borderRadius: Radius.pill,
+                              borderWidth: 1,
+                              borderColor: isSealed
+                                ? 'rgba(192, 132, 252, 0.35)'
+                                : isKeyLocked
+                                  ? 'rgba(251, 191, 36, 0.35)'
+                                  : 'rgba(192, 132, 252, 0.25)',
+                            }}
+                          >
+                            <Feather
+                              name={isSealed ? 'lock' : isKeyLocked ? 'key' : entry.recipient === 'past_self' ? 'heart' : 'mail'}
+                              size={10}
+                              color={isSealed ? '#FBBF24' : isKeyLocked ? '#FDE68A' : '#C084FC'}
+                            />
+                            <Text
+                              style={{
+                                fontFamily: Fonts.bodySemiBold,
+                                fontSize: FontSizes.tiny - 1,
+                                color: isSealed ? '#FBBF24' : isKeyLocked ? '#FDE68A' : '#C084FC',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              {isSealed
+                                ? countdown?.text
+                                : isKeyLocked
+                                  ? 'Locked'
+                                  : entry.recipient === 'future_self'
+                                    ? 'Delivered'
+                                    : entry.recipient === 'past_self'
+                                      ? 'Past Self'
+                                      : entry.recipient_name
+                                        ? `To: ${entry.recipient_name}`
+                                        : 'Letter'}
+                            </Text>
                           </View>
+                        ) : (
+                          moodDef && (
+                            <View style={styles.entryMoodChip}>
+                              <MoodFace
+                                expression={moodDef.expression}
+                                bgColor={moodDef.bgColor}
+                                faceColor={moodDef.faceColor}
+                                size="xs"
+                              />
+                            </View>
+                          )
                         )}
                       </View>
-                      <Text style={styles.entryTitle}>
-                        {entry.title ?? 'Journal Entry'}
+
+                      <Text
+                        style={[
+                          styles.entryTitle,
+                          isSealed && { color: '#E9D5FF' },
+                          isKeyLocked && { color: '#FEF3C7' },
+                        ]}
+                      >
+                        {entry.title ?? (isSealed ? 'Sealed Time Capsule' : isKeyLocked ? 'Protected Letter' : isLetter ? 'Time Letter' : 'Journal Entry')}
                       </Text>
-                      <Text style={styles.entryPreview} numberOfLines={1}>
-                        {preview}...
+
+                      <Text
+                        style={[
+                          styles.entryPreview,
+                          (isSealed || isKeyLocked) && { fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.55)' },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {isSealed
+                          ? 'Sealed and locked for your future self...'
+                          : isKeyLocked
+                            ? `Protected with secret keyword • Hint: "${entry.lock_hint}"`
+                            : `${preview}...`}
                       </Text>
                     </View>
-                    <Feather name="chevron-right" size={18} color={Colors.text.tertiary} />
+                    <Feather
+                      name={isSealed ? 'lock' : isKeyLocked ? 'key' : 'chevron-right'}
+                      size={18}
+                      color={isSealed ? '#C084FC' : isKeyLocked ? '#FBBF24' : Colors.text.tertiary}
+                    />
                   </View>
                 </GlassCard>
               </Pressable>
@@ -429,6 +575,19 @@ export default function JournalScreen() {
           </Pressable>
         )}
       </ScrollView>
+
+      {/* Keyword Unlock Modal */}
+      <LetterUnlockModal
+        visible={!!unlockModalEntry}
+        entry={unlockModalEntry}
+        onClose={() => setUnlockModalEntry(null)}
+        onUnlocked={(entry) => {
+          router.push({
+            pathname: '/journal-editor',
+            params: { entryId: entry.id, mode: 'letter' },
+          });
+        }}
+      />
     </GradientBackground>
   );
 }
