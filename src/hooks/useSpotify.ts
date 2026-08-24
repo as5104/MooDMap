@@ -24,6 +24,8 @@ import {
   getTopArtists,
   getTopTracks,
   getUserPlaylists,
+  createPlaylist as spotifyCreatePlaylist,
+  addTracksToPlaylist as spotifyAddTracksToPlaylist,
   searchArtists,
   searchForMood,
   searchTracks,
@@ -82,6 +84,8 @@ interface UseSpotifyReturn {
   // Data Actions
   refreshNowPlaying: () => Promise<void>;
   loadPlaylists: () => Promise<void>;
+  addTrackToSpotifyPlaylist: (playlistId: string, trackUri: string) => Promise<boolean>;
+  createSpotifyPlaylist: (name: string, description?: string) => Promise<SpotifyPlaylist | null>;
   loadTopTracks: (timeRange?: 'short_term' | 'medium_term' | 'long_term') => Promise<void>;
   loadRecentlyPlayed: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -453,6 +457,54 @@ export function useSpotify(): UseSpotifyReturn {
     }
   }, [getValidAccessToken]);
 
+  const addTrackToSpotifyPlaylist = useCallback(
+    async (playlistId: string, trackUri: string): Promise<boolean> => {
+      try {
+        const token = await getValidAccessToken();
+        if (!token) return false;
+        const res = await spotifyAddTracksToPlaylist(token, playlistId, [trackUri]);
+        if (res.success || res.snapshot_id) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          // Refresh playlists track counts in background
+          loadPlaylists();
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.warn('[useSpotify] Failed to add track to playlist:', err);
+        return false;
+      }
+    },
+    [getValidAccessToken, loadPlaylists]
+  );
+
+  const createSpotifyPlaylist = useCallback(
+    async (name: string, description?: string): Promise<SpotifyPlaylist | null> => {
+      try {
+        const token = await getValidAccessToken();
+        if (!token) return null;
+        let userId = spotifyUser?.id;
+        if (!userId) {
+          const user = await getCurrentUser(token);
+          userId = user?.id;
+        }
+        if (!userId) return null;
+        const newPl = await spotifyCreatePlaylist(token, userId, name, description);
+        if (newPl) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          // Prepend to playlists state
+          setPlaylists((prev) => [newPl, ...prev]);
+          return newPl;
+        }
+        return null;
+      } catch (err) {
+        console.warn('[useSpotify] Failed to create playlist:', err);
+        return null;
+      }
+    },
+    [getValidAccessToken, spotifyUser?.id]
+  );
+
   const loadTopTracks = useCallback(
     async (timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term') => {
       try {
@@ -799,6 +851,8 @@ export function useSpotify(): UseSpotifyReturn {
 
     refreshNowPlaying,
     loadPlaylists,
+    addTrackToSpotifyPlaylist,
+    createSpotifyPlaylist,
     loadTopTracks,
     loadRecentlyPlayed,
     refreshSession,

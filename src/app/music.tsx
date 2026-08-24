@@ -57,6 +57,7 @@ import { formatDuration as spotifyFormatDur, getBestImage as spotifyGetBestImage
 import { useAppStore } from '../stores/appStore';
 import { useTierStore } from '../stores/tierStore';
 import { isTrackComfort } from '../services/comfortBoxService';
+import { AddToSpotifyPlaylistModal, type SpotifyTrackTarget } from '../components/music/AddToSpotifyPlaylistModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -897,11 +898,13 @@ const SpotifyListView = React.memo(({
   onTrackPress,
   onSettingsPress,
   onShowQueue,
+  onAddToPlaylist,
 }: {
   onGoBack: () => void;
   onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => void;
   onSettingsPress: () => void;
   onShowQueue: () => void;
+  onAddToPlaylist?: (track: SpotifyTrackTarget) => void;
 }) => {
   const {
     playlists: spotifyPlaylists,
@@ -1701,11 +1704,13 @@ const SpotifyListView = React.memo(({
                   });
                 }}
               >
-                <Feather name="plus-circle" size={18} color="#FFF" />
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather name="plus-circle" size={18} color="#FFF" />
+                </View>
                 <Text style={styles.menuOptionText}>Add to Queue</Text>
               </Pressable>
 
-              {/* Add / Remove Favourite */}
+              {/* Add / Remove Comfort Box */}
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
@@ -1715,19 +1720,44 @@ const SpotifyListView = React.memo(({
                     const trackId = 'spotify_' + targetTrack.id;
                     const wasFav = spotifyFavorites.includes(trackId);
                     spotifyToggleFavorite(trackId);
-                    showSpotifyToast(wasFav ? 'Removed from Favourites' : 'Added to Favourites');
+                    showSpotifyToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
                   });
                 }}
               >
-                <Feather
-                  name="heart"
-                  size={18}
-                  color={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? Colors.error : '#FFF'}
-                  fill={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? Colors.error : 'transparent'}
-                />
-                <Text style={styles.menuOptionText}>
-                  {spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? 'Remove from Favourites' : 'Add to Favourites'}
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather
+                    name="heart"
+                    size={18}
+                    color={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? '#F472B6' : '#FFF'}
+                    fill={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? '#F472B6' : 'transparent'}
+                  />
+                </View>
+                <Text style={[styles.menuOptionText, spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) && { color: '#F472B6' }]}>
+                  {spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
+              </Pressable>
+
+              {/* Add to Spotify Playlist */}
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  if (!spotifyMenuTrack) return;
+                  const targetTrack = spotifyMenuTrack;
+                  handleCloseSpotifyMenu(() => {
+                    onAddToPlaylist?.({
+                      id: targetTrack.id,
+                      title: targetTrack.name,
+                      artist: targetTrack.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
+                      cover: targetTrack.album?.images?.[0]?.url,
+                      uri: targetTrack.uri || `spotify:track:${targetTrack.id}`,
+                    });
+                  });
+                }}
+              >
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather name="folder-plus" size={18} color="#1DB954" />
+                </View>
+                <Text style={[styles.menuOptionText, { color: '#1DB954' }]}>Add to Spotify Playlist</Text>
               </Pressable>
             </GlassCard>
           </RNAnimated.View>
@@ -1932,11 +1962,13 @@ const RecommendedListView = React.memo(({
   onTrackPress,
   onSettingsPress,
   onShowQueue,
+  onAddToPlaylist,
 }: {
   onGoBack: () => void;
   onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => void;
   onSettingsPress: () => void;
   onShowQueue: () => void;
+  onAddToPlaylist?: (track: SpotifyTrackTarget) => void;
 }) => {
   const isVIP = useTierStore((s) => s.isVIP);
   const spotifyConnected = useTierStore((s) => s.spotifyConnected);
@@ -2664,11 +2696,13 @@ const RecommendedListView = React.memo(({
                   });
                 }}
               >
-                <Feather name="plus-circle" size={18} color="#FFF" />
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather name="plus-circle" size={18} color="#FFF" />
+                </View>
                 <Text style={styles.menuOptionText}>Add to Queue</Text>
               </Pressable>
 
-              {/* Add / Remove Favourite */}
+              {/* Add / Remove Comfort Box */}
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
@@ -2677,19 +2711,44 @@ const RecommendedListView = React.memo(({
                   handleCloseMenu(() => {
                     const wasFav = favorites.includes(trackId);
                     toggleFavorite(trackId);
-                    showToast(wasFav ? 'Removed from Favourites' : 'Added to Favourites');
+                    showToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
                   });
                 }}
               >
-                <Feather
-                  name="heart"
-                  size={18}
-                  color={menuTrack?.track && favorites.includes(menuTrack.track.id) ? Colors.error : '#FFF'}
-                  fill={menuTrack?.track && favorites.includes(menuTrack.track.id) ? Colors.error : 'transparent'}
-                />
-                <Text style={styles.menuOptionText}>
-                  {menuTrack?.track && favorites.includes(menuTrack.track.id) ? 'Remove from Favourites' : 'Add to Favourites'}
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather
+                    name="heart"
+                    size={18}
+                    color={menuTrack?.track && favorites.includes(menuTrack.track.id) ? '#F472B6' : '#FFF'}
+                    fill={menuTrack?.track && favorites.includes(menuTrack.track.id) ? '#F472B6' : 'transparent'}
+                  />
+                </View>
+                <Text style={[styles.menuOptionText, menuTrack?.track && favorites.includes(menuTrack.track.id) && { color: '#F472B6' }]}>
+                  {menuTrack?.track && favorites.includes(menuTrack.track.id) ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
+              </Pressable>
+
+              {/* Add to Spotify Playlist */}
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  if (!menuTrack?.track) return;
+                  const target = menuTrack.track;
+                  handleCloseMenu(() => {
+                    onAddToPlaylist?.({
+                      id: target.id,
+                      title: target.title,
+                      artist: target.artist,
+                      cover: target.cover,
+                      uri: target.url?.startsWith('spotify:') ? target.url : `spotify:track:${target.id.replace('spotify_', '')}`,
+                    });
+                  });
+                }}
+              >
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather name="folder-plus" size={18} color="#1DB954" />
+                </View>
+                <Text style={[styles.menuOptionText, { color: '#1DB954' }]}>Add to Spotify Playlist</Text>
               </Pressable>
             </GlassCard>
           </RNAnimated.View>
@@ -3502,10 +3561,12 @@ const PlayerView = React.memo(({
   onGoBack,
   onShowQueue,
   isPlayerActive,
+  onAddToPlaylist,
 }: {
   onGoBack: () => void;
   onShowQueue: () => void;
   isPlayerActive: boolean;
+  onAddToPlaylist?: (track: SpotifyTrackTarget) => void;
 }) => {
   const {
     currentTrack,
@@ -3908,15 +3969,43 @@ const PlayerView = React.memo(({
                   setShowAppearanceMenu(false);
                 }}
               >
-                <Feather
-                  name="heart"
-                  size={18}
-                  color={isCurrentFav ? '#F472B6' : '#FFF'}
-                />
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather
+                    name="heart"
+                    size={18}
+                    color={isCurrentFav ? '#F472B6' : '#FFF'}
+                    fill={isCurrentFav ? '#F472B6' : 'transparent'}
+                  />
+                </View>
                 <Text style={[styles.menuOptionText, isCurrentFav && { color: '#F472B6' }]}>
                   {isCurrentFav ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
               </Pressable>
+
+              {/* Add to Spotify Playlist (if Spotify song or connected) */}
+              {(currentTrack.category === 'spotify' || currentTrack.url?.startsWith('spotify:') || currentTrack.id?.startsWith('spotify_') || isSpotify) && (
+                <Pressable
+                  style={styles.menuOption}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setShowAppearanceMenu(false);
+                    onAddToPlaylist?.({
+                      id: currentTrack.id,
+                      title: currentTrack.title,
+                      artist: currentTrack.artist,
+                      cover: currentTrack.cover,
+                      uri: currentTrack.url?.startsWith('spotify:')
+                        ? currentTrack.url
+                        : `spotify:track:${currentTrack.id.replace('spotify_', '')}`,
+                    });
+                  }}
+                >
+                  <View style={styles.menuOptionIconSlot}>
+                    <Feather name="folder-plus" size={18} color="#1DB954" />
+                  </View>
+                  <Text style={[styles.menuOptionText, { color: '#1DB954' }]}>Add to Spotify Playlist</Text>
+                </Pressable>
+              )}
 
               <View style={styles.menuDivider} />
 
@@ -4055,34 +4144,41 @@ const QueueItem = React.memo(({
             ? [{ translateY: dragY }]
             : [],
           zIndex: isDragging ? 999 : 1,
-          opacity: isDragging ? 0.92 : 1,
+          opacity: isDragging ? 0.95 : 1,
         },
-        isDragging && {
-          backgroundColor: 'rgba(141, 233, 29, 0.10)',
-          borderColor: 'rgba(141, 233, 29, 0.25)',
-          borderWidth: 1,
-        },
+        isDragging && styles.draggingQueueItemRow,
       ]}
     >
       <Pressable
         onPress={() => onTrackPress(track, index)}
-        style={({ pressed }) => [{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [styles.queueItemMainBtn, pressed && { opacity: 0.75 }]}
       >
-        <MusicCover cover={track.cover} style={styles.queueItemCover} iconSize={12} borderRadius={6} />
+        <View style={styles.queueItemCoverWrapper}>
+          <MusicCover cover={track.cover} style={styles.queueItemCover} iconSize={14} borderRadius={8} />
+          {isCurrent && (
+            <View style={styles.queueItemPlayingBadge}>
+              <Feather name="volume-2" size={10} color="#000000" />
+            </View>
+          )}
+        </View>
 
-        <View style={{ flex: 1 }}>
+        <View style={styles.queueItemInfo}>
           <Text numberOfLines={1} style={[styles.queueItemTitle, isCurrent && styles.activeQueueItemText]}>
             {track.title}
           </Text>
-          <Text numberOfLines={1} style={styles.queueItemArtist}>
+          <Text numberOfLines={1} style={[styles.queueItemArtist, isCurrent && styles.activeQueueItemSubText]}>
             {track.artist}
           </Text>
         </View>
       </Pressable>
 
       {/* Drag Handle */}
-      <View {...panResponder.panHandlers} style={styles.queueItemDragHandle}>
-        <Feather name="menu" size={18} color={isDragging ? Colors.accent.primary : 'rgba(255, 255, 255, 0.4)'} />
+      <View {...panResponder.panHandlers} style={styles.queueItemDragHandle} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <Feather
+          name="menu"
+          size={16}
+          color={isDragging ? '#1DB954' : isCurrent ? 'rgba(29, 185, 84, 0.85)' : 'rgba(255, 255, 255, 0.35)'}
+        />
       </View>
     </RNAnimated.View>
   );
@@ -4093,11 +4189,13 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue, isQueueRecommended, play, pause, resume, isPlaying } = useMusic();
 
   const SCREEN_HEIGHT = Dimensions.get('window').height;
+  const COMPACT_HEIGHT = Math.min(390, Math.round(SCREEN_HEIGHT * 0.52));
+  const EXPANDED_HEIGHT = Math.min(Math.round(SCREEN_HEIGHT * 0.78), 640);
 
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Reanimated shared value for height layout resizing on native UI thread
-  const sheetHeight = useSharedValue(340);
+  const sheetHeight = useSharedValue(COMPACT_HEIGHT);
 
   const animatedCardStyle = useAnimatedStyle(() => {
     return {
@@ -4144,14 +4242,14 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
 
   const toggleHeight = useCallback(() => {
     const nextState = !isExpanded;
-    const target = nextState ? SCREEN_HEIGHT * 0.72 : 340;
+    const target = nextState ? EXPANDED_HEIGHT : COMPACT_HEIGHT;
     sheetHeight.value = withSpring(target, {
-      damping: 24,
-      stiffness: 150,
+      damping: 22,
+      stiffness: 160,
     });
     setIsExpanded(nextState);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [isExpanded, SCREEN_HEIGHT]);
+  }, [isExpanded, EXPANDED_HEIGHT, COMPACT_HEIGHT, sheetHeight]);
 
   const [localQueue, setLocalQueue] = useState<{ track: Track; key: string }[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -4243,7 +4341,7 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
     const { draggedIndex: activeIdx, localQueue: activeQueue } = stateRef.current;
     if (activeIdx === null) return;
 
-    const itemHeight = 64;
+    const itemHeight = 66;
     const swapThreshold = itemHeight * 0.5;
     const scrollDelta = scrollOffsetRef.current - initialScrollOffsetRef.current;
     const relativeDy = dy + scrollDelta;
@@ -4357,7 +4455,7 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
       setQueue(syncedTracks, newIndex === -1 ? 0 : newIndex);
       syncReorderedQueue();
     }, 0);
-  }, [dragYVal, currentTrack, setQueue]);
+  }, [dragYVal, currentTrack, setQueue, syncReorderedQueue]);
 
   const handleQueueTrackClick = useCallback((clickedTrack: Track, clickedIndex: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -4408,8 +4506,8 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   }, [currentTrack?.id, draggedIndex, dragYVal, handleDragStart, handleDragMove, handleDragEnd, handleQueueTrackClick]);
 
   const getItemLayout = useCallback((_: any, index: number) => ({
-    length: 64,
-    offset: 64 * index + 12, // 12 = padding
+    length: 66,
+    offset: 66 * index + 6,
     index,
   }), []);
 
@@ -4431,92 +4529,70 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
         ]}
         pointerEvents="box-none"
       >
-        <Animated.View style={[styles.queuePopupContent, animatedCardStyle, { borderRadius: Radius.card, overflow: 'hidden' }]}>
-          <GlassCard
-            intensity="strong"
-            padding="none"
-            style={{
-              height: '100%',
-              flex: 1,
-              borderRadius: Radius.card
-            }}
-          >
-            {/* Tap to Resize Handle Bar */}
-            <Pressable onPress={toggleHeight} style={styles.modalDragHandleContainer}>
-              <Feather
-                name={isExpanded ? "chevron-down" : "chevron-up"}
-                size={22}
-                color={Colors.accent.primary}
-              />
-            </Pressable>
+        <Animated.View style={[styles.queuePopupCard, animatedCardStyle]}>
+          {/* Top Drag Handle Bar */}
+          <Pressable onPress={toggleHeight} style={styles.queueTopHandleBar} hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}>
+            <View style={styles.queueDragHandlePill} />
+          </Pressable>
 
-            <View style={styles.menuSelectorHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                <Feather name="list" size={18} color={Colors.accent.primary} />
-                <Text style={styles.menuTitleText}>Play Queue</Text>
-                {isQueueRecommended && (
-                  <View style={{
-                    backgroundColor: 'rgba(30, 215, 96, 0.12)',
-                    borderColor: 'rgba(30, 215, 96, 0.3)',
-                    borderWidth: 1,
-                    borderRadius: 999,
-                    paddingHorizontal: 8,
-                    paddingVertical: 2.5,
-                    marginLeft: 4,
-                  }}>
-                    <Text style={{
-                      fontFamily: Fonts.bodyBold,
-                      fontSize: FontSizes.tiny,
-                      color: '#1DB954',
-                      textTransform: 'uppercase',
-                      letterSpacing: 0.5,
-                    }}>
-                      Recommended
-                    </Text>
-                  </View>
-                )}
+          {/* Header */}
+          <View style={styles.queueHeaderRow}>
+            <View style={styles.queueHeaderLeft}>
+              <View style={styles.queueIconBadge}>
+                <Feather name="list" size={16} color="#1DB954" />
               </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                <Text style={{ fontFamily: Fonts.body, fontSize: FontSizes.tiny + 1, color: 'rgba(255,255,255,0.4)' }}>
-                  {localQueue.length} {localQueue.length === 1 ? 'track' : 'tracks'}
+              <View style={styles.queueHeaderTitles}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.queueTitleText}>Play Queue</Text>
+                  {isQueueRecommended && (
+                    <View style={styles.queueRecommendedBadge}>
+                      <Text style={styles.queueRecommendedBadgeText}>Recommended</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.queueSubtitleText}>
+                  {localQueue.length} {localQueue.length === 1 ? 'track' : 'tracks'} • Drag to reorder
                 </Text>
-                <Pressable onPress={handleClose} hitSlop={8} style={styles.menuSelectorCloseBtn}>
-                  <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
-                </Pressable>
               </View>
             </View>
 
-            <View style={styles.menuDivider} />
+            <Pressable onPress={handleClose} hitSlop={8} style={styles.queueCloseBtn}>
+              <Feather name="x" size={16} color="rgba(255, 255, 255, 0.7)" />
+            </Pressable>
+          </View>
 
-            {localQueue.length === 0 ? (
-              <View style={styles.queueEmptyContainer}>
-                <Feather name="music" size={32} color="rgba(255, 255, 255, 0.2)" style={{ marginBottom: Spacing.sm }} />
-                <Text style={styles.queueEmptyText}>Queue is empty</Text>
-                <Text style={[styles.queueEmptyText, { fontSize: FontSizes.tiny, marginTop: 4 }]}>Play a song to build your queue</Text>
+          <View style={styles.queueHeaderDivider} />
+
+          {localQueue.length === 0 ? (
+            <View style={styles.queueEmptyContainer}>
+              <View style={styles.queueEmptyIconCircle}>
+                <Feather name="music" size={24} color="#1DB954" />
               </View>
-            ) : (
-              <View ref={listContainerRef} style={{ flex: 1 }} collapsable={false}>
-                <FlatList
-                  ref={flatListRef}
-                  data={localQueue}
-                  keyExtractor={(item) => item.key}
-                  renderItem={renderItem}
-                  getItemLayout={getItemLayout}
-                  style={[styles.queueList, { maxHeight: undefined }]}
-                  showsVerticalScrollIndicator={false}
-                  scrollEnabled={draggedIndex === null}
-                  contentContainerStyle={styles.queueListContent}
-                  removeClippedSubviews={Platform.OS === 'android'}
-                  initialNumToRender={14}
-                  maxToRenderPerBatch={10}
-                  windowSize={7}
-                  onScroll={handleScroll}
-                  scrollEventThrottle={16}
-                  onScrollToIndexFailed={() => { }}
-                />
-              </View>
-            )}
-          </GlassCard>
+              <Text style={styles.queueEmptyTitle}>Queue is empty</Text>
+              <Text style={styles.queueEmptySubtitle}>Play a song from categories or Spotify to build your queue.</Text>
+            </View>
+          ) : (
+            <View ref={listContainerRef} style={styles.queueListWrapper} collapsable={false}>
+              <FlatList
+                ref={flatListRef}
+                data={localQueue}
+                keyExtractor={(item) => item.key}
+                renderItem={renderItem}
+                getItemLayout={getItemLayout}
+                style={styles.queueList}
+                showsVerticalScrollIndicator={true}
+                scrollEnabled={draggedIndex === null}
+                contentContainerStyle={styles.queueListContent}
+                removeClippedSubviews={Platform.OS === 'android'}
+                initialNumToRender={12}
+                maxToRenderPerBatch={10}
+                windowSize={5}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                onScrollToIndexFailed={() => { }}
+              />
+            </View>
+          )}
         </Animated.View>
       </RNAnimated.View>
     </View>
@@ -4687,6 +4763,15 @@ export default function MusicScreen() {
       });
     }, 2000);
   }, [toastOpacity]);
+
+  // Spotify Add to Playlist Modal states
+  const [showSpotifyPlaylistModal, setShowSpotifyPlaylistModal] = useState(false);
+  const [spotifyPlaylistTargetTrack, setSpotifyPlaylistTargetTrack] = useState<SpotifyTrackTarget | null>(null);
+
+  const handleOpenSpotifyPlaylistModal = useCallback((target: SpotifyTrackTarget) => {
+    setSpotifyPlaylistTargetTrack(target);
+    setShowSpotifyPlaylistModal(true);
+  }, []);
 
   // Modal / Options Menu internal states
   const [menuTrack, setMenuTrack] = useState<Track | null>(null);
@@ -5008,6 +5093,7 @@ export default function MusicScreen() {
               onTrackPress={handleTrackPress}
               onSettingsPress={handleOpenSpotifySettings}
               onShowQueue={handleShowQueue}
+              onAddToPlaylist={handleOpenSpotifyPlaylistModal}
             />
           ) : selectedCategory === 'spotify' ? (
             <SpotifyListView
@@ -5015,6 +5101,7 @@ export default function MusicScreen() {
               onTrackPress={handleTrackPress}
               onSettingsPress={handleOpenSpotifySettings}
               onShowQueue={handleShowQueue}
+              onAddToPlaylist={handleOpenSpotifyPlaylistModal}
             />
           ) : (
             <ListView
@@ -5034,6 +5121,7 @@ export default function MusicScreen() {
             onGoBack={handleGoBack}
             onShowQueue={handleShowQueue}
             isPlayerActive={view === 'player' && activeView === 'player' && !showQueuePopup}
+            onAddToPlaylist={handleOpenSpotifyPlaylistModal}
           />
         </Animated.View>
       </View>
@@ -5092,28 +5180,32 @@ export default function MusicScreen() {
                   }
                 }}
               >
-                <Feather name="plus-circle" size={18} color="#FFF" />
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather name="plus-circle" size={18} color="#FFF" />
+                </View>
                 <Text style={styles.menuOptionText}>Add to Queue</Text>
               </Pressable>
 
-              {/* Add/Remove Favorite */}
+              {/* Add/Remove Comfort Box */}
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
                   toggleFavorite(menuTrack.id);
                   setShowMenu(false);
                   const wasFav = favorites.includes(menuTrack.id);
-                  showToast(wasFav ? 'Removed from Favourites' : 'Added to Favourites');
+                  showToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
                 }}
               >
-                <Feather
-                  name="heart"
-                  size={18}
-                  color={favorites.includes(menuTrack.id) ? Colors.error : "#FFF"}
-                  fill={favorites.includes(menuTrack.id) ? Colors.error : "transparent"}
-                />
-                <Text style={styles.menuOptionText}>
-                  {favorites.includes(menuTrack.id) ? 'Remove from Favourites' : 'Add to Favourites'}
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather
+                    name="heart"
+                    size={18}
+                    color={favorites.includes(menuTrack.id) ? '#F472B6' : "#FFF"}
+                    fill={favorites.includes(menuTrack.id) ? '#F472B6' : "transparent"}
+                  />
+                </View>
+                <Text style={[styles.menuOptionText, favorites.includes(menuTrack.id) && { color: '#F472B6' }]}>
+                  {favorites.includes(menuTrack.id) ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
               </Pressable>
 
@@ -5124,7 +5216,9 @@ export default function MusicScreen() {
                   setShowPlaylistSelector(true);
                 }}
               >
-                <Feather name="folder-plus" size={18} color="#FFF" />
+                <View style={styles.menuOptionIconSlot}>
+                  <Feather name="folder-plus" size={18} color="#FFF" />
+                </View>
                 <Text style={styles.menuOptionText}>Add to Playlist</Text>
               </Pressable>
 
@@ -5138,7 +5232,9 @@ export default function MusicScreen() {
                     showToast('Removed from Playlist');
                   }}
                 >
-                  <Feather name="x-circle" size={18} color={Colors.error} />
+                  <View style={styles.menuOptionIconSlot}>
+                    <Feather name="x-circle" size={18} color={Colors.error} />
+                  </View>
                   <Text style={[styles.menuOptionText, { color: Colors.error }]}>Remove from Playlist</Text>
                 </Pressable>
               )}
@@ -5270,6 +5366,13 @@ export default function MusicScreen() {
           clearCache={handleClearSpotifyCache}
         />
       )}
+      {/* 5b. Spotify Add to Playlist Modal */}
+      <AddToSpotifyPlaylistModal
+        visible={showSpotifyPlaylistModal}
+        onClose={() => setShowSpotifyPlaylistModal(false)}
+        track={spotifyPlaylistTargetTrack}
+        onSuccess={(plName) => showToast(`Added to "${plName}"`)}
+      />
       {/* 6. Sort Overlay Bottom Sheet */}
       {showSortMenu && (
         <View style={styles.menuBackdrop}>
@@ -5990,6 +6093,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
   },
+  menuOptionIconSlot: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   menuOptionText: {
     fontFamily: Fonts.bodyMedium,
     fontSize: FontSizes.body,
@@ -6198,57 +6307,194 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     width: '100%',
   },
-  modalDragHandleContainer: {
+  queuePopupCard: {
+    backgroundColor: '#0E1210',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    overflow: 'hidden',
     width: '100%',
-    height: 32,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 14,
+  },
+  queueTopHandleBar: {
+    width: '100%',
+    paddingTop: 10,
+    paddingBottom: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'transparent',
   },
-  modalDragHandleLine: {
+  queueDragHandlePill: {
+    width: 38,
+    height: 4.5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  queueHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: 4,
+    paddingBottom: Spacing.sm,
+  },
+  queueHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    flex: 1,
+  },
+  queueIconBadge: {
     width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(29, 185, 84, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(29, 185, 84, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  queueHeaderTitles: {
+    flex: 1,
+  },
+  queueTitleText: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.body + 1,
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+  },
+  queueSubtitleText: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption - 1,
+    color: 'rgba(255, 255, 255, 0.5)',
+    marginTop: 2,
+  },
+  queueRecommendedBadge: {
+    backgroundColor: 'rgba(29, 185, 84, 0.16)',
+    borderColor: 'rgba(29, 185, 84, 0.4)',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+  },
+  queueRecommendedBadgeText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 9,
+    color: '#1DB954',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  queueCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  queueHeaderDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    marginHorizontal: Spacing.lg,
+    marginBottom: 6,
+  },
+  queueListWrapper: {
+    flex: 1,
+  },
+  queueList: {
+    flex: 1,
+  },
+  queueListContent: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 6,
+    gap: 8,
   },
   queueItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: Radius.md,
-    padding: Spacing.sm,
-    gap: Spacing.md,
-    height: 56,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    borderRadius: Radius.card,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    gap: 10,
+    height: 58,
   },
   activeQueueItemRow: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: 'rgba(29, 185, 84, 0.13)',
+    borderColor: 'rgba(29, 185, 84, 0.45)',
+  },
+  draggingQueueItemRow: {
+    backgroundColor: 'rgba(29, 185, 84, 0.22)',
+    borderColor: 'rgba(29, 185, 84, 0.7)',
+    shadowColor: '#1DB954',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  queueItemMainBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  queueItemCoverWrapper: {
+    position: 'relative',
+    width: 40,
+    height: 40,
   },
   queueItemCover: {
-    width: 36,
-    height: 36,
-    borderRadius: 6,
-    backgroundColor: '#1E1E24',
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#181A1B',
+  },
+  queueItemPlayingBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#1DB954',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#0E1210',
+  },
+  queueItemInfo: {
+    flex: 1,
   },
   queueItemTitle: {
     fontFamily: Fonts.bodySemiBold,
-    fontSize: FontSizes.bodySmall,
+    fontSize: FontSizes.bodySmall + 0.5,
     color: '#FFFFFF',
     marginBottom: 1,
   },
   activeQueueItemText: {
-    color: Colors.accent.primary,
+    color: '#1DB954',
+    fontFamily: Fonts.bodyBold,
   },
   queueItemArtist: {
     fontFamily: Fonts.body,
-    fontSize: FontSizes.tiny,
+    fontSize: FontSizes.tiny + 0.5,
     color: 'rgba(255, 255, 255, 0.5)',
+  },
+  activeQueueItemSubText: {
+    color: 'rgba(29, 185, 84, 0.8)',
   },
   queueItemDragHandle: {
     width: 36,
     height: 36,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -6285,30 +6531,47 @@ const styles = StyleSheet.create({
   },
   queueBackdropBg: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
   },
   queueSheetContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: Spacing.md,
-    paddingBottom: 40,
+    paddingHorizontal: 10,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 14,
   },
   queueEmptyContainer: {
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
-  queueEmptyText: {
-    color: 'rgba(255, 255, 255, 0.4)',
-    fontFamily: Fonts.body,
-  },
-  queueList: {
     flex: 1,
+    paddingVertical: Spacing.xxl,
+    paddingHorizontal: Spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  queueListContent: {
-    padding: Spacing.md,
-    gap: Spacing.sm,
+  queueEmptyIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(29, 185, 84, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(29, 185, 84, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.md,
+  },
+  queueEmptyTitle: {
+    fontFamily: Fonts.heading,
+    fontSize: FontSizes.body,
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  queueEmptySubtitle: {
+    fontFamily: Fonts.body,
+    fontSize: FontSizes.caption,
+    color: 'rgba(255, 255, 255, 0.5)',
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 18,
   },
   playerContainer: {
     flex: 1,

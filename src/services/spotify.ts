@@ -101,7 +101,9 @@ export interface SpotifyPlaylist {
   images: SpotifyImage[];
   tracks?: { total: number };
   items?: { total: number };
-  owner: { display_name: string };
+  owner: { id?: string; display_name: string };
+  collaborative?: boolean;
+  public?: boolean;
   uri: string;
   external_urls: { spotify: string };
 }
@@ -142,6 +144,9 @@ export function getAuthRequestConfig(): AuthSession.AuthRequestConfig {
     usePKCE: true,
     redirectUri: REDIRECT_URI,
     responseType: AuthSession.ResponseType.Code,
+    extraParams: {
+      show_dialog: 'true',
+    },
   };
 }
 
@@ -489,16 +494,216 @@ export async function createPlaylist(
   name: string,
   description?: string
 ): Promise<SpotifyPlaylist | null> {
-  return spotifyFetch<SpotifyPlaylist>(
-    accessToken,
-    `/users/${userId}/playlists`,
-    'POST',
-    {
-      name,
-      description: description ?? '',
-      public: false,
+  const body: any = {
+    name,
+    description: description ?? '',
+  };
+
+  try {
+    const endpoint = userId
+      ? `/users/${encodeURIComponent(userId)}/playlists`
+      : `/me/playlists`;
+
+    let res = await fetch(`${SPOTIFY_API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (res.status === 200 || res.status === 201) {
+      const data = await res.json();
+      return data as SpotifyPlaylist;
     }
-  );
+
+    // If userId route failed, try /me/playlists fallback
+    if (userId) {
+      const fallbackRes = await fetch(`${SPOTIFY_API_BASE}/me/playlists`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      if (fallbackRes.status === 200 || fallbackRes.status === 201) {
+        const data = await fallbackRes.json();
+        return data as SpotifyPlaylist;
+      }
+    }
+
+    const errText = await res.text();
+    console.warn(`[Spotify] Create playlist failed (${res.status}):`, errText);
+    return null;
+  } catch (err) {
+    console.warn('[Spotify] Create playlist exception:', err);
+    return null;
+  }
+}
+
+export interface AddTracksResult {
+  snapshot_id?: string;
+  success: boolean;
+  error?: string;
+  statusCode?: number;
+}
+
+/**
+ * Add tracks to a Spotify playlist by URI.
+ */
+export async function addTracksToPlaylist(
+  accessToken: string,
+  playlistId: string,
+  uris: string[]
+): Promise<AddTracksResult> {
+  if (!uris || uris.length === 0) {
+    return { success: false, error: 'No track URIs provided' };
+  }
+  const formattedUris = uris.map(formatSpotifyTrackUri).filter(Boolean);
+  if (formattedUris.length === 0) {
+    return { success: false, error: 'Invalid Spotify track URI' };
+  }
+
+  const cleanPlaylistId = playlistId.replace('spotify:playlist:', '').replace('spotify_', '').trim();
+  const endpoint = `${SPOTIFY_API_BASE}/playlists/${cleanPlaylistId}/items`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        uris: formattedUris,
+      }),
+    });
+
+    if (response.status === 200 || response.status === 201) {
+      const text = await response.text();
+      let data: any = {};
+      try {
+        if (text) data = JSON.parse(text);
+      } catch {}
+      return { success: true, snapshot_id: data.snapshot_id || 'ok', statusCode: response.status };
+    }
+
+    const errText = await response.text();
+    let parsedMsg = '';
+    try {
+      const errObj = JSON.parse(errText);
+      parsedMsg = errObj?.error?.message || errObj?.error_description || '';
+    } catch {}
+
+    if (response.status === 403) {
+      return {
+        success: false,
+        statusCode: 403,
+        error: 'You can only add songs to playlists you own or collaborate on.',
+      };
+    }
+
+    if (response.status === 401) {
+      return {
+        success: false,
+        statusCode: 401,
+        error: 'Spotify session expired. Please tap Reconnect.',
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        success: false,
+        statusCode: 404,
+        error: 'Playlist not found on Spotify.',
+      };
+    }
+
+    console.warn(`[Spotify] Add tracks to playlist failed (${response.status}):`, errText);
+    return {
+      success: false,
+      statusCode: response.status,
+      error: parsedMsg || `Spotify error (${response.status})`,
+    };
+  } catch (err: any) {
+    console.warn('[Spotify] Add tracks to playlist exception:', err);
+    return { success: false, error: err?.message || 'Network error' };
+  }
+}
+
+/**
+ * Format any track URI or ID into a clean Spotify URI (spotify:track:ID)
+ */
+export function formatSpotifyTrackUri(uriOrId: string): string {
+  if (!uriOrId) return '';
+  let clean = uriOrId.trim();
+
+  // If already standard spotify:track:xxx
+  if (clean.startsWith('spotify:track:')) {
+    const id = clean.replace('spotify:track:', '').split('?')[0].trim();
+    return `spotify:track:${id}`;
+  }
+
+  if (clean.includes('/track/')) {
+    const parts = clean.split('/track/');
+    const idPart = (parts[1] || '').split('?')[0].split('/')[0].trim();
+    if (idPart) return `spotify:track:${idPart}`;
+  }
+
+  // If starts with generic spotify:
+  if (clean.startsWith('spotify:')) {
+    return clean;
+  }
+
+  // Strip internal prefix like spotify_
+  if (clean.startsWith('spotify_')) {
+    clean = clean.replace('spotify_', '');
+  }
+
+  // Strip query params if any
+  clean = clean.split('?')[0].trim();
+
+  return `spotify:track:${clean}`;
+}
+
+/**
+ * Resolves any track (Spotify, Deezer fallback, or local) to a valid Spotify track URI.
+ * If already a valid Spotify URI/ID, returns it.
+ * If non-Spotify ID (e.g. dz_xxx, local ID), searches Spotify by track title + artist to find the official Spotify URI.
+ */
+export async function resolveSpotifyTrackUri(
+  accessToken: string,
+  track: { id?: string; uri?: string; title?: string; artist?: string }
+): Promise<string | null> {
+  const raw = track.uri || track.id || '';
+  const formatted = formatSpotifyTrackUri(raw);
+
+  // Check if it's already a valid Spotify track URI (standard 22-char base62)
+  const idPart = formatted.replace('spotify:track:', '');
+  const isValidSpotifyId = /^[0-9A-Za-z]{22}$/.test(idPart);
+
+  if (isValidSpotifyId) {
+    return formatted;
+  }
+
+  // If not a valid 22-char Spotify ID (e.g. dz_xxx, local, or title text), search Spotify
+  if (track.title) {
+    const cleanArtist = (track.artist || '').split(',')[0].trim();
+    const query = `${track.title} ${cleanArtist}`.trim();
+    try {
+      const searchRes = await searchTracks(accessToken, query, 3);
+      if (searchRes && searchRes.length > 0) {
+        return searchRes[0].uri || `spotify:track:${searchRes[0].id}`;
+      }
+    } catch (err) {
+      console.warn('[Spotify] Could not resolve Spotify URI via search:', err);
+    }
+  }
+
+  // Fallback to formatted if search didn't find
+  return formatted || null;
 }
 
 // Search Endpoint
