@@ -86,6 +86,14 @@ export const initializeDatabase = async (): Promise<void> => {
         mood_entry_id TEXT,
         prompt_used TEXT,
         images TEXT,
+        is_comfort INTEGER NOT NULL DEFAULT 0,
+        last_shown_at TEXT,
+        subtype TEXT NOT NULL DEFAULT 'journal',
+        recipient TEXT,
+        recipient_name TEXT,
+        reveal_at TEXT,
+        lock_keyword TEXT,
+        lock_hint TEXT,
         user_id TEXT
       );
 
@@ -178,11 +186,26 @@ export const initializeDatabase = async (): Promise<void> => {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS comfort_tracks (
+        id TEXT PRIMARY KEY NOT NULL,
+        track_name TEXT NOT NULL,
+        artist_name TEXT NOT NULL,
+        track_source TEXT NOT NULL,
+        album_art TEXT,
+        audio_url TEXT,
+        duration TEXT,
+        is_comfort INTEGER NOT NULL DEFAULT 1,
+        last_shown_at TEXT,
+        created_at TEXT NOT NULL,
+        user_id TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_recsig_user ON recommendation_signals(user_id);
       CREATE INDEX IF NOT EXISTS idx_recsig_track ON recommendation_signals(track_id);
       CREATE INDEX IF NOT EXISTS idx_recsig_mood ON recommendation_signals(mood_type);
       CREATE INDEX IF NOT EXISTS idx_drt_user_date ON daily_recommended_tracks(user_id, date);
       CREATE INDEX IF NOT EXISTS idx_drt_track ON daily_recommended_tracks(track_id);
+      CREATE INDEX IF NOT EXISTS idx_comfort_tracks_user ON comfort_tracks(user_id);
     `);
 
     // Run safe migrations for existing tables
@@ -195,6 +218,66 @@ export const initializeDatabase = async (): Promise<void> => {
       db.execSync('ALTER TABLE mood_entries ADD COLUMN sleep_quality INTEGER;');
     } catch (_) {
       // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE journal_entries ADD COLUMN is_comfort INTEGER NOT NULL DEFAULT 0;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE journal_entries ADD COLUMN last_shown_at TEXT;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync("ALTER TABLE journal_entries ADD COLUMN subtype TEXT NOT NULL DEFAULT 'journal';");
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE journal_entries ADD COLUMN recipient TEXT;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE journal_entries ADD COLUMN recipient_name TEXT;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE journal_entries ADD COLUMN reveal_at TEXT;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE journal_entries ADD COLUMN lock_keyword TEXT;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('ALTER TABLE journal_entries ADD COLUMN lock_hint TEXT;');
+    } catch (_) {
+      // Column already exists, safe to ignore
+    }
+    try {
+      db.execSync('CREATE INDEX IF NOT EXISTS idx_journal_comfort ON journal_entries(is_comfort);');
+    } catch (_) {
+      // Safe to ignore
+    }
+    try {
+      db.execSync('CREATE INDEX IF NOT EXISTS idx_journal_subtype ON journal_entries(subtype);');
+    } catch (_) {
+      // Safe to ignore
+    }
+    try {
+      db.execSync('CREATE INDEX IF NOT EXISTS idx_journal_reveal_at ON journal_entries(reveal_at);');
+    } catch (_) {
+      // Safe to ignore
+    }
+    try {
+      db.execSync('CREATE INDEX IF NOT EXISTS idx_journal_lock_keyword ON journal_entries(lock_keyword);');
+    } catch (_) {
+      // Safe to ignore
     }
 
     console.log('[DB] Database initialized successfully');

@@ -34,6 +34,14 @@ export const journalEntries = sqliteTable('journal_entries', {
   moodEntryId: text('mood_entry_id'),
   promptUsed: text('prompt_used'),
   images: text('images'), // JSON array of Supabase Storage URLs
+  isComfort: integer('is_comfort').notNull().default(0), // 0 = false, 1 = true
+  lastShownAt: text('last_shown_at'), // ISO datetime when surfaced in Comfort Box
+  subtype: text('subtype').notNull().default('journal'), // 'journal' | 'letter'
+  recipient: text('recipient'), // 'future_self' | 'past_self' | 'someone'
+  recipientName: text('recipient_name'), // optional recipient name
+  revealAt: text('reveal_at'), // ISO datetime when future letter unlocks
+  lockKeyword: text('lock_keyword'), // Secret keyword password for past_self / someone letters
+  lockHint: text('lock_hint'), // Hint to remember secret keyword
   userId: text('user_id'),
 });
 
@@ -111,4 +119,19 @@ export const dailyRecommendedTracks = sqliteTable('daily_recommended_tracks', {
   artistName: text('artist_name').notNull(),
   date: text('date').notNull(), // YYYY-MM-DD
   createdAt: text('created_at').notNull(),
+});
+
+// Comfort Tracks
+export const comfortTracks = sqliteTable('comfort_tracks', {
+  id: text('id').primaryKey(), // trackId
+  trackName: text('track_name').notNull(),
+  artistName: text('artist_name').notNull(),
+  trackSource: text('track_source').notNull(),
+  albumArt: text('album_art'),
+  audioUrl: text('audio_url'),
+  duration: text('duration'),
+  isComfort: integer('is_comfort').notNull().default(1),
+  lastShownAt: text('last_shown_at'),
+  createdAt: text('created_at').notNull(),
+  userId: text('user_id'),
 });
