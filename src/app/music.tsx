@@ -914,15 +914,27 @@ const SpotifyListView = React.memo(({
     addToQueue: spotifyAddToQueueHook,
   } = useSpotify();
   const { currentTrack, isPlaying, favorites: spotifyFavorites, toggleFavorite: spotifyToggleFavorite, setQueue: setMusicQueue } = useMusic();
+  const dataVersion = useAppStore((s) => s.dataVersion);
+  const insets = useSafeAreaInsets();
 
   // — Spotify Track 3-dot menu state & animations —
   const [spotifyMenuTrack, setSpotifyMenuTrack] = useState<any | null>(null);
   const [showSpotifyMenu, setShowSpotifyMenu] = useState(false);
   const menuSlideAnim = useRef(new RNAnimated.Value(220)).current;
   const menuOpacityAnim = useRef(new RNAnimated.Value(0)).current;
+  const prevShowSpotifyMenuRef = useRef(false);
+  const isSpotifyMenuClosingRef = useRef(false);
+  const lastSpotifyMenuCloseTimeRef = useRef(0);
+
+  const isSpotifyMenuComfort = useMemo(() => {
+    if (!spotifyMenuTrack) return false;
+    const id1 = 'spotify_' + spotifyMenuTrack.id;
+    const id2 = spotifyMenuTrack.id;
+    return spotifyFavorites.includes(id1) || spotifyFavorites.includes(id2) || isTrackComfort(id1) || isTrackComfort(id2);
+  }, [spotifyMenuTrack, spotifyFavorites, dataVersion]);
 
   useEffect(() => {
-    if (showSpotifyMenu) {
+    if (showSpotifyMenu && !prevShowSpotifyMenuRef.current) {
       menuSlideAnim.setValue(220);
       menuOpacityAnim.setValue(0);
       RNAnimated.parallel([
@@ -939,9 +951,22 @@ const SpotifyListView = React.memo(({
         }),
       ]).start();
     }
+    prevShowSpotifyMenuRef.current = showSpotifyMenu;
   }, [showSpotifyMenu, menuSlideAnim, menuOpacityAnim]);
 
+  const handleSpotifyMorePress = useCallback((item: any) => {
+    if (Date.now() - lastSpotifyMenuCloseTimeRef.current < 450) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    isSpotifyMenuClosingRef.current = false;
+    setSpotifyMenuTrack(item);
+    setShowSpotifyMenu(true);
+  }, []);
+
   const handleCloseSpotifyMenu = useCallback((onComplete?: () => void) => {
+    if (isSpotifyMenuClosingRef.current) return;
+    isSpotifyMenuClosingRef.current = true;
+    lastSpotifyMenuCloseTimeRef.current = Date.now();
+
     RNAnimated.parallel([
       RNAnimated.timing(menuOpacityAnim, {
         toValue: 0,
@@ -955,6 +980,8 @@ const SpotifyListView = React.memo(({
       }),
     ]).start(() => {
       setShowSpotifyMenu(false);
+      setSpotifyMenuTrack(null);
+      isSpotifyMenuClosingRef.current = false;
       if (onComplete) onComplete();
     });
   }, [menuOpacityAnim, menuSlideAnim]);
@@ -977,12 +1004,6 @@ const SpotifyListView = React.memo(({
       });
     }, 2000);
   }, [spToastOpacity]);
-
-  const handleSpotifyMorePress = useCallback((item: any) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSpotifyMenuTrack(item);
-    setShowSpotifyMenu(true);
-  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -1647,12 +1668,12 @@ const SpotifyListView = React.memo(({
             style={{
               width: '100%',
               paddingHorizontal: 14,
-              paddingBottom: 110,
+              paddingBottom: Math.max(insets.bottom, 20) + 16,
               transform: [{ translateY: menuSlideAnim }],
             }}
             pointerEvents="box-none"
           >
-            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)' }]}>
+            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)', overflow: 'hidden' }]}>
               {/* Track header */}
               <View style={styles.menuHeader}>
                 <Image
@@ -1714,12 +1735,12 @@ const SpotifyListView = React.memo(({
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
-                  if (!spotifyMenuTrack) return;
+                  if (!spotifyMenuTrack || isSpotifyMenuClosingRef.current) return;
                   const targetTrack = spotifyMenuTrack;
+                  const trackObj = convertSpotifyTrackToTrack(targetTrack);
+                  const wasFav = isSpotifyMenuComfort;
                   handleCloseSpotifyMenu(() => {
-                    const trackId = 'spotify_' + targetTrack.id;
-                    const wasFav = spotifyFavorites.includes(trackId);
-                    spotifyToggleFavorite(trackId);
+                    spotifyToggleFavorite(trackObj);
                     showSpotifyToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
                   });
                 }}
@@ -1728,12 +1749,12 @@ const SpotifyListView = React.memo(({
                   <Feather
                     name="heart"
                     size={18}
-                    color={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? '#F472B6' : '#FFF'}
-                    fill={spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? '#F472B6' : 'transparent'}
+                    color={isSpotifyMenuComfort ? '#F472B6' : '#FFF'}
+                    fill={isSpotifyMenuComfort ? '#F472B6' : 'transparent'}
                   />
                 </View>
-                <Text style={[styles.menuOptionText, spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) && { color: '#F472B6' }]}>
-                  {spotifyMenuTrack && spotifyFavorites.includes('spotify_' + spotifyMenuTrack.id) ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
+                <Text style={[styles.menuOptionText, isSpotifyMenuComfort && { color: '#F472B6' }]}>
+                  {isSpotifyMenuComfort ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
               </Pressable>
 
@@ -1994,6 +2015,7 @@ const RecommendedListView = React.memo(({
   const user = useAppStore((s) => s.user);
   const moodRecommendationSession = useAppStore((s) => s.moodRecommendationSession);
   const setMoodRecommendationSession = useAppStore((s) => s.setMoodRecommendationSession);
+  const insets = useSafeAreaInsets();
 
   const [recommendedRecs, setRecommendedRecs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2006,6 +2028,29 @@ const RecommendedListView = React.memo(({
   const [showMenu, setShowMenu] = useState(false);
   const menuSlideAnim = useRef(new RNAnimated.Value(220)).current;
   const menuOpacityAnim = useRef(new RNAnimated.Value(0)).current;
+  const prevShowMenuRef = useRef(false);
+  const isMenuClosingRef = useRef(false);
+  const lastMenuCloseTimeRef = useRef(0);
+  const dataVersion = useAppStore((s) => s.dataVersion);
+
+  const isRecMenuComfort = useMemo(() => {
+    if (!menuTrack?.track) return false;
+    const id1 = menuTrack.track.id;
+    const id2 = id1.startsWith('spotify_') ? id1.replace('spotify_', '') : `spotify_${id1}`;
+    return favorites.includes(id1) || favorites.includes(id2) || isTrackComfort(id1) || isTrackComfort(id2);
+  }, [menuTrack, favorites, dataVersion]);
+
+  useEffect(() => {
+    if (showMenu && !prevShowMenuRef.current) {
+      menuSlideAnim.setValue(220);
+      menuOpacityAnim.setValue(0);
+      RNAnimated.parallel([
+        RNAnimated.timing(menuOpacityAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+        RNAnimated.spring(menuSlideAnim, { toValue: 0, tension: 75, friction: 12, useNativeDriver: true }),
+      ]).start();
+    }
+    prevShowMenuRef.current = showMenu;
+  }, [showMenu, menuSlideAnim, menuOpacityAnim]);
 
   // Signal tracking sets
   const completedTrackIdsRef = useRef<Set<string>>(new Set(moodRecommendationSession?.completedTrackIds ?? []));
@@ -2033,31 +2078,28 @@ const RecommendedListView = React.memo(({
   }, [toastOpacity]);
 
   const handleOpenMenu = useCallback((track: any) => {
+    if (Date.now() - lastMenuCloseTimeRef.current < 450) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    isMenuClosingRef.current = false;
     setMenuTrack(track);
     setShowMenu(true);
   }, []);
 
   const handleCloseMenu = useCallback((onComplete?: () => void) => {
+    if (isMenuClosingRef.current) return;
+    isMenuClosingRef.current = true;
+    lastMenuCloseTimeRef.current = Date.now();
+
     RNAnimated.parallel([
       RNAnimated.timing(menuOpacityAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
       RNAnimated.timing(menuSlideAnim, { toValue: 220, duration: 180, useNativeDriver: true }),
     ]).start(() => {
       setShowMenu(false);
+      setMenuTrack(null);
+      isMenuClosingRef.current = false;
       if (onComplete) onComplete();
     });
   }, [menuOpacityAnim, menuSlideAnim]);
-
-  useEffect(() => {
-    if (showMenu) {
-      menuSlideAnim.setValue(220);
-      menuOpacityAnim.setValue(0);
-      RNAnimated.parallel([
-        RNAnimated.timing(menuOpacityAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-        RNAnimated.spring(menuSlideAnim, { toValue: 0, tension: 75, friction: 12, useNativeDriver: true }),
-      ]).start();
-    }
-  }, [showMenu, menuSlideAnim, menuOpacityAnim]);
 
   // Load initial recommendation batch (20 songs)
   const loadRecommendations = useCallback(async (forceFresh: boolean = false) => {
@@ -2639,12 +2681,12 @@ const RecommendedListView = React.memo(({
             style={{
               width: '100%',
               paddingHorizontal: 14,
-              paddingBottom: 110,
+              paddingBottom: Math.max(insets.bottom, 20) + 16,
               transform: [{ translateY: menuSlideAnim }],
             }}
             pointerEvents="box-none"
           >
-            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)' }]}>
+            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)', overflow: 'hidden' }]}>
               {/* Track header */}
               <View style={styles.menuHeader}>
                 <MusicCover cover={menuTrack?.track?.cover} style={[styles.menuTrackCover, { borderRadius: 12 }]} iconSize={14} />
@@ -2706,11 +2748,11 @@ const RecommendedListView = React.memo(({
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
-                  if (!menuTrack?.track) return;
-                  const trackId = menuTrack.track.id;
+                  if (!menuTrack?.track || isMenuClosingRef.current) return;
+                  const target = menuTrack.track;
+                  const wasFav = isRecMenuComfort;
                   handleCloseMenu(() => {
-                    const wasFav = favorites.includes(trackId);
-                    toggleFavorite(trackId);
+                    toggleFavorite(target);
                     showToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
                   });
                 }}
@@ -2719,12 +2761,12 @@ const RecommendedListView = React.memo(({
                   <Feather
                     name="heart"
                     size={18}
-                    color={menuTrack?.track && favorites.includes(menuTrack.track.id) ? '#F472B6' : '#FFF'}
-                    fill={menuTrack?.track && favorites.includes(menuTrack.track.id) ? '#F472B6' : 'transparent'}
+                    color={isRecMenuComfort ? '#F472B6' : '#FFF'}
+                    fill={isRecMenuComfort ? '#F472B6' : 'transparent'}
                   />
                 </View>
-                <Text style={[styles.menuOptionText, menuTrack?.track && favorites.includes(menuTrack.track.id) && { color: '#F472B6' }]}>
-                  {menuTrack?.track && favorites.includes(menuTrack.track.id) ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
+                <Text style={[styles.menuOptionText, isRecMenuComfort && { color: '#F472B6' }]}>
+                  {isRecMenuComfort ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
               </Pressable>
 
@@ -2949,7 +2991,14 @@ const ListView = React.memo(({
   }, [localTracks]);
 
   // Optimize favorites lookups
+  const dataVersion = useAppStore((s) => s.dataVersion);
   const favoritesSet = useMemo(() => new Set(favorites), [favorites]);
+
+  const isTrackFavorited = useCallback((trackId: string) => {
+    if (!trackId) return false;
+    const altId = trackId.startsWith('spotify_') ? trackId.replace('spotify_', '') : `spotify_${trackId}`;
+    return favoritesSet.has(trackId) || favoritesSet.has(altId) || isTrackComfort(trackId) || isTrackComfort(altId);
+  }, [favoritesSet]);
 
   // Filtered tracks memo
   const tracksListToRender = useMemo(() => {
@@ -2964,7 +3013,7 @@ const ListView = React.memo(({
     let tracks = [...getCategoryTracks(category)];
 
     if (activeFilter === 'liked') {
-      tracks = tracks.filter(t => favoritesSet.has(t.id));
+      tracks = tracks.filter(t => isTrackFavorited(t.id));
     }
 
     if (debouncedSearchQuery.trim() !== '') {
@@ -2987,7 +3036,7 @@ const ListView = React.memo(({
     }
 
     return tracks;
-  }, [category, activeFilter, selectedPlaylist, playlists, favoritesSet, debouncedSearchQuery, getCategoryTracks, sortBy]);
+  }, [category, activeFilter, selectedPlaylist, playlists, isTrackFavorited, debouncedSearchQuery, getCategoryTracks, sortBy, dataVersion]);
 
   const currentPlayingIndex = useMemo(() => {
     if (!currentTrack) return -1;
@@ -3586,6 +3635,7 @@ const PlayerView = React.memo(({
   } = useMusic();
 
   const { nowPlaying, refreshNowPlaying } = useSpotify();
+  const dataVersion = useAppStore((s) => s.dataVersion);
   const isSpotify = currentTrack?.category === 'spotify';
   const isTrackPlaying = isPlaying;
 
@@ -3599,6 +3649,97 @@ const PlayerView = React.memo(({
     }
   });
   const [showAppearanceMenu, setShowAppearanceMenu] = useState(false);
+  const menuSlideAnim = useRef(new RNAnimated.Value(220)).current;
+  const menuOpacityAnim = useRef(new RNAnimated.Value(0)).current;
+  const prevShowAppearanceMenuRef = useRef(false);
+  const isAppearanceMenuClosingRef = useRef(false);
+  const lastAppearanceMenuCloseTimeRef = useRef(0);
+
+  useEffect(() => {
+    if (showAppearanceMenu && !prevShowAppearanceMenuRef.current) {
+      menuSlideAnim.setValue(220);
+      menuOpacityAnim.setValue(0);
+      RNAnimated.parallel([
+        RNAnimated.timing(menuOpacityAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        RNAnimated.spring(menuSlideAnim, {
+          toValue: 0,
+          tension: 75,
+          friction: 12,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+    prevShowAppearanceMenuRef.current = showAppearanceMenu;
+  }, [showAppearanceMenu, menuSlideAnim, menuOpacityAnim]);
+
+  const handleOpenAppearanceMenu = useCallback(() => {
+    if (Date.now() - lastAppearanceMenuCloseTimeRef.current < 450) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    isAppearanceMenuClosingRef.current = false;
+    setShowAppearanceMenu(true);
+  }, []);
+
+  const handleCloseAppearanceMenu = useCallback((onComplete?: () => void) => {
+    if (isAppearanceMenuClosingRef.current) return;
+    isAppearanceMenuClosingRef.current = true;
+    lastAppearanceMenuCloseTimeRef.current = Date.now();
+
+    RNAnimated.parallel([
+      RNAnimated.timing(menuOpacityAnim, {
+        toValue: 0,
+        duration: 160,
+        useNativeDriver: true,
+      }),
+      RNAnimated.timing(menuSlideAnim, {
+        toValue: 220,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowAppearanceMenu(false);
+      isAppearanceMenuClosingRef.current = false;
+      if (onComplete) onComplete();
+    });
+  }, [menuOpacityAnim, menuSlideAnim]);
+
+  // Toast notification state for PlayerView
+  const [playerToastMsg, setPlayerToastMsg] = useState<string | null>(null);
+  const [playerToastType, setPlayerToastType] = useState<'success' | 'warning' | 'error'>('success');
+  const playerToastOpacity = useRef(new RNAnimated.Value(0)).current;
+  const playerToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showPlayerToast = useCallback((message: string, type: 'success' | 'warning' | 'error' = 'success') => {
+    if (playerToastTimerRef.current) clearTimeout(playerToastTimerRef.current);
+    setPlayerToastMsg(message);
+    setPlayerToastType(type);
+    playerToastOpacity.setValue(0);
+    RNAnimated.timing(playerToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    playerToastTimerRef.current = setTimeout(() => {
+      RNAnimated.timing(playerToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+        setPlayerToastMsg(null);
+      });
+    }, 2000);
+  }, [playerToastOpacity]);
+
+  // Rotation animation for vinyl mode
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    if (isTrackPlaying && isPlayerActive && playerViewMode === 'vinyl') {
+      rotation.value = rotation.value % 360;
+      rotation.value = withRepeat(
+        withTiming(rotation.value + 360, { duration: 35000, easing: Easing.linear }),
+        -1,
+        false
+      );
+    } else {
+      cancelAnimation(rotation);
+    }
+  }, [isTrackPlaying, isPlayerActive, playerViewMode, rotation]);
 
   const setPlayerViewMode = useCallback((mode: 'vinyl' | 'poster') => {
     setPlayerViewModeState(mode);
@@ -3647,27 +3788,17 @@ const PlayerView = React.memo(({
 
   const insets = useSafeAreaInsets();
 
-  // Artwork rotation animation for Vinyl mode
-  const rotation = useSharedValue(0);
-  useEffect(() => {
-    if (isTrackPlaying && isPlayerActive && playerViewMode === 'vinyl') {
-      rotation.value = rotation.value % 360;
-      rotation.value = withRepeat(
-        withTiming(rotation.value + 360, { duration: 35000, easing: Easing.linear }),
-        -1,
-        false
-      );
-    } else {
-      cancelAnimation(rotation);
-    }
-  }, [isTrackPlaying, isPlayerActive, playerViewMode, rotation]);
-
   const rotatedArtworkStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
   if (!currentTrack) return null;
 
-  const isCurrentFav = favorites.includes(currentTrack.id) || isTrackComfort(currentTrack.id);
+  const isCurrentFav = useMemo(() => {
+    if (!currentTrack) return false;
+    const id1 = currentTrack.id;
+    const id2 = id1.startsWith('spotify_') ? id1.replace('spotify_', '') : `spotify_${id1}`;
+    return favorites.includes(id1) || favorites.includes(id2) || isTrackComfort(id1) || isTrackComfort(id2);
+  }, [currentTrack, favorites, dataVersion]);
   const isPosterMode = playerViewMode === 'poster';
 
   return (
@@ -3723,10 +3854,7 @@ const PlayerView = React.memo(({
         {/* Single 3-dot button — opens unified Track Options sheet (Favourite + Appearance) */}
         <Pressable
           style={isPosterMode ? styles.glassIconBtn : styles.closeBtn}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setShowAppearanceMenu(true);
-          }}
+          onPress={handleOpenAppearanceMenu}
         >
           <Feather
             name="more-vertical"
@@ -3939,23 +4067,44 @@ const PlayerView = React.memo(({
       </View>
 
       {/* Track Options Modal — Favourite + Appearance */}
-      {showAppearanceMenu && (
-        <View style={styles.menuBackdropOverlay}>
+      <Modal
+        visible={showAppearanceMenu}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={() => handleCloseAppearanceMenu()}
+      >
+        <RNAnimated.View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            justifyContent: 'flex-end',
+            opacity: menuOpacityAnim,
+          }}
+        >
           <BlurView
             intensity={Platform.OS === 'ios' ? 40 : 25}
             tint="dark"
             style={StyleSheet.absoluteFill}
           />
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowAppearanceMenu(false)} />
-          <View style={[styles.menuContainer, { paddingBottom: insets.bottom + 130 }]}>
-            <GlassCard intensity="strong" padding="none" style={styles.menuContent}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => handleCloseAppearanceMenu()} />
+          <RNAnimated.View
+            style={{
+              width: '100%',
+              paddingHorizontal: 14,
+              paddingBottom: Math.max(insets.bottom, 20) + 16,
+              transform: [{ translateY: menuSlideAnim }],
+            }}
+            pointerEvents="box-none"
+          >
+            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)', overflow: 'hidden' }]}>
               {/* Header */}
               <View style={styles.menuSelectorHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
                   <Feather name="more-vertical" size={18} color={Colors.accent.primary} />
                   <Text style={styles.menuTitleText}>Track Options</Text>
                 </View>
-                <Pressable onPress={() => setShowAppearanceMenu(false)} hitSlop={8} style={styles.menuSelectorCloseBtn}>
+                <Pressable onPress={() => handleCloseAppearanceMenu()} hitSlop={8} style={styles.menuSelectorCloseBtn}>
                   <Feather name="x" size={18} color="rgba(255,255,255,0.6)" />
                 </Pressable>
               </View>
@@ -3964,9 +4113,13 @@ const PlayerView = React.memo(({
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
+                  if (!currentTrack || isAppearanceMenuClosingRef.current) return;
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  toggleFavorite(currentTrack.id);
-                  setShowAppearanceMenu(false);
+                  const wasFav = isCurrentFav;
+                  handleCloseAppearanceMenu(() => {
+                    toggleFavorite(currentTrack);
+                    showPlayerToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
+                  });
                 }}
               >
                 <View style={styles.menuOptionIconSlot}>
@@ -3988,15 +4141,16 @@ const PlayerView = React.memo(({
                   style={styles.menuOption}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setShowAppearanceMenu(false);
-                    onAddToPlaylist?.({
-                      id: currentTrack.id,
-                      title: currentTrack.title,
-                      artist: currentTrack.artist,
-                      cover: currentTrack.cover,
-                      uri: currentTrack.url?.startsWith('spotify:')
-                        ? currentTrack.url
-                        : `spotify:track:${currentTrack.id.replace('spotify_', '')}`,
+                    handleCloseAppearanceMenu(() => {
+                      onAddToPlaylist?.({
+                        id: currentTrack.id,
+                        title: currentTrack.title,
+                        artist: currentTrack.artist,
+                        cover: currentTrack.cover,
+                        uri: currentTrack.url?.startsWith('spotify:')
+                          ? currentTrack.url
+                          : `spotify:track:${currentTrack.id.replace('spotify_', '')}`,
+                      });
                     });
                   }}
                 >
@@ -4025,7 +4179,7 @@ const PlayerView = React.memo(({
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     setPlayerViewMode('vinyl');
-                    setShowAppearanceMenu(false);
+                    handleCloseAppearanceMenu();
                   }}
                 >
                   <View style={[
@@ -4056,7 +4210,7 @@ const PlayerView = React.memo(({
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     setPlayerViewMode('poster');
-                    setShowAppearanceMenu(false);
+                    handleCloseAppearanceMenu();
                   }}
                 >
                   <View style={[
@@ -4079,8 +4233,61 @@ const PlayerView = React.memo(({
                 </Pressable>
               </View>
             </GlassCard>
+          </RNAnimated.View>
+        </RNAnimated.View>
+      </Modal>
+
+      {/* Toast Notification for PlayerView */}
+      {playerToastMsg && (
+        <RNAnimated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            bottom: insets.bottom + 80,
+            left: 0,
+            right: 0,
+            alignItems: 'center',
+            zIndex: 999999,
+            opacity: playerToastOpacity,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: 'rgba(30, 30, 36, 0.95)',
+              paddingVertical: 10,
+              paddingHorizontal: 20,
+              borderRadius: 9999,
+              borderWidth: 1,
+              borderColor: playerToastType === 'error'
+                ? 'rgba(255, 107, 107, 0.25)'
+                : playerToastType === 'warning'
+                  ? 'rgba(255, 190, 106, 0.25)'
+                  : 'rgba(141, 233, 29, 0.25)',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 6,
+              maxWidth: '85%',
+            }}
+          >
+            <Feather
+              name={playerToastType === 'success' ? 'check-circle' : 'alert-circle'}
+              size={14}
+              color={playerToastType === 'error'
+                ? Colors.error
+                : playerToastType === 'warning'
+                  ? Colors.warning
+                  : Colors.accent.primary}
+            />
+            <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption, flexShrink: 1 }}>
+              {playerToastMsg}
+            </Text>
           </View>
-        </View>
+        </RNAnimated.View>
       )}
     </View>
   );
@@ -4743,6 +4950,7 @@ export default function MusicScreen() {
     cacheSize,
     clearCache,
   } = useMusic();
+  const dataVersion = useAppStore((s) => s.dataVersion);
 
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -4776,17 +4984,76 @@ export default function MusicScreen() {
   // Modal / Options Menu internal states
   const [menuTrack, setMenuTrack] = useState<Track | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const menuSlideAnim = useRef(new RNAnimated.Value(220)).current;
+  const menuOpacityAnim = useRef(new RNAnimated.Value(0)).current;
+  const prevShowMenuRef = useRef(false);
+  const isMenuClosingRef = useRef(false);
+  const lastMenuCloseTimeRef = useRef(0);
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
   const [showCreatePlaylistModal, setShowCreatePlaylistModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [activePlaylistId, setActivePlaylistId] = useState<string | undefined>(undefined);
 
+  const isMenuTrackComfort = useMemo(() => {
+    if (!menuTrack) return false;
+    const id1 = menuTrack.id;
+    const id2 = id1.startsWith('spotify_') ? id1.replace('spotify_', '') : `spotify_${id1}`;
+    return favorites.includes(id1) || favorites.includes(id2) || isTrackComfort(id1) || isTrackComfort(id2);
+  }, [menuTrack, favorites, dataVersion]);
+
+  useEffect(() => {
+    if (showMenu && !prevShowMenuRef.current) {
+      menuSlideAnim.setValue(220);
+      menuOpacityAnim.setValue(0);
+      RNAnimated.parallel([
+        RNAnimated.timing(menuOpacityAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        RNAnimated.spring(menuSlideAnim, {
+          toValue: 0,
+          tension: 75,
+          friction: 12,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+    prevShowMenuRef.current = showMenu;
+  }, [showMenu, menuSlideAnim, menuOpacityAnim]);
+
   const handleMorePress = useCallback((track: Track, fromPlaylistId?: string) => {
+    if (Date.now() - lastMenuCloseTimeRef.current < 450) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    isMenuClosingRef.current = false;
     setMenuTrack(track);
     setActivePlaylistId(fromPlaylistId);
     setShowMenu(true);
   }, []);
+
+  const handleCloseMenu = useCallback((onComplete?: () => void) => {
+    if (isMenuClosingRef.current) return;
+    isMenuClosingRef.current = true;
+    lastMenuCloseTimeRef.current = Date.now();
+
+    RNAnimated.parallel([
+      RNAnimated.timing(menuOpacityAnim, {
+        toValue: 0,
+        duration: 160,
+        useNativeDriver: true,
+      }),
+      RNAnimated.timing(menuSlideAnim, {
+        toValue: 220,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowMenu(false);
+      setMenuTrack(null);
+      isMenuClosingRef.current = false;
+      if (onComplete) onComplete();
+    });
+  }, [menuOpacityAnim, menuSlideAnim]);
 
   // Internal navigation state
   const [view, setView] = useState<'categories' | 'list' | 'recommended' | 'player'>(
@@ -5147,20 +5414,34 @@ export default function MusicScreen() {
       )}
 
       {/* 1. Track Action Options Menu Backdrop Overlay */}
-      {showMenu && menuTrack && (
-        <View style={styles.menuBackdrop}>
+      <Modal
+        visible={showMenu && !!menuTrack}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={() => handleCloseMenu()}
+      >
+        <RNAnimated.View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.65)', justifyContent: 'flex-end', opacity: menuOpacityAnim }}>
           {/* Backdrop touch area */}
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowMenu(false)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => handleCloseMenu()} />
 
           {/* Menu content */}
-          <View style={styles.menuContainer} pointerEvents="box-none">
-            <GlassCard intensity="strong" padding="none" style={styles.menuContent}>
+          <RNAnimated.View
+            style={{
+              width: '100%',
+              paddingHorizontal: 14,
+              paddingBottom: Math.max(insets.bottom, 20) + 16,
+              transform: [{ translateY: menuSlideAnim }],
+            }}
+            pointerEvents="box-none"
+          >
+            <GlassCard intensity="strong" padding="none" style={[styles.menuContent, { borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.14)', overflow: 'hidden' }]}>
               {/* Header */}
               <View style={styles.menuHeader}>
-                <MusicCover cover={menuTrack.cover} style={styles.menuTrackCover} iconSize={12} borderRadius={10} />
+                <MusicCover cover={menuTrack?.cover || ''} style={styles.menuTrackCover} iconSize={12} borderRadius={10} />
                 <View style={{ flex: 1 }}>
-                  <Text numberOfLines={1} style={styles.menuTrackTitle}>{menuTrack.title}</Text>
-                  <Text numberOfLines={1} style={styles.menuTrackArtist}>{menuTrack.artist}</Text>
+                  <Text numberOfLines={1} style={styles.menuTrackTitle}>{menuTrack?.title}</Text>
+                  <Text numberOfLines={1} style={styles.menuTrackArtist}>{menuTrack?.artist}</Text>
                 </View>
               </View>
 
@@ -5170,12 +5451,12 @@ export default function MusicScreen() {
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
-                  if (currentTrack && currentTrack.category !== menuTrack.category) {
-                    setShowMenu(false);
+                  if (currentTrack && currentTrack.category !== menuTrack?.category) {
+                    handleCloseMenu();
                     showToast('Cannot mix categories in queue', 'warning');
-                  } else {
+                  } else if (menuTrack) {
                     addToQueue(menuTrack);
-                    setShowMenu(false);
+                    handleCloseMenu();
                     showToast('Added to Queue');
                   }
                 }}
@@ -5190,22 +5471,25 @@ export default function MusicScreen() {
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
-                  toggleFavorite(menuTrack.id);
-                  setShowMenu(false);
-                  const wasFav = favorites.includes(menuTrack.id);
-                  showToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
+                  if (!menuTrack || isMenuClosingRef.current) return;
+                  const target = menuTrack;
+                  const wasFav = isMenuTrackComfort;
+                  handleCloseMenu(() => {
+                    toggleFavorite(target);
+                    showToast(wasFav ? 'Removed from Comfort Box' : 'Added to Comfort Box');
+                  });
                 }}
               >
                 <View style={styles.menuOptionIconSlot}>
                   <Feather
                     name="heart"
                     size={18}
-                    color={favorites.includes(menuTrack.id) ? '#F472B6' : "#FFF"}
-                    fill={favorites.includes(menuTrack.id) ? '#F472B6' : "transparent"}
+                    color={isMenuTrackComfort ? '#F472B6' : "#FFF"}
+                    fill={isMenuTrackComfort ? '#F472B6' : "transparent"}
                   />
                 </View>
-                <Text style={[styles.menuOptionText, favorites.includes(menuTrack.id) && { color: '#F472B6' }]}>
-                  {favorites.includes(menuTrack.id) ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
+                <Text style={[styles.menuOptionText, isMenuTrackComfort && { color: '#F472B6' }]}>
+                  {isMenuTrackComfort ? 'Remove from Comfort Box' : 'Add to Comfort Box'}
                 </Text>
               </Pressable>
 
@@ -5213,7 +5497,9 @@ export default function MusicScreen() {
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
-                  setShowPlaylistSelector(true);
+                  handleCloseMenu(() => {
+                    setShowPlaylistSelector(true);
+                  });
                 }}
               >
                 <View style={styles.menuOptionIconSlot}>
@@ -5223,12 +5509,12 @@ export default function MusicScreen() {
               </Pressable>
 
               {/* Conditional: Remove from Playlist (only if opened from inside a playlist) */}
-              {activePlaylistId !== undefined && (
+              {activePlaylistId !== undefined && menuTrack && (
                 <Pressable
                   style={[styles.menuOption, { borderTopWidth: 0.5, borderTopColor: 'rgba(255,255,255,0.06)' }]}
                   onPress={async () => {
                     await removeTrackFromPlaylist(activePlaylistId, menuTrack.id);
-                    setShowMenu(false);
+                    handleCloseMenu();
                     showToast('Removed from Playlist');
                   }}
                 >
@@ -5239,9 +5525,9 @@ export default function MusicScreen() {
                 </Pressable>
               )}
             </GlassCard>
-          </View>
-        </View>
-      )}
+          </RNAnimated.View>
+        </RNAnimated.View>
+      </Modal>
 
       {/* 2. Add To Playlist Selector Overlay */}
       {showPlaylistSelector && menuTrack && (
@@ -6986,16 +7272,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent.primary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  menuBackdropOverlay: {
-    position: 'absolute',
-    top: -120,
-    left: -SCREEN_PADDING,
-    right: -SCREEN_PADDING,
-    bottom: -120,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    zIndex: 9999,
-    justifyContent: 'flex-end',
   },
   recommendedMoodBanner: {
     flexDirection: 'row',

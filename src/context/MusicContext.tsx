@@ -58,7 +58,7 @@ interface MusicContextType {
   next: () => Promise<void> | void;
   prev: () => Promise<void> | void;
   seekTo: (seconds: number) => void;
-  toggleFavorite: (trackId: string) => Promise<void>;
+  toggleFavorite: (trackOrId: string | Partial<Track>, fallbackTrackData?: Partial<Track>) => Promise<void>;
   toggleShuffle: () => void;
   toggleRepeatMode: () => void;
   cyclePlaybackMode: () => void;
@@ -358,6 +358,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const lastFetchedTrackIdRef = useRef<string | null>(null);
 
   // Keep refs in sync with state
+  const favoritesRef = useRef(favorites);
+  useEffect(() => { favoritesRef.current = favorites; }, [favorites]);
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
@@ -1674,47 +1676,81 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => clearInterval(interval);
   }, [currentTrack?.id, isPlaying, duration, triggerPlaybackRefresh, seekTo]);
 
-  const toggleFavorite = useCallback(async (trackId: string) => {
+  const toggleFavorite = useCallback(async (trackOrId: string | Partial<Track>, fallbackTrackData?: Partial<Track>) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    let isNowComfort = false;
-    setFavorites(prev => {
-      const isFav = prev.includes(trackId);
-      isNowComfort = !isFav;
-      const updated = isFav
-        ? prev.filter(id => id !== trackId)
-        : [...prev, trackId];
-      // Persist asynchronously — fire-and-forget inside updater to avoid stale closure
-      SecureStore.setItemAsync('music_favorites', JSON.stringify(updated)).catch(e => {
-        console.error('[MusicContext] SecureStore save error:', e);
-      });
-      return updated;
+
+    const trackId = typeof trackOrId === 'string' ? trackOrId : trackOrId.id;
+    if (!trackId) return;
+
+    const altTrackId = trackId.startsWith('spotify_')
+      ? trackId.replace('spotify_', '')
+      : `spotify_${trackId}`;
+
+    const { isTrackComfort, toggleTrackComfort } = require('../services/comfortBoxService');
+    const { useAppStore } = require('../stores/appStore');
+
+    // 1. Resolve full track metadata
+    let resolvedTrack: Partial<Track> | undefined =
+      typeof trackOrId === 'object' && trackOrId !== null
+        ? trackOrId
+        : undefined;
+
+    if (!resolvedTrack) {
+      if (currentTrackRef.current && (currentTrackRef.current.id === trackId || currentTrackRef.current.id === altTrackId)) {
+        resolvedTrack = currentTrackRef.current;
+      } else if (queueRef.current) {
+        resolvedTrack = queueRef.current.find(t => t.id === trackId || t.id === altTrackId);
+      }
+    }
+
+    if (!resolvedTrack && fallbackTrackData) {
+      resolvedTrack = { ...fallbackTrackData, id: trackId };
+    }
+
+    if (!resolvedTrack) {
+      try {
+        const { TRACKS_LIBRARY } = require('../data/musicTracks');
+        resolvedTrack = TRACKS_LIBRARY.find((t: Track) => t.id === trackId || t.id === altTrackId);
+      } catch (_) {}
+    }
+
+    // 2. Check current comfort status from SQLite and memory
+    const isDbComfort = isTrackComfort(trackId);
+    const isMemComfort = favoritesRef.current.includes(trackId) || favoritesRef.current.includes(altTrackId);
+    const isCurrentlyComfort = isDbComfort || isMemComfort;
+    const nextComfort = !isCurrentlyComfort;
+
+    // 3. Update in-memory favorites and SecureStore
+    const newFavorites = nextComfort
+      ? [...favoritesRef.current.filter(id => id !== trackId && id !== altTrackId), trackId]
+      : favoritesRef.current.filter(id => id !== trackId && id !== altTrackId);
+
+    favoritesRef.current = newFavorites;
+    setFavorites(newFavorites);
+
+    SecureStore.setItemAsync('music_favorites', JSON.stringify(newFavorites)).catch(e => {
+      console.error('[MusicContext] SecureStore save error:', e);
     });
 
-    // Also sync to Comfort Box (comfort_tracks database)
+    // 4. Persist to SQLite comfort_tracks table
     try {
-      const activeTrack = currentTrackRef.current?.id === trackId
-        ? currentTrackRef.current
-        : queueRef.current?.find(t => t.id === trackId);
+      const userId = useAppStore.getState().user?.id;
+      toggleTrackComfort(
+        {
+          id: trackId,
+          title: resolvedTrack?.title || 'Unknown Track',
+          artist: resolvedTrack?.artist || 'Unknown Artist',
+          source: resolvedTrack?.category || 'ambient',
+          cover: resolvedTrack?.cover || undefined,
+          url: resolvedTrack?.url || undefined,
+          duration: resolvedTrack?.duration || undefined,
+        },
+        nextComfort,
+        userId
+      );
 
-      if (activeTrack) {
-        const { useAppStore } = require('../stores/appStore');
-        const userId = useAppStore.getState().user?.id;
-        const { toggleTrackComfort } = require('../services/comfortBoxService');
-        toggleTrackComfort(
-          {
-            id: activeTrack.id,
-            title: activeTrack.title,
-            artist: activeTrack.artist,
-            source: activeTrack.category,
-            cover: activeTrack.cover,
-            url: activeTrack.url,
-            duration: activeTrack.duration,
-          },
-          isNowComfort,
-          userId
-        );
-        useAppStore.getState().refreshData();
-      }
+      // 5. Trigger store refresh to update all subscriber components
+      useAppStore.getState().refreshData();
     } catch (err) {
       console.warn('[MusicContext] Failed to sync comfort track on toggleFavorite:', err);
     }

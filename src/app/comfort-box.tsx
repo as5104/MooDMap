@@ -29,7 +29,6 @@ import {
   getComfortTracks,
   getSurfacedComfortItem,
   toggleJournalComfort,
-  toggleTrackComfort,
   type ComfortTrackRow,
   type ComfortSurfacedItem,
 } from '@/services/comfortBoxService';
@@ -43,7 +42,8 @@ type FilterTab = 'all' | 'journals' | 'tracks';
 export default function ComfortBoxScreen() {
   const insets = useSafeAreaInsets();
   const user = useAppStore((s) => s.user);
-  const { play, pause, isPlaying, currentTrack } = useMusic();
+  const dataVersion = useAppStore((s) => s.dataVersion);
+  const { play, pause, isPlaying, currentTrack, toggleFavorite } = useMusic();
 
   const [filter, setFilter] = useState<FilterTab>('all');
   const [journals, setJournals] = useState<JournalEntryRow[]>([]);
@@ -63,7 +63,7 @@ export default function ComfortBoxScreen() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, dataVersion]);
 
   const totalCount = journals.length + tracks.length;
 
@@ -83,15 +83,15 @@ export default function ComfortBoxScreen() {
 
   const handleRemoveTrack = (track: ComfortTrackRow) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    toggleTrackComfort(
-      {
-        id: track.id,
-        title: track.track_name,
-        artist: track.artist_name,
-      },
-      false,
-      user?.id
-    );
+    toggleFavorite({
+      id: track.id,
+      title: track.track_name,
+      artist: track.artist_name,
+      category: (track.track_source as any) || 'ambient',
+      cover: track.album_art || '',
+      url: track.audio_url || '',
+      duration: track.duration || '3:30',
+    });
     loadData();
   };
 

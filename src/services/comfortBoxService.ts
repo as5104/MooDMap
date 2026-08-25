@@ -57,9 +57,15 @@ export function toggleTrackComfort(
   isComfort: boolean,
   userId?: string
 ): void {
+  if (!track.id) return;
+
+  const altId = track.id.startsWith('spotify_')
+    ? track.id.replace('spotify_', '')
+    : `spotify_${track.id}`;
+
   const existing = queryFirst<ComfortTrackRow>(
-    `SELECT id FROM comfort_tracks WHERE id = ?`,
-    [track.id]
+    `SELECT id FROM comfort_tracks WHERE id = ? OR id = ?`,
+    [track.id, altId]
   );
 
   const now = new Date().toISOString();
@@ -74,7 +80,7 @@ export function toggleTrackComfort(
         track.cover || null,
         track.url || null,
         track.duration || null,
-        track.id,
+        existing.id,
       ]
     );
   } else if (isComfort) {
@@ -100,9 +106,15 @@ export function toggleTrackComfort(
  * Check if a track is marked as comfort anchor
  */
 export function isTrackComfort(trackId: string): boolean {
+  if (!trackId) return false;
+
+  const altId = trackId.startsWith('spotify_')
+    ? trackId.replace('spotify_', '')
+    : `spotify_${trackId}`;
+
   const row = queryFirst<{ is_comfort: number }>(
-    `SELECT is_comfort FROM comfort_tracks WHERE id = ? AND is_comfort = 1`,
-    [trackId]
+    `SELECT is_comfort FROM comfort_tracks WHERE (id = ? OR id = ?) AND is_comfort = 1`,
+    [trackId, altId]
   );
   return Boolean(row && row.is_comfort === 1);
 }

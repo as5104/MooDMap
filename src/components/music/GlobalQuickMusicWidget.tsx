@@ -23,7 +23,7 @@ import { MusicCover } from '@/components/music/MusicCover';
 import { Colors } from '@/constants/colors';
 import { Fonts, FontSizes } from '@/constants/typography';
 import { useAppStore } from '@/stores/appStore';
-import { toggleTrackComfort, isTrackComfort } from '@/services/comfortBoxService';
+import { isTrackComfort } from '@/services/comfortBoxService';
 
 interface GlobalQuickMusicWidgetProps {
   inline?: boolean;
@@ -32,14 +32,15 @@ interface GlobalQuickMusicWidgetProps {
 export const GlobalQuickMusicWidget: React.FC<GlobalQuickMusicWidgetProps> = () => {
   const insets = useSafeAreaInsets();
   const segments = useSegments();
-  const { currentTrack, isPlaying, pause, resume, next, prev } = useMusic();
-  const user = useAppStore((s) => s.user);
+  const { currentTrack, isPlaying, pause, resume, next, prev, favorites, toggleFavorite } = useMusic();
   const dataVersion = useAppStore((s) => s.dataVersion);
-  const refreshData = useAppStore((s) => s.refreshData);
 
   const isComfort = useMemo(() => {
-    return currentTrack ? isTrackComfort(currentTrack.id) : false;
-  }, [currentTrack, dataVersion]);
+    if (!currentTrack) return false;
+    const id1 = currentTrack.id;
+    const id2 = id1.startsWith('spotify_') ? id1.replace('spotify_', '') : `spotify_${id1}`;
+    return favorites.includes(id1) || favorites.includes(id2) || isTrackComfort(id1) || isTrackComfort(id2);
+  }, [currentTrack, favorites, dataVersion]);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -223,21 +224,7 @@ export const GlobalQuickMusicWidget: React.FC<GlobalQuickMusicWidgetProps> = () 
               <Pressable
                 onPress={() => {
                   if (!currentTrack) return;
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  toggleTrackComfort(
-                    {
-                      id: currentTrack.id,
-                      title: currentTrack.title,
-                      artist: currentTrack.artist,
-                      source: currentTrack.category,
-                      cover: currentTrack.cover,
-                      url: currentTrack.url,
-                      duration: currentTrack.duration,
-                    },
-                    !isComfort,
-                    user?.id
-                  );
-                  refreshData();
+                  toggleFavorite(currentTrack);
                 }}
                 hitSlop={6}
                 style={styles.controlBtn}
@@ -246,6 +233,7 @@ export const GlobalQuickMusicWidget: React.FC<GlobalQuickMusicWidgetProps> = () 
                   name="heart"
                   size={13}
                   color={isComfort ? '#F472B6' : 'rgba(255,255,255,0.4)'}
+                  fill={isComfort ? '#F472B6' : 'transparent'}
                 />
               </Pressable>
 
