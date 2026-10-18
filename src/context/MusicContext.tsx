@@ -8,7 +8,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { tagTrackToMood } from '../services/recommendationEngine';
 import { useAlertStore } from '../stores/alertStore';
 import { clearAudioCache, getAudioCacheSize, getCachedAudioUri } from '../utils/audioCache';
@@ -565,6 +565,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             currentIndexRef.current = 0;
             setCurrentIndex(0);
             setCurrentTrack(cleanQueue[0]);
+            setCurrentTime(progressSec);
+            currentTimeRef.current = progressSec;
+            setDuration(trackInfo.durationSec || durationSec);
 
             return;
           } else if (queueIdx === 0) {
@@ -737,7 +740,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           for (const ct of comfortList) {
             if (!list.includes(ct.id)) list.push(ct.id);
           }
-        } catch (_) {}
+        } catch (_) { }
         setFavorites(list);
       } catch (e) {
         console.error('[MusicContext] Failed to load favorites:', e);
@@ -929,7 +932,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (contextUri) {
       currentContextUriRef.current = contextUri;
-    } else if (_isFromSearch === true) {
+    } else {
       currentContextUriRef.current = undefined;
     }
 
@@ -1590,8 +1593,19 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 
       if (duration > 0 && nextTime >= duration) {
+        const isSpotify = currentTrackRef.current?.category === 'spotify';
+        if (isSpotify && !isQueueCustomRef.current) {
+          // Let Spotify's cloud player handle track advancement natively!
+          // Clear interval so it does not repeat every 1s, clamp time at duration, and trigger sync once.
+          clearInterval(interval);
+          setCurrentTime(duration);
+          currentTimeRef.current = duration;
+          triggerPlaybackRefresh();
+          return;
+        }
+
         clearInterval(interval);
-        console.log('[MusicContext] Spotify track finished. Auto-advancing...');
+        console.log('[MusicContext] Track finished. Auto-advancing...');
 
         // Auto-advance logic
         const rm = repeatModeRef.current;
@@ -1611,15 +1625,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             nextIdx = Math.floor(Math.random() * q.length);
           } else if (nextIdx >= q.length) {
             nextIdx = 0;
-          }
-
-          // Let Spotify's native player advance and sync state once the poll updates.
-          const isSpotify = currentTrackRef.current?.category === 'spotify';
-          if (isSpotify && !isQueueCustomRef.current) {
-            console.log('[MusicContext] Spotify auto-advancing: waiting for native sync to prevent UI flicker');
-            // Trigger an immediate sync request so the poll catches it quickly
-            triggerPlaybackRefresh();
-            return;
           }
 
           // Update local state immediately for instant UI feedback (for local audio or custom queues)
@@ -1711,7 +1716,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       try {
         const { TRACKS_LIBRARY } = require('../data/musicTracks');
         resolvedTrack = TRACKS_LIBRARY.find((t: Track) => t.id === trackId || t.id === altTrackId);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 2. Check current comfort status from SQLite and memory
