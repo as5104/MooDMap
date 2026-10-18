@@ -2,9 +2,10 @@
  * MoodMap - Music Hub
  */
 
-import { Feather } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { File, Paths } from 'expo-file-system';
+import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,10 +40,11 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withSpring,
-  withTiming,
+  withTiming
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, G, Mask, Path, Rect } from 'react-native-svg';
+import { AddToSpotifyPlaylistModal, type SpotifyTrackTarget } from '../components/music/AddToSpotifyPlaylistModal';
 import { FloatingMiniPlayer } from '../components/music/FloatingMiniPlayer';
 import { MusicCover } from '../components/music/MusicCover';
 import { AnimatedPressable, GlassCard, GradientBackground } from '../components/ui';
@@ -52,12 +54,12 @@ import { Radius, SCREEN_PADDING, Spacing } from '../constants/layout';
 import { Fonts, FontSizes } from '../constants/typography';
 import { Playlist, Track, TRACKS_LIBRARY, useMusic, usePlaybackTime } from '../context/MusicContext';
 import { useSpotify } from '../hooks/useSpotify';
+import { isTrackComfort } from '../services/comfortBoxService';
+import { getMusicPreferences, saveMusicPreferences } from '../services/musicPreferenceService';
 import { getSmartRecommendations, MOOD_GENRE_MAP } from '../services/recommendationEngine';
 import { formatDuration as spotifyFormatDur, getBestImage as spotifyGetBestImage } from '../services/spotify';
 import { useAppStore } from '../stores/appStore';
 import { useTierStore } from '../stores/tierStore';
-import { isTrackComfort } from '../services/comfortBoxService';
-import { AddToSpotifyPlaylistModal, type SpotifyTrackTarget } from '../components/music/AddToSpotifyPlaylistModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -157,34 +159,26 @@ const PlayerBackground = React.memo(({ currentTrack }: { currentTrack: Track | n
         style={StyleSheet.absoluteFill}
       />
 
-      {/* Dynamic glowing orbs in matching colors */}
-      <View style={StyleSheet.absoluteFill}>
-        {/* Top-right vibrant matching orb */}
-        <View style={[
-          styles.playerOrb,
-          {
-            width: 380,
-            height: 380,
-            borderRadius: 190,
-            backgroundColor: palette.glow,
-            top: -60,
-            right: -60,
-          }
-        ]} />
+      {/* Top-right vibrant ambient light bloom (smooth gradient falloff, zero hard circular edges) */}
+      <LinearGradient
+        colors={[palette.glow, 'rgba(0, 0, 0, 0)']}
+        locations={[0, 0.7]}
+        start={{ x: 1, y: 0 }}
+        end={{ x: 0.15, y: 0.75 }}
+        style={StyleSheet.absoluteFill}
+      />
 
-        {/* Bottom-left vibrant matching orb */}
-        <View style={[
-          styles.playerOrb,
-          {
-            width: 320,
-            height: 320,
-            borderRadius: 160,
-            backgroundColor: `hsla(${(parseFloat(palette.glow.match(/\d+/)?.[0] ?? '0') + 120) % 360}, 75%, 50%, 0.35)`,
-            bottom: -90,
-            left: -30,
-          }
-        ]} />
-      </View>
+      {/* Bottom-left matching ambient light bloom */}
+      <LinearGradient
+        colors={[
+          `hsla(${(parseFloat(palette.glow.match(/\d+/)?.[0] ?? '0') + 120) % 360}, 75%, 50%, 0.35)`,
+          'rgba(0, 0, 0, 0)'
+        ]}
+        locations={[0, 0.7]}
+        start={{ x: 0, y: 1 }}
+        end={{ x: 0.85, y: 0.25 }}
+        style={StyleSheet.absoluteFill}
+      />
 
       {/* Full screen Blur — slightly lower intensity so colors are extremely visible */}
       {Platform.OS === 'ios' ? (
@@ -892,6 +886,249 @@ ListViewSearchBar.displayName = 'ListViewSearchBar';
 
 const SPOTIFY_CACHE_FILE = new File(Paths.document, 'spotify_playlist_cache.json');
 let spotifyPlaylistCache: Record<string, any[]> = {};
+const SPOTIFY_ARTIST_CACHE_FILE = new File(Paths.document, 'spotify_artist_cache.json');
+let spotifyArtistCache: Record<string, any> = {};
+const ARTIST_PROFILE_TTL = 1000 * 60 * 60 * 24; // 24 hours TTL for artist tracks/albums
+const ARTIST_SPOTLIGHT_TTL = 1000 * 60 * 60 * 48; // 48 hours TTL for artist spotlights/avatars
+
+// Perfectly centered concentric progress ring for the rotating Spotify Cover Orb
+const SpotifyCoverProgressRing = React.memo(({ size = 42 }: { size?: number }) => {
+  const { currentTime, duration } = usePlaybackTime();
+  const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
+  const radius = size / 2;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - progress * circumference;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={size + 8} height={size + 8}>
+          <Circle
+            cx={(size + 8) / 2}
+            cy={(size + 8) / 2}
+            r={radius}
+            stroke="rgba(255, 255, 255, 0.08)"
+            strokeWidth={2}
+            fill="transparent"
+          />
+          <Circle
+            cx={(size + 8) / 2}
+            cy={(size + 8) / 2}
+            r={radius}
+            stroke={Colors.accent.primary}
+            strokeWidth={2}
+            fill="transparent"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            transform={`rotate(-90, ${(size + 8) / 2}, ${(size + 8) / 2})`}
+          />
+        </Svg>
+      </View>
+    </View>
+  );
+});
+SpotifyCoverProgressRing.displayName = 'SpotifyCoverProgressRing';
+
+const SkeletonBlock = React.memo(({ style }: { style?: any }) => {
+  const pulse = useSharedValue(0.3);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withTiming(0.7, { duration: 850, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    );
+  }, [pulse]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: pulse.value,
+  }));
+  return (
+    <Animated.View
+      style={[
+        { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+        style,
+        animatedStyle,
+      ]}
+    />
+  );
+});
+SkeletonBlock.displayName = 'SkeletonBlock';
+
+const OverviewSkeleton = React.memo(() => {
+  return (
+    <>
+      {/* Hero Card Skeleton */}
+      <View style={styles.spotifyHeroShell}>
+        <View style={styles.spotifyHeroCard}>
+          <View style={styles.spotifyHeroGlow} />
+          <View style={styles.spotifyHeroContent}>
+            <SkeletonBlock style={{ width: 100, height: 11, borderRadius: 6, marginBottom: 10 }} />
+            <SkeletonBlock style={{ width: 165, height: 22, borderRadius: 8, marginBottom: 6 }} />
+            <SkeletonBlock style={{ width: 125, height: 22, borderRadius: 8, marginBottom: 12 }} />
+            <SkeletonBlock style={{ width: 195, height: 12, borderRadius: 6, marginBottom: 16 }} />
+            <SkeletonBlock style={{ width: 108, height: 32, borderRadius: 16 }} />
+          </View>
+          <View style={styles.spotifyHeroArtworkWrap}>
+            <SkeletonBlock style={{ width: 92, height: 92, borderRadius: 18 }} />
+          </View>
+        </View>
+      </View>
+
+      {/* Made for your mood section skeleton */}
+      <View style={styles.spotifySectionHeading}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+          <SkeletonBlock style={{ width: 26, height: 26, borderRadius: 13 }} />
+          <SkeletonBlock style={{ width: 145, height: 16, borderRadius: 6 }} />
+        </View>
+        <SkeletonBlock style={{ width: 45, height: 14, borderRadius: 6 }} />
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.spotifyHorizontalRail} scrollEnabled={false}>
+        {[0, 1, 2, 3].map((i) => (
+          <View key={`skel-mood-${i}`} style={styles.spotifyMoodRecCard}>
+            <SkeletonBlock style={{ width: 112, height: 112, borderRadius: 14, marginBottom: 8 }} />
+            <SkeletonBlock style={{ width: 88, height: 12, borderRadius: 6, marginBottom: 6 }} />
+            <SkeletonBlock style={{ width: 62, height: 10, borderRadius: 5, marginBottom: 8 }} />
+            <SkeletonBlock style={{ width: 75, height: 18, borderRadius: 8 }} />
+          </View>
+        ))}
+      </ScrollView>
+
+      {/* Recently played section skeleton */}
+      <View style={styles.spotifySectionHeading}>
+        <SkeletonBlock style={{ width: 120, height: 16, borderRadius: 6 }} />
+        <SkeletonBlock style={{ width: 45, height: 12, borderRadius: 6 }} />
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.spotifyHorizontalRail} scrollEnabled={false}>
+        {[0, 1, 2, 3].map((i) => (
+          <View key={`skel-recent-${i}`} style={styles.spotifyRecentCard}>
+            <SkeletonBlock style={{ width: 105, height: 105, borderRadius: 14, marginBottom: 8 }} />
+            <SkeletonBlock style={{ width: 82, height: 12, borderRadius: 6, marginBottom: 6 }} />
+            <SkeletonBlock style={{ width: 58, height: 10, borderRadius: 5 }} />
+          </View>
+        ))}
+      </ScrollView>
+
+      {/* Your listening pulse section skeleton */}
+      <View style={styles.spotifySectionHeading}>
+        <SkeletonBlock style={{ width: 145, height: 16, borderRadius: 6 }} />
+        <SkeletonBlock style={{ width: 45, height: 14, borderRadius: 6 }} />
+      </View>
+      <GlassCard intensity="medium" padding="none" style={styles.spotifyPulseCard}>
+        {[0, 1, 2, 3].map((i) => (
+          <View key={`skel-pulse-${i}`} style={styles.spotifyPulseRow}>
+            <SkeletonBlock style={{ width: 18, height: 14, borderRadius: 4, marginRight: 6 }} />
+            <SkeletonBlock style={{ width: 44, height: 44, borderRadius: 8, marginRight: 10 }} />
+            <View style={{ flex: 1, gap: 6 }}>
+              <SkeletonBlock style={{ width: '65%', height: 13, borderRadius: 5 }} />
+              <SkeletonBlock style={{ width: '40%', height: 10, borderRadius: 5 }} />
+            </View>
+            <SkeletonBlock style={{ width: 16, height: 16, borderRadius: 8 }} />
+          </View>
+        ))}
+      </GlassCard>
+    </>
+  );
+});
+OverviewSkeleton.displayName = 'OverviewSkeleton';
+
+const normalizeArtistKey = (name?: string) => (name ? name.toLowerCase().replace(/[^a-z0-9]/g, '') : '');
+const isSpotifyId = (id?: string) => !!(id && /^[A-Za-z0-9]{22}$/.test(id));
+
+const ArtistGridCard = React.memo(({
+  artist,
+  isPlaying,
+  onSelect,
+}: {
+  artist: any;
+  isPlaying: boolean;
+  onSelect: (artist: any) => void;
+}) => {
+  const handlePress = useCallback(() => {
+    onSelect(artist);
+  }, [artist, onSelect]);
+
+  const bestImage = useMemo(
+    () => spotifyGetBestImage(artist?.images ?? [], 300) ?? '',
+    [artist?.images]
+  );
+
+  const primaryGenre = useMemo(
+    () => artist?.genres?.slice(0, 1).join('') || 'Artist',
+    [artist?.genres]
+  );
+
+  return (
+    <Pressable
+      style={styles.artistGridItem}
+      onPress={handlePress}
+    >
+      <View style={styles.artistGridAvatarContainer}>
+        <View style={[
+          styles.artistGridAvatarWrap,
+          isPlaying && styles.artistGridAvatarWrapActive,
+        ]}>
+          <ExpoImage
+            source={{ uri: bestImage }}
+            style={styles.artistGridAvatar}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={150}
+          />
+        </View>
+        {isPlaying && (
+          <View style={styles.artistGridPlayingBadge}>
+            <Feather name="volume-2" size={12} color={Colors.text.onAccent} />
+          </View>
+        )}
+      </View>
+      <Text style={styles.artistGridName} numberOfLines={1}>{artist?.name}</Text>
+      <View style={styles.artistGridGenrePill}>
+        <Text style={styles.artistGridGenre} numberOfLines={1}>
+          {primaryGenre}
+        </Text>
+      </View>
+    </Pressable>
+  );
+});
+ArtistGridCard.displayName = 'ArtistGridCard';
+
+const ArtistPageItem = React.memo(({
+  pageArtists,
+  containerWidth,
+  currentPlayingTrackArtist,
+  isPlaying,
+  onSelect,
+}: {
+  pageArtists: any[];
+  containerWidth: number;
+  currentPlayingTrackArtist?: string | null;
+  isPlaying: boolean;
+  onSelect: (artist: any) => void;
+}) => {
+  return (
+    <View style={{ width: containerWidth }}>
+      <View style={styles.artistGrid}>
+        {pageArtists.map((artist: any) => {
+          const isArtistPlaying = !!(
+            currentPlayingTrackArtist &&
+            artist?.name &&
+            isPlaying &&
+            currentPlayingTrackArtist.toLowerCase().includes(artist.name.toLowerCase())
+          );
+          return (
+            <ArtistGridCard
+              key={artist.id || artist.name}
+              artist={artist}
+              isPlaying={isArtistPlaying}
+              onSelect={onSelect}
+            />
+          );
+        })}
+      </View>
+    </View>
+  );
+});
+ArtistPageItem.displayName = 'ArtistPageItem';
 
 const SpotifyListView = React.memo(({
   onGoBack,
@@ -899,12 +1136,26 @@ const SpotifyListView = React.memo(({
   onSettingsPress,
   onShowQueue,
   onAddToPlaylist,
+  onBottomChromeChange,
+  onOpenPlayer,
+  onOpenRecommended,
+  isPlayerOpen = false,
+  onRegisterBackHandler,
+  onFullCoverChange,
+  playerProgress,
 }: {
   onGoBack: () => void;
   onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => void;
   onSettingsPress: () => void;
   onShowQueue: () => void;
-  onAddToPlaylist?: (track: SpotifyTrackTarget) => void;
+  onAddToPlaylist?: (track: SpotifyTrackTarget, onSuccess?: (playlistName: string) => void) => void;
+  onBottomChromeChange?: (visible: boolean) => void;
+  onOpenPlayer?: () => void;
+  onOpenRecommended?: () => void;
+  isPlayerOpen?: boolean;
+  onRegisterBackHandler?: (handler: (() => boolean) | null) => void;
+  onFullCoverChange?: (isOpen: boolean) => void;
+  playerProgress?: SharedValue<number>;
 }) => {
   const {
     playlists: spotifyPlaylists,
@@ -912,10 +1163,244 @@ const SpotifyListView = React.memo(({
     search: searchSpotify,
     isConnected,
     addToQueue: spotifyAddToQueueHook,
+    recentlyPlayed,
+    topTracks,
+    loadRecentlyPlayed,
+    loadTopTracks,
+    getVIPRecommendations,
   } = useSpotify();
-  const { currentTrack, isPlaying, favorites: spotifyFavorites, toggleFavorite: spotifyToggleFavorite, setQueue: setMusicQueue } = useMusic();
+  const {
+    currentTrack,
+    isPlaying,
+    favorites: spotifyFavorites,
+    toggleFavorite: spotifyToggleFavorite,
+    setQueue: setMusicQueue,
+    pause,
+    resume,
+    next,
+    prev,
+  } = useMusic();
   const dataVersion = useAppStore((s) => s.dataVersion);
+  const user = useAppStore((s) => s.user);
+  const todayMood = useAppStore((s) => s.todayMood);
+  const moodRecommendationSession = useAppStore((s) => s.moodRecommendationSession);
+  const setMoodRecommendationSession = useAppStore((s) => s.setMoodRecommendationSession);
   const insets = useSafeAreaInsets();
+  const screenPaddingTop = Math.max(insets.top, Spacing.lg);
+  const [activeSpotifyTab, setActiveSpotifyTab] = useState<'overview' | 'artists' | 'playlists'>('overview');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isMiniPlayerExpanded, setIsMiniPlayerExpanded] = useState(false);
+  const [artistSpotlights, setArtistSpotlights] = useState<any[]>([]);
+  const [loadingArtists, setLoadingArtists] = useState(false);
+  const [artistLoadError, setArtistLoadError] = useState(false);
+  const [artistRefreshKey, setArtistRefreshKey] = useState(0);
+  const [overviewMoodRecs, setOverviewMoodRecs] = useState<any[]>([]);
+  const [isOverviewDataLoading, setIsOverviewDataLoading] = useState(isConnected);
+  const [isOverviewRecommendationsLoading, setIsOverviewRecommendationsLoading] = useState(() => Boolean(todayMood));
+  const isOverviewLoading = isOverviewDataLoading || isOverviewRecommendationsLoading;
+
+  // Keep Overview tab mood recommendations synchronized with today's logged mood session
+  useEffect(() => {
+    if (!todayMood) {
+      setOverviewMoodRecs([]);
+      setIsOverviewRecommendationsLoading(false);
+      return;
+    }
+
+    setIsOverviewRecommendationsLoading(true);
+    const moodKey = `${user?.id ?? 'guest'}:${todayMood.id}`;
+    if (moodRecommendationSession?.key === moodKey && moodRecommendationSession.tracks.length > 0) {
+      setOverviewMoodRecs(moodRecommendationSession.tracks.slice(0, 10));
+      setIsOverviewRecommendationsLoading(false);
+      return;
+    }
+
+    let active = true;
+    const safetyTimeout = setTimeout(() => {
+      if (active) setIsOverviewRecommendationsLoading(false);
+    }, 3500);
+
+    (async () => {
+      try {
+        const vipRecs = await getVIPRecommendations(
+          todayMood.moodType as any,
+          todayMood.moodScore ?? 7,
+          15
+        );
+        const recs = vipRecs.length > 0
+          ? vipRecs
+          : getSmartRecommendations(
+            todayMood.moodType as any,
+            TRACKS_LIBRARY,
+            user?.id ?? null,
+            15
+          );
+        if (active && recs && recs.length > 0) {
+          setOverviewMoodRecs(recs.slice(0, 10));
+          setMoodRecommendationSession({
+            key: moodKey,
+            tracks: recs,
+            seenTrackIds: recs.map((r: any) => r.track.id),
+            sampledArtistNames: [],
+            completedTrackIds: [],
+            skippedTrackIds: [],
+          });
+        }
+      } catch (e) {
+        console.warn('[SpotifyListView] Failed to load overview mood recs:', e);
+      } finally {
+        clearTimeout(safetyTimeout);
+        if (active) setIsOverviewRecommendationsLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+      clearTimeout(safetyTimeout);
+    };
+  }, [todayMood, user?.id, moodRecommendationSession, getVIPRecommendations, setMoodRecommendationSession]);
+
+  // Artist grid pagination & swipe navigation
+  const [artistPage, setArtistPage] = useState(0);
+  const ARTISTS_PER_PAGE = 9;
+  const artistPagerRef = useRef<FlatList>(null);
+  const [artistContainerWidth, setArtistContainerWidth] = useState(SCREEN_WIDTH - 2 * SCREEN_PADDING);
+
+  const artistPages = useMemo(() => {
+    const pages: any[][] = [];
+    for (let i = 0; i < artistSpotlights.length; i += ARTISTS_PER_PAGE) {
+      pages.push(artistSpotlights.slice(i, i + ARTISTS_PER_PAGE));
+    }
+    return pages;
+  }, [artistSpotlights]);
+
+  const visibleDots = useMemo(() => {
+    const total = artistPages.length;
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i);
+    }
+    const start = Math.max(0, Math.min(artistPage - 3, total - 7));
+    return Array.from({ length: 7 }, (_, i) => start + i);
+  }, [artistPages.length, artistPage]);
+
+  const handleGoToArtistPage = useCallback((targetPage: number) => {
+    if (targetPage < 0 || targetPage >= artistPages.length) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setArtistPage(targetPage);
+    artistPagerRef.current?.scrollToOffset({
+      offset: targetPage * artistContainerWidth,
+      animated: true,
+    });
+  }, [artistPages.length, artistContainerWidth]);
+
+  const handleArtistPagerMomentumEnd = useCallback((e: any) => {
+    const offsetX = e.nativeEvent.contentOffset.x;
+    const pageIndex = Math.round(offsetX / (artistContainerWidth || 1));
+    if (pageIndex >= 0 && pageIndex < artistPages.length && pageIndex !== artistPage) {
+      setArtistPage(pageIndex);
+    }
+  }, [artistContainerWidth, artistPages.length, artistPage]);
+  // Artist profile state
+  const [selectedArtistProfile, setSelectedArtistProfile] = useState<any | null>(null);
+  const [artistProfileTopTracks, setArtistProfileTopTracks] = useState<any[]>([]);
+  const [artistProfileAlbums, setArtistProfileAlbums] = useState<any[]>([]);
+  const [loadingArtistProfile, setLoadingArtistProfile] = useState(false);
+  const [refreshingArtistProfile, setRefreshingArtistProfile] = useState(false);
+  const forceArtistRevalidateRef = useRef(false);
+  // Album detail state
+  const [selectedAlbumDetail, setSelectedAlbumDetail] = useState<any | null>(null);
+  const [albumDetailTracks, setAlbumDetailTracks] = useState<any[]>([]);
+  const [loadingAlbumTracks, setLoadingAlbumTracks] = useState(false);
+  // In-memory cache for artist profile data (avoids re-fetching on revisit)
+  const artistProfileCacheRef = useRef<Record<string, { topTracks: any[]; albums: any[]; updatedAt?: number }>>({});
+  const liquidGlassAvailable = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
+
+  // Animation values for rotating cover and expanding droplet player
+  const coverRotation = useSharedValue(0);
+  const expansionProgress = useSharedValue(0);
+
+  // Tab indicator & content animations for smooth switching
+  const tabIndexValue = useSharedValue(activeSpotifyTab === 'overview' ? 0 : activeSpotifyTab === 'artists' ? 1 : 2);
+  const tabContentOpacity = useSharedValue(1);
+  const tabContentTranslateY = useSharedValue(0);
+
+  useEffect(() => {
+    const idx = activeSpotifyTab === 'overview' ? 0 : activeSpotifyTab === 'artists' ? 1 : 2;
+    tabIndexValue.value = withSpring(idx, {
+      damping: 18,
+      stiffness: 220,
+      mass: 0.8,
+    });
+
+    tabContentOpacity.value = 0.55;
+    tabContentTranslateY.value = 6;
+    tabContentOpacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.ease) });
+    tabContentTranslateY.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.ease) });
+  }, [activeSpotifyTab, tabIndexValue, tabContentOpacity, tabContentTranslateY]);
+
+  const navIndicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tabIndexValue.value * 65 }],
+  }));
+
+  const animatedTabContentStyle = useAnimatedStyle(() => ({
+    opacity: tabContentOpacity.value,
+    transform: [{ translateY: tabContentTranslateY.value }],
+  }));
+
+  // Animate rotating vinyl cover when track is playing
+  useEffect(() => {
+    if (isPlaying) {
+      coverRotation.value = coverRotation.value % 360;
+      coverRotation.value = withRepeat(
+        withTiming(coverRotation.value + 360, {
+          duration: 35000,
+          easing: Easing.linear,
+        }),
+        -1,
+        false
+      );
+    } else {
+      cancelAnimation(coverRotation);
+    }
+  }, [isPlaying, coverRotation]);
+
+  useEffect(() => {
+    if (isMiniPlayerExpanded) {
+      expansionProgress.value = withSpring(1, { damping: 18, stiffness: 160, mass: 0.8 });
+    } else {
+      expansionProgress.value = withTiming(0, { duration: 220, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
+    }
+  }, [isMiniPlayerExpanded, expansionProgress]);
+
+  useEffect(() => {
+    if (!currentTrack && isMiniPlayerExpanded) {
+      setIsMiniPlayerExpanded(false);
+    }
+  }, [currentTrack, isMiniPlayerExpanded]);
+
+  const animatedCoverStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${coverRotation.value}deg` }],
+  }));
+
+  const dropletAnimatedStyle = useAnimatedStyle(() => {
+    const p = expansionProgress.value;
+    return {
+      opacity: p,
+      transform: [
+        { translateY: (1 - p) * 20 },
+        { scale: 0.9 + 0.1 * p },
+      ],
+    };
+  });
+
+  const handleToggleExpandMiniPlayer = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsMiniPlayerExpanded((prev) => !prev);
+  }, []);
+
+  const handleCardPress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onOpenPlayer?.();
+  }, [onOpenPlayer]);
 
   // — Spotify Track 3-dot menu state & animations —
   const [spotifyMenuTrack, setSpotifyMenuTrack] = useState<any | null>(null);
@@ -1005,6 +1490,60 @@ const SpotifyListView = React.memo(({
     }, 2000);
   }, [spToastOpacity]);
 
+  const renderSpotifyToast = useCallback((bottomOffset: number = 130) => {
+    if (!spToastMsg) return null;
+    return (
+      <RNAnimated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          bottom: bottomOffset,
+          left: 0,
+          right: 0,
+          alignItems: 'center',
+          zIndex: 999999,
+          elevation: 99,
+          opacity: spToastOpacity,
+        }}
+      >
+        <View style={{
+          backgroundColor: 'rgba(30, 30, 36, 0.95)',
+          paddingVertical: 10,
+          paddingHorizontal: 20,
+          borderRadius: 9999,
+          borderWidth: 1,
+          borderColor: spToastType === 'error'
+            ? 'rgba(255, 107, 107, 0.25)'
+            : spToastType === 'warning'
+              ? 'rgba(255, 190, 106, 0.25)'
+              : 'rgba(141, 233, 29, 0.25)',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+          elevation: 10,
+          maxWidth: '85%',
+        }}>
+          <Feather
+            name={spToastType === 'success' ? 'check-circle' : 'alert-circle'}
+            size={14}
+            color={spToastType === 'error'
+              ? Colors.error
+              : spToastType === 'warning'
+                ? Colors.warning
+                : Colors.accent.primary}
+          />
+          <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption, flexShrink: 1 }}>
+            {spToastMsg}
+          </Text>
+        </View>
+      </RNAnimated.View>
+    );
+  }, [spToastMsg, spToastType, spToastOpacity]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -1059,6 +1598,16 @@ const SpotifyListView = React.memo(({
         }
       } catch (err) {
         console.warn('[SpotifyListView] Failed to load Spotify playlist cache:', err);
+      }
+      try {
+        if (SPOTIFY_ARTIST_CACHE_FILE.exists) {
+          const content = await SPOTIFY_ARTIST_CACHE_FILE.text();
+          if (content) {
+            spotifyArtistCache = JSON.parse(content);
+          }
+        }
+      } catch (err) {
+        console.warn('[SpotifyListView] Failed to load Spotify artist cache:', err);
       }
     };
     const loadRecents = async () => {
@@ -1148,19 +1697,302 @@ const SpotifyListView = React.memo(({
   const handleRefreshPlaylists = useCallback(async () => {
     setRefreshingPlaylists(true);
     try {
-      await loadSpotifyPlaylists();
+      if (activeSpotifyTab === 'artists') {
+        forceArtistRevalidateRef.current = true;
+        setArtistRefreshKey((k) => k + 1);
+      } else {
+        await loadSpotifyPlaylists();
+        if (activeSpotifyTab === 'overview') {
+          await Promise.all([
+            loadRecentlyPlayed().catch(() => { }),
+            loadTopTracks('short_term').catch(() => { }),
+          ]);
+        }
+      }
     } catch (e) {
-      console.warn('[SpotifyListView] Refresh playlists failed:', e);
+      console.warn('[SpotifyListView] Refresh failed:', e);
     } finally {
       setRefreshingPlaylists(false);
     }
-  }, [loadSpotifyPlaylists]);
+  }, [activeSpotifyTab, loadSpotifyPlaylists, loadRecentlyPlayed, loadTopTracks]);
 
   useEffect(() => {
-    if (isConnected) {
-      loadSpotifyPlaylists();
+    if (!isConnected) {
+      setIsOverviewDataLoading(false);
+      return;
     }
-  }, [isConnected, loadSpotifyPlaylists]);
+
+    let active = true;
+    setIsOverviewDataLoading(true);
+    loadSpotifyPlaylists();
+
+    const safetyTimeout = setTimeout(() => {
+      if (active) setIsOverviewDataLoading(false);
+    }, 3500);
+
+    Promise.allSettled([
+      loadRecentlyPlayed(),
+      loadTopTracks('short_term'),
+    ]).finally(() => {
+      clearTimeout(safetyTimeout);
+      if (active) setIsOverviewDataLoading(false);
+    });
+
+    return () => {
+      active = false;
+      clearTimeout(safetyTimeout);
+    };
+  }, [isConnected, loadSpotifyPlaylists, loadRecentlyPlayed, loadTopTracks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadArtistSpotlights = async () => {
+      const preferences = user?.id ? getMusicPreferences(user.id) : null;
+      const artistIds = preferences?.favoriteArtistIds ?? [];
+      const artistNames = preferences?.favoriteArtistNames ?? [];
+      if (!isConnected || (artistIds.length === 0 && artistNames.length === 0)) {
+        setArtistSpotlights([]);
+        setArtistLoadError(false);
+        return;
+      }
+
+      const forceRevalidate = forceArtistRevalidateRef.current;
+      forceArtistRevalidateRef.current = false;
+
+      // Helper to search cache without hitting profile keys
+      const findInCache = (id?: string, name?: string) => {
+        if (id && !id.startsWith('profile_') && spotifyArtistCache[id]?.name) {
+          return spotifyArtistCache[id];
+        }
+        const normKey = normalizeArtistKey(name);
+        if (normKey) {
+          for (const [key, val] of Object.entries(spotifyArtistCache)) {
+            if (!key.startsWith('profile_') && val?.name && normalizeArtistKey(val.name) === normKey) {
+              return val;
+            }
+          }
+        }
+        return null;
+      };
+
+      // 1. Instant load from cache if available (deduplicated by both ID and normalized name)
+      const cachedMatches: any[] = [];
+      const cachedSeenIds = new Set<string>();
+      const cachedSeenKeys = new Set<string>();
+
+      const totalTarget = Math.max(artistIds.length, artistNames.length);
+      for (let i = 0; i < totalTarget; i++) {
+        const id = artistIds[i];
+        const name = artistNames[i];
+        const cached = findInCache(id, name);
+        if (cached) {
+          const cId = cached.id;
+          const cKey = normalizeArtistKey(cached.name);
+          if ((cId && cachedSeenIds.has(cId)) || (cKey && cachedSeenKeys.has(cKey))) {
+            continue;
+          }
+          if (cId) cachedSeenIds.add(cId);
+          if (cKey) cachedSeenKeys.add(cKey);
+          cachedMatches.push(cached);
+        }
+      }
+
+      if (cachedMatches.length > 0 && !cancelled) {
+        setArtistSpotlights(cachedMatches);
+      } else {
+        setLoadingArtists(true);
+      }
+      setArtistLoadError(false);
+
+      const isAnyStale = cachedMatches.length === 0 || cachedMatches.some((a: any) => !a?.updatedAt || (Date.now() - a.updatedAt > ARTIST_SPOTLIGHT_TTL));
+
+      // If all survey artists are already found in cache AND fresh AND not manual refresh, we're completely done! Zero network needed.
+      if (cachedMatches.length >= totalTarget && cachedMatches.length > 0 && !isAnyStale && !forceRevalidate) {
+        if (!cancelled) setLoadingArtists(false);
+        return;
+      }
+
+      try {
+        const { useTierStore } = require('../stores/tierStore');
+        const token = await useTierStore.getState().getValidAccessToken();
+        if (!token || cancelled) return;
+        const { getMultipleArtists, searchArtists } = require('../services/spotify');
+
+        // Check if any direct Spotify IDs can be batch fetched (including cached artists to refresh pictures)
+        const rawIds = [
+          ...artistIds,
+          ...cachedMatches.map((a: any) => a?.id),
+        ].filter(Boolean);
+        const spotifyIds = Array.from(new Set(rawIds.filter((id: string) => isSpotifyId(id))));
+        const directArtists = spotifyIds.length ? await getMultipleArtists(token, spotifyIds) : [];
+
+        // Identify which artist names are still missing and need resolution
+        const knownKeys = new Set<string>();
+        directArtists.forEach((a: any) => {
+          const k = normalizeArtistKey(a?.name);
+          if (k) knownKeys.add(k);
+        });
+        cachedMatches.forEach((a: any) => {
+          if (isSpotifyId(a?.id) && a?.updatedAt && (Date.now() - a.updatedAt <= ARTIST_SPOTLIGHT_TTL)) {
+            const k = normalizeArtistKey(a?.name);
+            if (k) knownKeys.add(k);
+          }
+        });
+
+        const missingNames = artistNames.filter((name: string) => name && !knownKeys.has(normalizeArtistKey(name)));
+
+        // Resolve missing artists in controlled chunks of 5 (avoids 429 rate limit even with 50-100 artists)
+        const newlyResolved: any[] = [];
+        const CHUNK_SIZE = 5;
+        for (let i = 0; i < missingNames.length; i += CHUNK_SIZE) {
+          if (cancelled) return;
+          const chunk = missingNames.slice(i, i + CHUNK_SIZE);
+          const chunkResults = await Promise.all(
+            chunk.map(async (name: string) => {
+              const matches = await searchArtists(token, name, 3).catch(() => []);
+              const normalized = normalizeArtistKey(name);
+              const match = matches.find((artist: any) => normalizeArtistKey(artist?.name) === normalized) ?? matches[0] ?? null;
+              if (match) return match;
+              // Reliable fallback representation so user's chosen artist is never lost
+              return {
+                id: `pref_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+                name,
+                genres: ['Artist'],
+                images: [],
+              };
+            })
+          );
+          newlyResolved.push(...chunkResults.filter(Boolean));
+        }
+
+        // Unified pool: fresh artists take priority over cached matches
+        const artistById = new Map<string, any>();
+        const artistByKey = new Map<string, any>();
+
+        for (const cached of cachedMatches) {
+          if (!cached) continue;
+          const k = normalizeArtistKey(cached.name);
+          if (cached.id) artistById.set(cached.id, cached);
+          if (k) artistByKey.set(k, cached);
+        }
+
+        const freshList = [...directArtists, ...newlyResolved];
+        for (const fresh of freshList) {
+          if (!fresh) continue;
+          const k = normalizeArtistKey(fresh.name);
+          const freshWithTimestamp = { ...fresh, updatedAt: Date.now() };
+          if (fresh.id) artistById.set(fresh.id, freshWithTimestamp);
+          if (k) artistByKey.set(k, freshWithTimestamp);
+        }
+
+        // Reconstruct allArtists in user preference order, strictly deduplicating by ID and normalized name
+        const allArtists: any[] = [];
+        const seenFinalIds = new Set<string>();
+        const seenFinalKeys = new Set<string>();
+
+        for (let i = 0; i < totalTarget; i++) {
+          const prefId = artistIds[i];
+          const prefName = artistNames[i];
+          const normKey = normalizeArtistKey(prefName);
+
+          let bestMatch = (prefId && artistById.get(prefId)) ||
+                          (normKey && artistByKey.get(normKey)) ||
+                          null;
+
+          if (!bestMatch) {
+            const fallbackId = prefId || (prefName ? `pref_${prefName.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : `artist_${i}`);
+            bestMatch = {
+              id: fallbackId,
+              name: prefName || 'Artist',
+              genres: ['Artist'],
+              images: [],
+            };
+          }
+
+          const bId = bestMatch.id;
+          const bKey = normalizeArtistKey(bestMatch.name);
+
+          if ((bId && seenFinalIds.has(bId)) || (bKey && seenFinalKeys.has(bKey))) {
+            continue;
+          }
+
+          if (bId) seenFinalIds.add(bId);
+          if (bKey) seenFinalKeys.add(bKey);
+          allArtists.push(bestMatch);
+        }
+
+        // If any extra fresh artists were resolved that were not in preferences, add them without duplicating
+        for (const extra of freshList) {
+          if (!extra || !extra.id) continue;
+          const eKey = normalizeArtistKey(extra.name);
+          if (seenFinalIds.has(extra.id) || (eKey && seenFinalKeys.has(eKey))) {
+            continue;
+          }
+          seenFinalIds.add(extra.id);
+          if (eKey) seenFinalKeys.add(eKey);
+          allArtists.push(extra);
+        }
+
+        // Clean up cache: remove old pref_ keys when real Spotify IDs are established
+        allArtists.forEach((a: any) => {
+          if (a?.id) {
+            spotifyArtistCache[a.id] = { ...a, updatedAt: a.updatedAt || Date.now() };
+            if (isSpotifyId(a.id) && a.name) {
+              const oldPrefKey = `pref_${a.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+              if (spotifyArtistCache[oldPrefKey]) {
+                delete spotifyArtistCache[oldPrefKey];
+              }
+            }
+          }
+        });
+        try {
+          SPOTIFY_ARTIST_CACHE_FILE.write(JSON.stringify(spotifyArtistCache));
+        } catch { }
+
+        // Upgrade preferences in database if any placeholder IDs became valid Spotify IDs
+        if (user?.id) {
+          try {
+            const currentPrefs = getMusicPreferences(user.id);
+            if (currentPrefs && currentPrefs.favoriteArtistIds?.length) {
+              let hasUpgrades = false;
+              const upgradedIds = currentPrefs.favoriteArtistIds.map((curId, idx) => {
+                const name = currentPrefs.favoriteArtistNames?.[idx];
+                const matched = allArtists.find(a => normalizeArtistKey(a.name) === normalizeArtistKey(name));
+                if (matched && isSpotifyId(matched.id) && curId !== matched.id) {
+                  hasUpgrades = true;
+                  return matched.id;
+                }
+                return curId;
+              });
+              if (hasUpgrades) {
+                saveMusicPreferences(user.id, { favoriteArtistIds: upgradedIds });
+              }
+            }
+          } catch { }
+        }
+
+        if (!cancelled) {
+          setArtistSpotlights(allArtists);
+          if (forceRevalidate) {
+            setArtistPage(0);
+            artistPagerRef.current?.scrollToOffset({ offset: 0, animated: false });
+          }
+        }
+      } catch (error) {
+        console.warn('[SpotifyListView] Failed to load favourite artist spotlights:', error);
+        if (!cancelled && cachedMatches.length === 0) setArtistLoadError(true);
+      } finally {
+        if (!cancelled) setLoadingArtists(false);
+      }
+    };
+    loadArtistSpotlights();
+    return () => { cancelled = true; };
+  }, [isConnected, user?.id, dataVersion, artistRefreshKey]);
+
+  useEffect(() => {
+    onBottomChromeChange?.(!selectedPlaylist && !isSearchOpen && !selectedArtistProfile && !selectedAlbumDetail);
+    onFullCoverChange?.(!!selectedArtistProfile || !!selectedAlbumDetail);
+  }, [selectedPlaylist, isSearchOpen, selectedArtistProfile, selectedAlbumDetail, onBottomChromeChange, onFullCoverChange]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -1255,7 +2087,260 @@ const SpotifyListView = React.memo(({
     }
   }, []);
 
+  // ── Artist Profile handlers ──────────────────────────────────────
+  const handleArtistSelect = useCallback(async (artist: any, forceFresh: boolean = false) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSelectedArtistProfile(artist);
+
+    // Check in-memory and persistent cache first
+    const cached = artistProfileCacheRef.current[artist.id] || spotifyArtistCache[`profile_${artist.id}`];
+    const hasCachedContent = cached && ((cached.topTracks?.length ?? 0) >= 3 || (cached.albums?.length ?? 0) > 0);
+    const isStale = !cached?.updatedAt || (Date.now() - cached.updatedAt > ARTIST_PROFILE_TTL);
+
+    if (hasCachedContent) {
+      setArtistProfileTopTracks(cached.topTracks || []);
+      setArtistProfileAlbums(cached.albums || []);
+    }
+
+    // If we already have fresh cached data and this is not a manual force refresh, return immediately (0ms instant tap!)
+    if (hasCachedContent && !isStale && !forceFresh) {
+      return;
+    }
+
+    // If no cached content, show full loader. If already cached, show subtle pull-to-refresh spinner (if manual) or do quiet background sync
+    if (!hasCachedContent) {
+      setLoadingArtistProfile(true);
+      setArtistProfileTopTracks([]);
+      setArtistProfileAlbums([]);
+    } else if (forceFresh) {
+      setRefreshingArtistProfile(true);
+    }
+
+    try {
+      const token = await useTierStore.getState().getValidAccessToken();
+      if (!token) return;
+      const { getArtistTopTracks, getArtistAlbums, getArtist, searchArtists, searchTracks, searchAlbums } = require('../services/spotify');
+
+      let realArtistId = artist.id;
+      let realArtistObj = artist;
+
+      // Fetch tracks, albums, and fresh artist object (to capture any updated profile photo or followers)
+      let [tracks, albums, freshArtistProfile] = await Promise.all([
+        getArtistTopTracks(token, realArtistId, 'US', artist.name).catch(() => []),
+        getArtistAlbums(token, realArtistId, 10, artist.name).catch(() => []),
+        /^[A-Za-z0-9]{22}$/.test(realArtistId) ? getArtist(token, realArtistId).catch(() => null) : Promise.resolve(null),
+      ]);
+
+      if (freshArtistProfile?.images?.length) {
+        realArtistObj = { ...realArtistObj, ...freshArtistProfile };
+        setSelectedArtistProfile(realArtistObj);
+      }
+
+      // If both tracks & albums are empty, search Spotify by artist name to resolve true ID
+      if (tracks.length === 0 && albums.length === 0 && artist.name) {
+        console.log(`[SpotifyListView] Resolving real artist for "${artist.name}"...`);
+        const searchMatches = await searchArtists(token, artist.name, 3).catch(() => []);
+        const match = searchMatches.find(
+          (a: any) => a.name?.toLowerCase().trim() === artist.name.toLowerCase().trim()
+        ) || searchMatches[0];
+
+        if (match && match.id) {
+          realArtistId = match.id;
+          realArtistObj = { ...artist, ...match };
+          setSelectedArtistProfile(realArtistObj);
+
+          [tracks, albums] = await Promise.all([
+            getArtistTopTracks(token, realArtistId, 'US', artist.name).catch(() => []),
+            getArtistAlbums(token, realArtistId, 10, artist.name).catch(() => []),
+          ]);
+        }
+      }
+
+      // If top tracks are fewer than 10, search for tracks by artist query to enrich catalog to 10-15+ songs
+      if (tracks.length < 10 && artist.name) {
+        const [p1, p2] = await Promise.all([
+          searchTracks(token, `artist:"${artist.name}"`, 10, 0).catch(() => []),
+          searchTracks(token, `artist:"${artist.name}"`, 10, 10).catch(() => []),
+        ]);
+        let candidateTracks = [...p1, ...p2];
+        if (candidateTracks.length === 0) {
+          candidateTracks = await searchTracks(token, artist.name, 10, 0).catch(() => []);
+        }
+        if (candidateTracks.length > 0) {
+          const trackIds = new Set(tracks.map((t: any) => t.id));
+          for (const st of candidateTracks) {
+            if (!trackIds.has(st.id)) {
+              trackIds.add(st.id);
+              tracks.push(st);
+              if (tracks.length >= 15) break;
+            }
+          }
+        }
+      }
+
+      // Extract unique albums directly from the loaded tracks to guarantee rich releases
+      const trackAlbums: any[] = [];
+      const seenAlbumIds = new Set(albums.map((a: any) => a.id));
+      tracks.forEach((t: any) => {
+        if (t.album && t.album.id && !seenAlbumIds.has(t.album.id)) {
+          seenAlbumIds.add(t.album.id);
+          trackAlbums.push({
+            id: t.album.id,
+            name: t.album.name,
+            images: t.album.images || [],
+            release_date: t.album.release_date || '',
+            album_type: t.album.album_type || 'album',
+          });
+        }
+      });
+      if (trackAlbums.length > 0) {
+        albums = [...albums, ...trackAlbums];
+      }
+
+      // If albums are still empty, search Spotify for albums by artist query as guaranteed fallback
+      if (albums.length === 0 && artist.name) {
+        let searchedAlbums = await searchAlbums(token, `artist:"${artist.name}"`, 10).catch(() => []);
+        if (searchedAlbums.length === 0) {
+          searchedAlbums = await searchAlbums(token, artist.name, 10).catch(() => []);
+        }
+        if (searchedAlbums.length > 0) {
+          albums = searchedAlbums;
+        }
+      }
+
+      // Ensure albums are sorted newest first so latest drops always lead
+      albums.sort((a: any, b: any) => (b.release_date || '').localeCompare(a.release_date || ''));
+
+      // If artist image was missing, attach album art as fallback
+      if ((!realArtistObj.images || realArtistObj.images.length === 0) && tracks.length > 0 && tracks[0].album?.images?.length) {
+        realArtistObj = {
+          ...realArtistObj,
+          images: tracks[0].album.images,
+        };
+        setSelectedArtistProfile(realArtistObj);
+      }
+
+      setArtistProfileTopTracks(tracks);
+      setArtistProfileAlbums(albums);
+
+      // Persist profile data with updatedAt timestamp
+      if (tracks.length > 0 || albums.length > 0) {
+        const profileData = {
+          topTracks: tracks,
+          albums,
+          updatedAt: Date.now(),
+        };
+        artistProfileCacheRef.current[artist.id] = profileData;
+        if (realArtistId !== artist.id) {
+          artistProfileCacheRef.current[realArtistId] = profileData;
+        }
+        spotifyArtistCache[`profile_${artist.id}`] = profileData;
+        spotifyArtistCache[`profile_${realArtistId}`] = profileData;
+        if (spotifyArtistCache[artist.id] && realArtistObj.images?.length) {
+          spotifyArtistCache[artist.id] = {
+            ...spotifyArtistCache[artist.id],
+            images: realArtistObj.images,
+            updatedAt: Date.now(),
+          };
+        }
+        try {
+          SPOTIFY_ARTIST_CACHE_FILE.write(JSON.stringify(spotifyArtistCache));
+        } catch { }
+      }
+
+      if (forceFresh) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (e) {
+      console.warn('[SpotifyListView] Failed to load artist profile:', e);
+    } finally {
+      setLoadingArtistProfile(false);
+      setRefreshingArtistProfile(false);
+    }
+  }, []);
+
+  const handleArtistProfileBack = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedArtistProfile(null);
+  }, []);
+
+  const handleInternalBack = useCallback(() => {
+    if (selectedAlbumDetail) {
+      setSelectedAlbumDetail(null);
+      return true;
+    }
+    if (selectedArtistProfile) {
+      setSelectedArtistProfile(null);
+      return true;
+    }
+    if (selectedPlaylist) {
+      setSelectedPlaylist(null);
+      setIsSearchOpen(false);
+      setSearchQuery('');
+      return true;
+    }
+    if (isSearchOpen) {
+      setIsSearchOpen(false);
+      setSearchQuery('');
+      return true;
+    }
+    return false;
+  }, [selectedAlbumDetail, selectedArtistProfile, selectedPlaylist, isSearchOpen]);
+
+  // Register internal back handler with parent MusicScreen so hardware back / gestures
+  // close album detail -> artist profile -> playlists -> categories in proper hierarchy
+  useEffect(() => {
+    onRegisterBackHandler?.(handleInternalBack);
+    return () => {
+      onRegisterBackHandler?.(null);
+    };
+  }, [handleInternalBack, onRegisterBackHandler]);
+
+  // Smooth card border rounding when zooming out to music player
+  const artistModalAnimatedStyle = useAnimatedStyle(() => {
+    if (!playerProgress) return {};
+    const progress = Math.max(0, Math.min(1, playerProgress.value - 1));
+    const borderRadius = progress * 28;
+    return {
+      borderRadius,
+      overflow: 'hidden',
+    };
+  });
+
+  const isArtistCurrentlyPlaying = useCallback((artist: any) => {
+    if (!currentTrack || !artist?.name) return false;
+    return isPlaying && currentTrack.artist?.toLowerCase().includes(artist.name.toLowerCase());
+  }, [currentTrack, isPlaying]);
+
+  const artistPageKeyExtractor = useCallback((page: any[], index: number) => {
+    const firstArtistId = page[0]?.id || `page_${index}`;
+    return `artist-page-${index}-${firstArtistId}`;
+  }, []);
+
+  const getArtistItemLayout = useCallback((_: any, index: number) => ({
+    length: artistContainerWidth,
+    offset: artistContainerWidth * index,
+    index,
+  }), [artistContainerWidth]);
+
+  const renderArtistPage = useCallback(({ item: pageArtists }: { item: any[] }) => (
+    <ArtistPageItem
+      pageArtists={pageArtists}
+      containerWidth={artistContainerWidth}
+      currentPlayingTrackArtist={currentTrack?.artist}
+      isPlaying={isPlaying}
+      onSelect={handleArtistSelect}
+    />
+  ), [artistContainerWidth, currentTrack?.artist, isPlaying, handleArtistSelect]);
+
   const convertSpotifyTrackToTrack = useCallback((st: any): Track => {
+    // Mood recommendations are already normalized MusicContext tracks, while
+    // history, playlists, and search results come straight from Spotify. Keep
+    // normalized tracks intact so their playback URI and category survive.
+    if (st?.title && st?.artist && st?.url && st?.category) {
+      return st as Track;
+    }
+
     return {
       id: 'spotify_' + st.id,
       title: st.name,
@@ -1290,6 +2375,124 @@ const SpotifyListView = React.memo(({
       }
     }
   }, [convertSpotifyTrackToTrack, onTrackPress, selectedPlaylist]);
+
+  const isCurrentlyPlayingThisArtist = useMemo(() => {
+    if (!currentTrack || !selectedArtistProfile) return false;
+    const matchesTrack = artistProfileTopTracks.some((t: any) => currentTrack.id === 'spotify_' + t.id || currentTrack.url === t.uri);
+    const matchesArtist = !!(selectedArtistProfile.name && currentTrack.artist?.toLowerCase().includes(selectedArtistProfile.name.toLowerCase()));
+    return matchesTrack || matchesArtist;
+  }, [currentTrack, selectedArtistProfile, artistProfileTopTracks]);
+
+  const handlePlayAllArtistTracks = useCallback(() => {
+    if (artistProfileTopTracks.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isCurrentlyPlayingThisArtist) {
+      if (isPlaying) {
+        pause();
+      } else {
+        resume();
+      }
+      return;
+    }
+    handleTrackPressItem(artistProfileTopTracks[0], artistProfileTopTracks);
+  }, [artistProfileTopTracks, isCurrentlyPlayingThisArtist, isPlaying, pause, resume, handleTrackPressItem]);
+
+  const handleShuffleAllArtistTracks = useCallback(() => {
+    if (artistProfileTopTracks.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const randomIndex = Math.floor(Math.random() * artistProfileTopTracks.length);
+    handleTrackPressItem(artistProfileTopTracks[randomIndex], artistProfileTopTracks, true);
+  }, [artistProfileTopTracks, handleTrackPressItem]);
+
+  const handleOpenAlbumDetail = useCallback(async (album: any) => {
+    if (!album?.id) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedAlbumDetail(album);
+    setLoadingAlbumTracks(true);
+    setAlbumDetailTracks([]);
+    try {
+      const token = await useTierStore.getState().getValidAccessToken();
+      if (!token) return;
+      const { getAlbumTracks } = require('../services/spotify');
+      const tracks = await getAlbumTracks(token, album.id, album, 50).catch(() => []);
+      setAlbumDetailTracks(tracks || []);
+    } catch (err) {
+      console.warn('[SpotifyListView] Failed to load album tracks:', err);
+    } finally {
+      setLoadingAlbumTracks(false);
+    }
+  }, []);
+
+  const handlePlayAlbum = useCallback(async (album: any, startIndex: number = 0) => {
+    if (!album?.id) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const token = await useTierStore.getState().getValidAccessToken();
+      if (!token) return;
+      const { getAlbumTracks } = require('../services/spotify');
+      const albumTracks = await getAlbumTracks(token, album.id, album, 50).catch(() => []);
+      if (albumTracks && albumTracks.length > 0) {
+        const targetTrack = albumTracks[startIndex] || albumTracks[0];
+        handleTrackPressItem(targetTrack, albumTracks, false, album.uri || `spotify:album:${album.id}`, targetTrack.uri);
+      } else if (artistProfileTopTracks.length > 0) {
+        handleTrackPressItem(artistProfileTopTracks[0], artistProfileTopTracks, false);
+      }
+    } catch (e) {
+      console.warn('[SpotifyListView] Failed to play album:', e);
+      if (artistProfileTopTracks.length > 0) {
+        handleTrackPressItem(artistProfileTopTracks[0], artistProfileTopTracks, false);
+      }
+    }
+  }, [artistProfileTopTracks, handleTrackPressItem]);
+
+  const handleShufflePlayAlbum = useCallback(async (album: any) => {
+    if (!album?.id) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      let tracks = albumDetailTracks;
+      if (!tracks || tracks.length === 0) {
+        const token = await useTierStore.getState().getValidAccessToken();
+        if (!token) return;
+        const { getAlbumTracks } = require('../services/spotify');
+        tracks = await getAlbumTracks(token, album.id, album, 50).catch(() => []);
+      }
+      if (tracks && tracks.length > 0) {
+        const randomIndex = Math.floor(Math.random() * tracks.length);
+        handleTrackPressItem(tracks[randomIndex], tracks, true, album.uri || `spotify:album:${album.id}`, tracks[randomIndex].uri);
+      }
+    } catch (e) {
+      console.warn('[SpotifyListView] Failed to shuffle album:', e);
+    }
+  }, [albumDetailTracks, handleTrackPressItem]);
+
+  const isCurrentlyPlayingThisAlbum = useMemo(() => {
+    if (!currentTrack || !selectedAlbumDetail) return false;
+    return albumDetailTracks.some((t: any) => currentTrack.id === 'spotify_' + t.id || currentTrack.url === t.uri);
+  }, [currentTrack, selectedAlbumDetail, albumDetailTracks]);
+
+  const handlePlayAllAlbumTracks = useCallback(() => {
+    if (!selectedAlbumDetail) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isCurrentlyPlayingThisAlbum) {
+      if (isPlaying) {
+        pause();
+      } else {
+        resume();
+      }
+      return;
+    }
+    if (albumDetailTracks.length > 0) {
+      handleTrackPressItem(
+        albumDetailTracks[0],
+        albumDetailTracks,
+        false,
+        selectedAlbumDetail.uri || `spotify:album:${selectedAlbumDetail.id}`,
+        albumDetailTracks[0].uri
+      );
+    } else {
+      handlePlayAlbum(selectedAlbumDetail, 0);
+    }
+  }, [selectedAlbumDetail, isCurrentlyPlayingThisAlbum, isPlaying, pause, resume, albumDetailTracks, handleTrackPressItem, handlePlayAlbum]);
 
   const handleShufflePlay = useCallback(() => {
     if (playlistTracks.length === 0) return;
@@ -1347,66 +2550,40 @@ const SpotifyListView = React.memo(({
   }, [currentTrack?.id, filteredPlaylistTracks, handleTrackPressItem, selectedPlaylist, handleSpotifyMorePress]);
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* Navigation Header */}
-      <View style={styles.navigationHeader}>
-        <View style={styles.absoluteTitleContainer} pointerEvents="none">
-          <Text style={styles.navigationTitleText} numberOfLines={1}>
-            {selectedPlaylist ? selectedPlaylist.name : "Spotify Library"}
-          </Text>
-        </View>
-
-        <View style={{ width: 96, alignItems: 'flex-start' }}>
-          <Pressable
-            style={styles.closeBtn}
-            onPress={selectedPlaylist ? () => setSelectedPlaylist(null) : onGoBack}
-          >
+    <View style={styles.spotifyHubRoot}>
+      {!selectedArtistProfile && !selectedAlbumDetail && (
+        <View style={styles.spotifyHubHeader}>
+          <Pressable style={styles.spotifyHubIconButton} onPress={selectedPlaylist ? () => { setSelectedPlaylist(null); setIsSearchOpen(false); setSearchQuery(''); } : onGoBack}>
             <Feather name="chevron-left" size={24} color={Colors.text.primary} />
           </Pressable>
-        </View>
-
-        <View style={{ width: 96, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: Spacing.sm }}>
-          {selectedPlaylist && (
-            <Pressable
-              style={styles.closeBtn}
-              onPress={() => handleRefreshPlaylist(selectedPlaylist)}
-              disabled={loadingPlaylist}
-            >
-              {loadingPlaylist ? (
-                <ActivityIndicator size="small" color="#1DB954" />
-              ) : (
-                <Feather name="refresh-cw" size={18} color="#1DB954" />
-              )}
+          <View style={styles.spotifyHubHeaderTitle} pointerEvents="none">
+            <Text style={styles.spotifyHubEyebrow}>{selectedPlaylist ? 'YOUR PLAYLIST' : 'MooDMap × SPOTIFY'}</Text>
+            <Text style={styles.spotifyHubTitle} numberOfLines={1}>{selectedPlaylist?.name ?? 'Tune Into Your Mood'}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {selectedPlaylist && <Pressable style={styles.spotifyHubIconButton} onPress={() => handleRefreshPlaylist(selectedPlaylist)} disabled={loadingPlaylist}>
+              {loadingPlaylist ? <ActivityIndicator size="small" color={Colors.accent.primary} /> : <Feather name="refresh-cw" size={18} color={Colors.accent.primary} />}
+            </Pressable>}
+            <Pressable style={styles.spotifyHubIconButton} onPress={onSettingsPress}>
+              <Feather name="settings" size={18} color={Colors.accent.primary} />
             </Pressable>
-          )}
-          <Pressable style={styles.closeBtn} onPress={onSettingsPress}>
-            <Feather name="settings" size={20} color="#1DB954" />
-          </Pressable>
+          </View>
         </View>
-      </View>
-
-      {/* Spotify Custom Search Bar */}
-      <View style={[styles.searchBar, { borderColor: 'rgba(30, 215, 96, 0.2)', borderWidth: 1 }]}>
-        <Feather name="search" size={16} color="rgba(255,255,255,0.4)" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder={selectedPlaylist ? `Search inside ${selectedPlaylist.name}...` : "Search Spotify tracks..."}
-          placeholderTextColor="rgba(255,255,255,0.4)"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {searchQuery.length > 0 && (
-          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
-            <Feather name="x" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
-          </Pressable>
-        )}
-      </View>
+      )}
 
       {selectedPlaylist ? (
         /* Playlist detail list view */
         <View style={{ flex: 1 }}>
+          <View style={styles.spotifyPlaylistTools}>
+            <Pressable style={styles.spotifyPlaylistSearchToggle} onPress={() => { setIsSearchOpen((open) => !open); if (isSearchOpen) setSearchQuery(''); }}>
+              <Feather name="search" size={15} color={Colors.accent.primary} />
+              <Text style={styles.spotifyPlaylistSearchToggleText}>{isSearchOpen ? 'Close search' : 'Search this playlist'}</Text>
+            </Pressable>
+            {isSearchOpen && <View style={styles.spotifyPlaylistInlineSearch}>
+              <TextInput autoFocus value={searchQuery} onChangeText={setSearchQuery} placeholder={`Search ${selectedPlaylist.name}`} placeholderTextColor="rgba(255,255,255,0.4)" style={styles.spotifySearchInput} />
+              {!!searchQuery && <Pressable onPress={() => setSearchQuery('')}><Feather name="x" size={16} color={Colors.text.secondary} /></Pressable>}
+            </View>}
+          </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-between', gap: 8, paddingHorizontal: Spacing.sm, marginBottom: Spacing.md }}>
             {/* Playlists Back Button */}
             <View style={{ flex: 1 }}>
@@ -1423,6 +2600,7 @@ const SpotifyListView = React.memo(({
                 }}
                 onPress={() => {
                   setSelectedPlaylist(null);
+                  setIsSearchOpen(false);
                   setSearchQuery('');
                 }}
               >
@@ -1526,66 +2704,96 @@ const SpotifyListView = React.memo(({
             </View>
           )}
         </View>
-      ) : searchQuery.trim() ? (
+      ) : isSearchOpen ? (
         /* Spotify Search Results list view */
         <View style={{ flex: 1 }}>
-          {loading ? (
-            <View style={styles.centerContainer}>
-              <ActivityIndicator size="large" color="#1DB954" />
-            </View>
-          ) : searchResults.length === 0 ? (
-            <View style={styles.centerContainer}>
-              <Feather name="search" size={48} color={Colors.text.secondary} />
-              <Text style={styles.emptyTracksTitle}>No tracks found</Text>
-              <Text style={styles.emptyTracksDesc}>Try searching for another song name.</Text>
+          <View style={styles.spotifySearchSheet}>
+            <Feather name="search" size={18} color={Colors.accent.primary} />
+            <TextInput
+              autoFocus
+              style={styles.spotifySearchInput}
+              placeholder="Search Spotify"
+              placeholderTextColor="rgba(255,255,255,0.42)"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Pressable onPress={() => { setIsSearchOpen(false); setSearchQuery(''); }} hitSlop={10}>
+              <Feather name="x" size={19} color="rgba(255,255,255,0.65)" />
+            </Pressable>
+          </View>
+          {!searchQuery.trim() ? (
+            <View style={styles.spotifySearchEmpty}>
+              <View style={styles.spotifySearchEmptyIcon}><Feather name="search" size={27} color={Colors.accent.primary} /></View>
+              <Text style={styles.emptyTracksTitle}>Find something for this moment</Text>
+              <Text style={styles.emptyTracksDesc}>Search songs, artists, or albums on Spotify.</Text>
             </View>
           ) : (
-            <ScrollView contentContainerStyle={styles.listScroll} showsVerticalScrollIndicator={false}>
-              {searchResults.map((item, idx) => {
-                const isCurrent = currentTrack?.id === 'spotify_' + item.id;
-                return (
-                  <GlassCard
-                    key={`${item.id}-${idx}`}
-                    intensity="subtle"
-                    padding="none"
-                    style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
-                    onPress={() => handleTrackPressItem(item, [item], false, undefined, item.uri, true)}
-                    disablePressAnimation
-                  >
-                    <View style={styles.trackItemInner}>
-                      <Image
-                        source={item.album?.images?.[0]?.url ? { uri: item.album.images[0].url } : undefined}
-                        style={[styles.trackCover, { borderRadius: 20 }]}
-                      />
-                      <View style={styles.trackDetails}>
-                        <Text numberOfLines={1} style={[styles.trackName, isCurrent && styles.activeTrackText]}>
-                          {item.name}
-                        </Text>
-                        <Text numberOfLines={1} style={styles.trackArtist}>
-                          {item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown'}
-                        </Text>
+            loading ? (
+              <View style={styles.centerContainer}>
+                <ActivityIndicator size="large" color="#1DB954" />
+              </View>
+            ) : searchResults.length === 0 ? (
+              <View style={styles.centerContainer}>
+                <Feather name="search" size={48} color={Colors.text.secondary} />
+                <Text style={styles.emptyTracksTitle}>No tracks found</Text>
+                <Text style={styles.emptyTracksDesc}>Try searching for another song name.</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={styles.listScroll} showsVerticalScrollIndicator={false}>
+                {searchResults.map((item, idx) => {
+                  const isCurrent = currentTrack?.id === 'spotify_' + item.id;
+                  return (
+                    <GlassCard
+                      key={`${item.id}-${idx}`}
+                      intensity="subtle"
+                      padding="none"
+                      style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
+                      onPress={() => handleTrackPressItem(item, [item], false, undefined, item.uri, true)}
+                      disablePressAnimation
+                    >
+                      <View style={styles.trackItemInner}>
+                        <Image
+                          source={item.album?.images?.[0]?.url ? { uri: item.album.images[0].url } : undefined}
+                          style={[styles.trackCover, { borderRadius: 20 }]}
+                        />
+                        <View style={styles.trackDetails}>
+                          <Text numberOfLines={1} style={[styles.trackName, isCurrent && styles.activeTrackText]}>
+                            {item.name}
+                          </Text>
+                          <Text numberOfLines={1} style={styles.trackArtist}>
+                            {item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown'}
+                          </Text>
+                        </View>
+                        <View style={styles.trackActions}>
+                          <Pressable
+                            onPress={(e) => { e.stopPropagation?.(); handleSpotifyMorePress(item); }}
+                            hitSlop={12}
+                            style={styles.trackMoreBtn}
+                          >
+                            <Feather name="more-vertical" size={20} color="rgba(255, 255, 255, 0.6)" />
+                          </Pressable>
+                        </View>
                       </View>
-                      <View style={styles.trackActions}>
-                        <Pressable
-                          onPress={(e) => { e.stopPropagation?.(); handleSpotifyMorePress(item); }}
-                          hitSlop={12}
-                          style={styles.trackMoreBtn}
-                        >
-                          <Feather name="more-vertical" size={20} color="rgba(255, 255, 255, 0.6)" />
-                        </Pressable>
-                      </View>
-                    </View>
-                  </GlassCard>
-                );
-              })}
-            </ScrollView>
+                    </GlassCard>
+                  );
+                })}
+              </ScrollView>
+            )
           )}
         </View>
       ) : (
-        /* Playlists Grid View */
+        /* Three-tab Spotify home */
         <ScrollView
-          contentContainerStyle={styles.listScroll}
+          contentContainerStyle={[
+            styles.listScroll,
+            styles.spotifyHubScroll,
+            activeSpotifyTab === 'artists' && styles.spotifyHubScrollArtists,
+          ]}
           showsVerticalScrollIndicator={false}
+          bounces={true}
+          alwaysBounceVertical={true}
           refreshControl={
             <RefreshControl
               refreshing={refreshingPlaylists}
@@ -1595,63 +2803,559 @@ const SpotifyListView = React.memo(({
             />
           }
         >
-          <Text style={[styles.cardTitleSm, { marginBottom: Spacing.md, marginLeft: Spacing.xs }]}>
-            Your Playlists
-          </Text>
-          {sortedPlaylists.length === 0 ? (
-            <View style={[styles.centerContainer, { paddingVertical: Spacing.section }]}>
-              <Feather name="folder" size={40} color={Colors.text.secondary} />
-              <Text style={styles.emptyTracksTitle}>No Playlists Found</Text>
-              <Text style={styles.emptyTracksDesc}>Check back after creating playlists on Spotify.</Text>
-            </View>
-          ) : (
-            sortedPlaylists.map(pl => {
-              const isActive = isPlaylistActive(pl.id);
-              const hasImage = pl.images?.[0]?.url;
-              return (
-                <GlassCard
-                  key={pl.id}
-                  onPress={() => handlePlaylistSelect(pl)}
-                  intensity={isActive ? "strong" : "subtle"}
-                  padding="none"
-                  style={[
-                    styles.playlistItemCard,
-                    isActive && styles.activePlaylistItemCard
-                  ]}
-                >
-                  <View style={styles.playlistItemInner}>
-                    {hasImage ? (
-                      <Image
-                        source={{ uri: hasImage }}
-                        style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                      />
-                    ) : (
-                      <View style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
-                        <Feather name="music" size={20} color="rgba(255,255,255,0.3)" />
+          <Animated.View style={[{ flex: 1 }, animatedTabContentStyle]}>
+            {activeSpotifyTab === 'overview' ? (
+              isOverviewLoading ? (
+                <OverviewSkeleton />
+              ) : (
+                <>
+                  <View style={styles.spotifyHeroShell}>
+                    <View style={styles.spotifyHeroCard}>
+                      <View style={styles.spotifyHeroGlow} />
+                      <View style={styles.spotifyHeroContent}>
+                        <Text style={styles.spotifyHeroKicker}>{isPlaying && currentTrack?.category === 'spotify' ? 'NOW PLAYING' : 'YOUR SPOTIFY SPACE'}</Text>
+                        <Text style={styles.spotifyHeroTitle}>{isPlaying && currentTrack?.category === 'spotify' ? currentTrack.title : 'Your music,\nAll in one place.'}</Text>
+                        <Text style={styles.spotifyHeroCopy} numberOfLines={2}>{isPlaying && currentTrack?.category === 'spotify' ? currentTrack.artist : 'Revisit recent listens, explore your favourite artists and playlists.'}</Text>
+                        <AnimatedPressable style={styles.spotifyHeroQueueButton} pressScale={0.98} onPress={onShowQueue}>
+                          <Feather name="list" size={16} color={Colors.text.onAccent} />
+                          <Text style={styles.spotifyHeroQueueText}>View queue</Text>
+                        </AnimatedPressable>
                       </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.playlistItemName, isActive && styles.activePlaylistItemName]}>{pl.name}</Text>
-                      <Text style={[styles.playlistItemCount, isActive && styles.activePlaylistItemCount]}>
-                        {isActive ? (isPlaying ? 'Playing • ' : 'Paused • ') : ''}
-                        {(pl.tracks?.total ?? pl.items?.total ?? 0)} tracks
-                      </Text>
+                      <View style={styles.spotifyHeroArtworkWrap}>
+                        <MusicCover cover={currentTrack?.category === 'spotify' ? currentTrack.cover : (recentlyPlayed[0]?.track ? spotifyGetBestImage(recentlyPlayed[0].track.album?.images ?? [], 300) ?? '' : '')} style={styles.spotifyHeroArtwork} iconSize={28} />
+                        <View style={styles.spotifyHeroArtworkHighlight} pointerEvents="none" />
+                      </View>
                     </View>
-                    {isActive ? (
-                      <Feather
-                        name={isPlaying ? "volume-2" : "pause"}
-                        size={16}
-                        color="#1DB954"
-                      />
-                    ) : (
-                      <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.4)" />
-                    )}
                   </View>
-                </GlassCard>
-              );
-            })
-          )}
+                  {/* Made for your mood section (after user logs mood) */}
+                  {todayMood ? (
+                    <>
+                      <View style={styles.spotifySectionHeading}>
+                        <Pressable
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}
+                          onPress={onOpenRecommended}
+                        >
+                          <View style={[
+                            styles.moodRecSectionIconBadge,
+                            { backgroundColor: (Colors.mood[todayMood.moodType] ?? Colors.accent.primary) + '22' }
+                          ]}>
+                            <Feather
+                              name={(MOOD_GENRE_MAP[todayMood.moodType as keyof typeof MOOD_GENRE_MAP]?.icon ?? 'music') as any}
+                              size={14}
+                              color={Colors.mood[todayMood.moodType] ?? Colors.accent.primary}
+                            />
+                          </View>
+                          <Text style={styles.spotifySectionTitle}>Made for your mood</Text>
+                          <Feather name="chevron-right" size={15} color={Colors.text.tertiary} style={{ marginLeft: 1 }} />
+                        </Pressable>
+                        <Pressable onPress={onOpenRecommended} hitSlop={8}>
+                          <Text style={styles.spotifySectionAction}>See all</Text>
+                        </Pressable>
+                      </View>
+
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.spotifyHorizontalRail}
+                      >
+                        {overviewMoodRecs.length > 0 ? (
+                          overviewMoodRecs.map((rec: any, index: number) => {
+                            const track = rec.track;
+                            const isCurrent = currentTrack?.id === track.id;
+                            return (
+                              <Pressable
+                                key={`mood-${track.id}-${index}`}
+                                style={styles.spotifyMoodRecCard}
+                                onPress={() => {
+                                  const allMoodTracks = overviewMoodRecs.map((r: any) => r.track);
+                                  handleTrackPressItem(track, allMoodTracks, false, undefined, track.url);
+                                }}
+                              >
+                                <View style={[
+                                  styles.spotifyMoodRecCoverWrap,
+                                  isCurrent && { borderColor: Colors.accent.primary, borderWidth: 1.5 }
+                                ]}>
+                                  <MusicCover
+                                    cover={track.cover}
+                                    style={styles.spotifyMoodRecCover}
+                                    iconSize={18}
+                                  />
+                                  {isCurrent && isPlaying && (
+                                    <View style={styles.spotifyMoodRecPlayingOverlay}>
+                                      <Feather name="volume-2" size={18} color={Colors.accent.primary} />
+                                    </View>
+                                  )}
+                                </View>
+                                <Text
+                                  style={[
+                                    styles.spotifyRecentTitle,
+                                    isCurrent && { color: Colors.accent.primary }
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {track.title}
+                                </Text>
+                                <Text style={styles.spotifyRecentMeta} numberOfLines={1}>
+                                  {track.artist}
+                                </Text>
+                                {rec.reason ? (
+                                  <View style={styles.spotifyMoodReasonChip}>
+                                    <Feather
+                                      name={
+                                        rec.source === 'personal' ? 'heart' :
+                                          rec.source === 'playlist' ? 'disc' :
+                                            rec.source === 'discovery' ? 'compass' : 'star'
+                                      }
+                                      size={9}
+                                      color={Colors.accent.primary}
+                                    />
+                                    <Text style={styles.spotifyMoodReasonText} numberOfLines={1}>
+                                      {rec.reason}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                              </Pressable>
+                            );
+                          })
+                        ) : (
+                          <View style={styles.spotifyMoodEmptyWrap}>
+                            <ActivityIndicator size="small" color={Colors.accent.primary} />
+                            <Text style={styles.spotifyEmptyRailText}>Crafting your mood mix...</Text>
+                          </View>
+                        )}
+                      </ScrollView>
+                    </>
+                  ) : (
+                    <GlassCard intensity="subtle" padding="none" style={styles.spotifyMoodPromptCard}>
+                      <Pressable
+                        style={styles.spotifyMoodPromptInner}
+                        onPress={() => router.push('/')}
+                      >
+                        <View style={styles.spotifyMoodPromptIconWrap}>
+                          <Feather name="smile" size={20} color={Colors.accent.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.spotifyMoodPromptTitle}>How are you feeling today?</Text>
+                          <Text style={styles.spotifyMoodPromptDesc}>
+                            Check in your mood to unlock personalized Spotify tracks tuned to your exact vibe.
+                          </Text>
+                        </View>
+                        <Feather name="chevron-right" size={18} color="rgba(255, 255, 255, 0.4)" />
+                      </Pressable>
+                    </GlassCard>
+                  )}
+
+                  <View style={styles.spotifySectionHeading}><Text style={styles.spotifySectionTitle}>Recently played</Text><Text style={styles.spotifySectionHint}>Spotify</Text></View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.spotifyHorizontalRail}>
+                    {recentlyPlayed.slice(0, 8).map((entry: any, index: number) => {
+                      const track = entry.track;
+                      return <Pressable
+                        key={`${track.id}-${index}`}
+                        style={styles.spotifyRecentCard}
+                        onPress={() => handleTrackPressItem(
+                          track,
+                          [track],
+                          false,
+                          track.album?.uri ?? (track.album?.id ? `spotify:album:${track.album.id}` : undefined),
+                          track.uri,
+                        )}
+                      >
+                        <MusicCover cover={spotifyGetBestImage(track.album?.images ?? [], 300) ?? ''} style={styles.spotifyRecentCover} iconSize={18} />
+                        <Text style={styles.spotifyRecentTitle} numberOfLines={1}>{track.name}</Text>
+                        <Text style={styles.spotifyRecentMeta} numberOfLines={1}>{track.artists?.map((a: any) => a.name).join(', ')}</Text>
+                      </Pressable>;
+                    })}
+                    {recentlyPlayed.length === 0 && <Text style={styles.spotifyEmptyRailText}>Recent listening will appear here.</Text>}
+                  </ScrollView>
+                  <View style={styles.spotifySectionHeading}><Text style={styles.spotifySectionTitle}>Your listening pulse</Text><Pressable onPress={() => setActiveSpotifyTab('artists')}><Text style={styles.spotifySectionAction}>Artists</Text></Pressable></View>
+                  <GlassCard intensity="medium" padding="none" style={styles.spotifyPulseCard}>
+                    {(topTracks.length ? topTracks : recentlyPlayed.map((entry: any) => entry.track)).slice(0, 4).map((track: any, index: number) => <Pressable
+                      key={`${track.id}-${index}`}
+                      style={styles.spotifyPulseRow}
+                      onPress={() => handleTrackPressItem(
+                        track,
+                        [track],
+                        false,
+                        track.album?.uri ?? (track.album?.id ? `spotify:album:${track.album.id}` : undefined),
+                        track.uri,
+                      )}
+                    >
+                      <Text style={styles.spotifyPulseIndex}>{String(index + 1).padStart(2, '0')}</Text>
+                      <MusicCover cover={spotifyGetBestImage(track.album?.images ?? [], 80) ?? ''} style={styles.spotifyPulseCover} iconSize={14} />
+                      <View style={{ flex: 1 }}><Text style={styles.spotifyPulseName} numberOfLines={1}>{track.name}</Text><Text style={styles.spotifyPulseArtist} numberOfLines={1}>{track.artists?.map((a: any) => a.name).join(', ')}</Text></View>
+                      <Feather name="play" size={15} color={Colors.accent.primary} />
+                    </Pressable>)}
+                    {topTracks.length === 0 && recentlyPlayed.length === 0 && <Text style={styles.spotifyEmptyRailText}>Play a few songs on Spotify to build your listening pulse.</Text>}
+                  </GlassCard>
+                </>
+              )) : activeSpotifyTab === 'artists' ? (
+                <>
+                  <View style={styles.spotifyArtistIntroRow}>
+                    <View style={{ flex: 1, paddingRight: 10 }}>
+                      <Text style={styles.spotifyHeroKicker}>FROM YOUR TASTE SURVEY</Text>
+                      <Text style={styles.spotifyArtistIntroTitle}>Artists you love</Text>
+                      <Text style={styles.spotifyArtistIntroCopy}>Tap an artist to explore their catalog.</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => router.push('/music-preferences')}
+                      style={styles.artistTasteHeaderBtn}
+                      hitSlop={8}
+                    >
+                      <Feather name="sliders" size={13} color={Colors.accent.primary} />
+                      <Text style={styles.artistTasteHeaderBtnText}>Tune Taste</Text>
+                    </Pressable>
+                  </View>
+                  {loadingArtists ? (
+                    <View style={styles.spotifyArtistLoading}>
+                      <View style={{ flexDirection: 'row', gap: 16, justifyContent: 'center' }}>
+                        {[0, 1, 2].map(i => <View key={i} style={styles.artistGridSkeletonCircle} />)}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 16, justifyContent: 'center', marginTop: 20 }}>
+                        {[3, 4, 5].map(i => <View key={i} style={styles.artistGridSkeletonCircle} />)}
+                      </View>
+                    </View>
+                  ) : artistLoadError ? (
+                    <GlassCard intensity="medium" style={styles.spotifyArtistEmpty}>
+                      <Feather name="wifi-off" size={28} color={Colors.accent.primary} />
+                      <Text style={styles.emptyTracksTitle}>Artists are taking a moment</Text>
+                      <Text style={styles.emptyTracksDesc}>Check your Spotify connection, then try again.</Text>
+                      <AnimatedPressable style={styles.spotifySurveyButton} onPress={() => setArtistRefreshKey((key) => key + 1)}>
+                        <Text style={styles.spotifySurveyButtonText}>Try again</Text>
+                      </AnimatedPressable>
+                    </GlassCard>
+                  ) : artistSpotlights.length === 0 ? (
+                    <GlassCard intensity="medium" style={styles.spotifyArtistEmpty}>
+                      <Feather name="users" size={28} color={Colors.accent.primary} />
+                      <Text style={styles.emptyTracksTitle}>Choose your favourite artists</Text>
+                      <Text style={styles.emptyTracksDesc}>Finish the music taste survey to make this space personal.</Text>
+                      <AnimatedPressable style={styles.spotifySurveyButton} onPress={() => router.push('/music-preferences')}>
+                        <Text style={styles.spotifySurveyButtonText}>Update music taste</Text>
+                      </AnimatedPressable>
+                    </GlassCard>
+                  ) : (
+                    <View
+                      style={styles.artistGridSectionWrap}
+                      onLayout={(e) => {
+                        const w = e.nativeEvent.layout.width;
+                        if (w > 0 && Math.abs(w - artistContainerWidth) > 2) {
+                          setArtistContainerWidth(w);
+                        }
+                      }}
+                    >
+                      {/* Swipeable Horizontal FlatList Pager */}
+                      <FlatList
+                        ref={artistPagerRef}
+                        data={artistPages}
+                        keyExtractor={artistPageKeyExtractor}
+                        horizontal
+                        pagingEnabled={Platform.OS === 'ios'}
+                        snapToInterval={artistContainerWidth}
+                        snapToAlignment="start"
+                        decelerationRate="fast"
+                        disableIntervalMomentum={true}
+                        nestedScrollEnabled={true}
+                        showsHorizontalScrollIndicator={false}
+                        directionalLockEnabled={true}
+                        scrollEnabled={artistPages.length > 1}
+                        onMomentumScrollEnd={handleArtistPagerMomentumEnd}
+                        getItemLayout={getArtistItemLayout}
+                        initialNumToRender={2}
+                        maxToRenderPerBatch={2}
+                        windowSize={3}
+                        removeClippedSubviews={Platform.OS === 'android'}
+                        renderItem={renderArtistPage}
+                      />
+
+                      {/* Pagination controls with smooth page indicator dots */}
+                      {artistPages.length > 1 && (
+                        <View style={styles.artistPagination}>
+                          <Pressable
+                            onPress={() => handleGoToArtistPage(artistPage - 1)}
+                            disabled={artistPage === 0}
+                            style={[styles.artistPageBtn, artistPage === 0 && styles.artistPageBtnDisabled]}
+                            hitSlop={10}
+                          >
+                            <Feather name="chevron-left" size={18} color={artistPage === 0 ? 'rgba(255,255,255,0.2)' : Colors.accent.primary} />
+                          </Pressable>
+
+                          <View style={styles.artistPaginationCenter}>
+                            <Text style={styles.artistPageIndicator}>
+                              {artistPage + 1} / {artistPages.length}
+                            </Text>
+                            <View style={styles.artistPageDotsRow}>
+                              {visibleDots.map((dotIdx) => (
+                                <Pressable
+                                  key={dotIdx}
+                                  onPress={() => handleGoToArtistPage(dotIdx)}
+                                  hitSlop={6}
+                                >
+                                  <View
+                                    style={[
+                                      styles.artistPageDot,
+                                      dotIdx === artistPage && styles.artistPageDotActive,
+                                    ]}
+                                  />
+                                </Pressable>
+                              ))}
+                            </View>
+                          </View>
+
+                          <Pressable
+                            onPress={() => handleGoToArtistPage(artistPage + 1)}
+                            disabled={artistPage >= artistPages.length - 1}
+                            style={[styles.artistPageBtn, artistPage >= artistPages.length - 1 && styles.artistPageBtnDisabled]}
+                            hitSlop={10}
+                          >
+                            <Feather name="chevron-right" size={18} color={artistPage >= artistPages.length - 1 ? 'rgba(255,255,255,0.2)' : Colors.accent.primary} />
+                          </Pressable>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </>
+              ) : (
+              <>
+                <Text style={[styles.cardTitleSm, { marginBottom: Spacing.md, marginLeft: Spacing.xs }]}>
+                  Your Playlists
+                </Text>
+                {sortedPlaylists.length === 0 ? (
+                  <View style={[styles.centerContainer, { paddingVertical: Spacing.section }]}>
+                    <Feather name="folder" size={40} color={Colors.text.secondary} />
+                    <Text style={styles.emptyTracksTitle}>No Playlists Found</Text>
+                    <Text style={styles.emptyTracksDesc}>Check back after creating playlists on Spotify.</Text>
+                  </View>
+                ) : (
+                  sortedPlaylists.map(pl => {
+                    const isActive = isPlaylistActive(pl.id);
+                    const hasImage = pl.images?.[0]?.url;
+                    return (
+                      <GlassCard
+                        key={pl.id}
+                        onPress={() => handlePlaylistSelect(pl)}
+                        intensity={isActive ? "strong" : "subtle"}
+                        padding="none"
+                        style={[
+                          styles.playlistItemCard,
+                          isActive && styles.activePlaylistItemCard
+                        ]}
+                      >
+                        <View style={styles.playlistItemInner}>
+                          {hasImage ? (
+                            <Image
+                              source={{ uri: hasImage }}
+                              style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                            />
+                          ) : (
+                            <View style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
+                              <Feather name="music" size={20} color="rgba(255,255,255,0.3)" />
+                            </View>
+                          )}
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.playlistItemName, isActive && styles.activePlaylistItemName]}>{pl.name}</Text>
+                            <Text style={[styles.playlistItemCount, isActive && styles.activePlaylistItemCount]}>
+                              {isActive ? (isPlaying ? 'Playing • ' : 'Paused • ') : ''}
+                              {(pl.tracks?.total ?? pl.items?.total ?? 0)} tracks
+                            </Text>
+                          </View>
+                          {isActive ? (
+                            <Feather
+                              name={isPlaying ? "volume-2" : "pause"}
+                              size={16}
+                              color="#1DB954"
+                            />
+                          ) : (
+                            <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.4)" />
+                          )}
+                        </View>
+                      </GlassCard>
+                    );
+                  })
+                )}
+              </>
+            )}
+          </Animated.View>
         </ScrollView>
+      )}
+
+      {/* Expanded Mini Player (stays open until user taps music cover orb again) */}
+      {!selectedPlaylist && !isSearchOpen && !selectedArtistProfile && !selectedAlbumDetail && currentTrack && (
+        <Animated.View
+          pointerEvents={isMiniPlayerExpanded ? 'box-none' : 'none'}
+          style={[
+            styles.spotifyDropletPlayerContainer,
+            { bottom: Math.max(insets.bottom, 14) + 6 + 62 + 10 },
+            dropletAnimatedStyle,
+          ]}
+        >
+          <Pressable
+            onPress={handleCardPress}
+            style={({ pressed }) => [
+              styles.spotifyDropletCard,
+              pressed && { opacity: 0.94, transform: [{ scale: 0.99 }] }
+            ]}
+          >
+            {/* Track Info */}
+            <View style={styles.spotifyDropletTrackInfo}>
+              <View style={styles.spotifyDropletCoverWrap}>
+                <MusicCover
+                  cover={currentTrack.cover || ''}
+                  style={styles.spotifyDropletCover}
+                  iconSize={14}
+                  borderRadius={12}
+                />
+              </View>
+              <View style={styles.spotifyDropletMeta}>
+                <Text numberOfLines={1} style={styles.spotifyDropletTitle}>
+                  {currentTrack.title || 'Unknown Track'}
+                </Text>
+                <Text numberOfLines={1} style={styles.spotifyDropletArtist}>
+                  {currentTrack.artist || 'Unknown Artist'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Playback Controls */}
+            <View style={styles.spotifyDropletControls}>
+              <Pressable
+                hitSlop={10}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  prev();
+                }}
+                style={styles.spotifyDropletCtrlBtn}
+              >
+                <Feather name="skip-back" size={16} color="rgba(255,255,255,0.78)" />
+              </Pressable>
+
+              <Pressable
+                hitSlop={10}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  if (isPlaying) {
+                    pause();
+                  } else {
+                    resume();
+                  }
+                }}
+                style={styles.spotifyDropletPlayBtn}
+              >
+                <Feather
+                  name={isPlaying ? "pause" : "play"}
+                  size={17}
+                  color={Colors.text.onAccent}
+                  style={isPlaying ? undefined : { marginLeft: 2.5 }}
+                />
+              </Pressable>
+
+              <Pressable
+                hitSlop={10}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  next();
+                }}
+                style={styles.spotifyDropletCtrlBtn}
+              >
+                <Feather name="skip-forward" size={16} color="rgba(255,255,255,0.78)" />
+              </Pressable>
+            </View>
+          </Pressable>
+        </Animated.View>
+      )}
+
+      {/* Floating Bottom Navigation Bar */}
+      {!selectedPlaylist && !isSearchOpen && !selectedArtistProfile && !selectedAlbumDetail && (
+        <View style={[styles.spotifyFloatingNav, { bottom: Math.max(insets.bottom, 14) + 6 }]} pointerEvents="box-none">
+          <GlassView
+            glassEffectStyle={liquidGlassAvailable ? 'regular' : 'none'}
+            tintColor="rgba(190, 255, 108, 0.22)"
+            colorScheme="dark"
+            style={styles.spotifyNavPill}
+          >
+            {/* Smooth animated sliding indicator pill centered in track */}
+            <View style={styles.spotifyNavIndicatorTrack} pointerEvents="none">
+              <Animated.View
+                style={[
+                  styles.spotifyNavActiveIndicator,
+                  navIndicatorStyle,
+                ]}
+              />
+            </View>
+            {([['overview', 'home', 'Overview'], ['artists', 'users', 'Artists'], ['playlists', 'music', 'Playlists']] as const).map(([tab, icon, label]) => {
+              const active = activeSpotifyTab === tab;
+              return (
+                <Pressable
+                  key={tab}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setActiveSpotifyTab(tab);
+                  }}
+                  style={styles.spotifyNavItem}
+                >
+                  <Feather name={icon} size={16} color={active ? Colors.text.onAccent : 'rgba(255,255,255,0.67)'} />
+                  <Text style={[styles.spotifyNavLabel, active && styles.spotifyNavLabelActive]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </GlassView>
+
+          <GlassView
+            glassEffectStyle={liquidGlassAvailable ? 'regular' : 'none'}
+            tintColor="rgba(190, 255, 108, 0.28)"
+            colorScheme="dark"
+            style={styles.spotifySearchOrb}
+          >
+            <Pressable
+              style={styles.spotifySearchOrbPressable}
+              onPress={() => {
+                setSearchQuery('');
+                setIsSearchOpen(true);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+            >
+              <Feather name="search" size={20} color={Colors.accent.primary} />
+            </Pressable>
+          </GlassView>
+
+          {/* Rotating Music Cover Orb (Visible when track is playing / loaded) */}
+          {currentTrack && (
+            <GlassView
+              glassEffectStyle={liquidGlassAvailable ? 'regular' : 'none'}
+              tintColor={isMiniPlayerExpanded ? "rgba(190, 255, 108, 0.38)" : "rgba(190, 255, 108, 0.26)"}
+              colorScheme="dark"
+              style={[
+                styles.spotifyCoverOrb,
+                isMiniPlayerExpanded && styles.spotifyCoverOrbActive
+              ]}
+            >
+              <Pressable
+                style={styles.spotifyCoverOrbPressable}
+                onPress={handleToggleExpandMiniPlayer}
+              >
+                {/* Concentric Progress Ring */}
+                <SpotifyCoverProgressRing size={42} />
+
+                {/* Disc backing */}
+                <View style={styles.spotifyCoverDiscBacking} />
+
+                {/* Rotating Vinyl Disc */}
+                <Animated.View style={[animatedCoverStyle, styles.spotifyCoverRotatingDisc]}>
+                  <MusicCover
+                    cover={currentTrack.cover}
+                    style={{ width: '100%', height: '100%' }}
+                    iconSize={12.5}
+                    borderRadius={19}
+                  />
+                </Animated.View>
+
+                {/* Center vinyl spindle pin */}
+                <View style={styles.spotifyCoverCenterPin} />
+              </Pressable>
+            </GlassView>
+          )}
+        </View>
       )}
 
       {/* Spotify Track 3-dot Options Sheet */}
@@ -1771,6 +3475,8 @@ const SpotifyListView = React.memo(({
                       artist: targetTrack.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
                       cover: targetTrack.album?.images?.[0]?.url,
                       uri: targetTrack.uri || `spotify:track:${targetTrack.id}`,
+                    }, (plName) => {
+                      showSpotifyToast(`Added to "${plName}"`);
                     });
                   });
                 }}
@@ -1785,57 +3491,588 @@ const SpotifyListView = React.memo(({
         </RNAnimated.View>
       </Modal>
 
-      {/* Spotify section local toast */}
-      {spToastMsg && (
-        <RNAnimated.View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            // Sit above the mini player (~80px) with some breathing room
-            bottom: 130,
-            left: -SCREEN_PADDING,
-            right: -SCREEN_PADDING,
-            alignItems: 'center',
-            zIndex: 999999,
-            opacity: spToastOpacity,
-          }}
+      {/* Full-Screen Edge-to-Edge Artist Profile View */}
+      {selectedArtistProfile && (
+        <Animated.View
+          style={[
+            styles.artistModalRoot,
+            {
+              position: 'absolute',
+              top: -screenPaddingTop,
+              left: -SCREEN_PADDING,
+              right: -SCREEN_PADDING,
+              bottom: 0,
+              zIndex: 40,
+            },
+            artistModalAnimatedStyle,
+          ]}
         >
-          <View style={{
-            backgroundColor: 'rgba(30, 30, 36, 0.95)',
-            paddingVertical: 10,
-            paddingHorizontal: 20,
-            borderRadius: 9999,
-            borderWidth: 1,
-            borderColor: spToastType === 'error'
-              ? 'rgba(255, 107, 107, 0.25)'
-              : spToastType === 'warning'
-                ? 'rgba(255, 190, 106, 0.25)'
-                : 'rgba(141, 233, 29, 0.25)',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            elevation: 6,
-            maxWidth: '85%',
-          }}>
-            <Feather
-              name={spToastType === 'success' ? 'check-circle' : 'alert-circle'}
-              size={14}
-              color={spToastType === 'error'
-                ? Colors.error
-                : spToastType === 'warning'
-                  ? Colors.warning
-                  : Colors.accent.primary}
-            />
-            <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption, flexShrink: 1 }}>
-              {spToastMsg}
-            </Text>
-          </View>
-        </RNAnimated.View>
+          <ScrollView
+            style={styles.artistModalScroll}
+            contentContainerStyle={{
+              paddingBottom: currentTrack ? Math.max(insets.bottom, 16) + 90 : Math.max(insets.bottom, 24) + 32,
+            }}
+            showsVerticalScrollIndicator={false}
+            bounces={true}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshingArtistProfile}
+                onRefresh={() => handleArtistSelect(selectedArtistProfile, true)}
+                tintColor={Colors.accent.primary}
+                colors={[Colors.accent.primary]}
+                progressBackgroundColor="#181B14"
+              />
+            }
+          >
+            {/* Edge-to-Edge Full-Screen Banner Hero */}
+            <View style={styles.artistHeroBannerContainer}>
+              {/* Artist Profile Photo - Edge to Edge */}
+              <ExpoImage
+                source={{
+                  uri: spotifyGetBestImage(selectedArtistProfile.images ?? [], 640)
+                    || (selectedArtistProfile.images?.[0]?.url ?? ''),
+                }}
+                style={styles.artistHeroBannerImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={250}
+              />
+
+              {/* Multi-Stop Blurry Smooth Linear Gradient Blending into Theme */}
+              <LinearGradient
+                colors={[
+                  'rgba(11, 13, 10, 0.45)',
+                  'rgba(11, 13, 10, 0.0)',
+                  'rgba(11, 13, 10, 0.25)',
+                  'rgba(11, 13, 10, 0.65)',
+                  'rgba(11, 13, 10, 0.92)',
+                  '#0B0D0A',
+                ]}
+                locations={[0, 0.22, 0.52, 0.74, 0.90, 1.0]}
+                style={StyleSheet.absoluteFill}
+              />
+
+              {/* Frosted Top Navigation Bar Overlay */}
+              <View style={[styles.artistHeroNavRow, { paddingTop: Math.max(insets.top, 16) + 8 }]}>
+                <Pressable
+                  style={styles.artistNavCircleBtn}
+                  onPress={handleArtistProfileBack}
+                  hitSlop={12}
+                >
+                  <Feather name="chevron-left" size={24} color={Colors.text.primary} />
+                </Pressable>
+              </View>
+
+              {/* Lower Hero Content: Artist Name & Action Controls */}
+              <View style={styles.artistHeroContentBottom}>
+                <Text style={styles.artistHeroName} numberOfLines={2}>
+                  {selectedArtistProfile.name}
+                </Text>
+
+                {selectedArtistProfile.genres && selectedArtistProfile.genres.length > 0 && (
+                  <Text style={styles.artistHeroSubline} numberOfLines={1}>
+                    {selectedArtistProfile.genres.slice(0, 3).map((g: string) => g.charAt(0).toUpperCase() + g.slice(1)).join(' • ')}
+                  </Text>
+                )}
+
+                {/* Action Controls Row */}
+                <View style={styles.artistHeroActionRow}>
+                  {/* Shuffle Button (left) */}
+                  <Pressable
+                    style={styles.artistHeroAuxBtn}
+                    onPress={handleShuffleAllArtistTracks}
+                    hitSlop={10}
+                  >
+                    <Feather name="shuffle" size={20} color={Colors.accent.primary} />
+                  </Pressable>
+
+                  {/* Prominent Center Big Lime Play Button */}
+                  <Pressable
+                    style={styles.artistHeroBigPlayBtn}
+                    onPress={handlePlayAllArtistTracks}
+                    hitSlop={10}
+                  >
+                    <Ionicons
+                      name={isCurrentlyPlayingThisArtist && isPlaying ? "pause" : "play"}
+                      size={30}
+                      color={Colors.text.onAccent}
+                      style={{ marginLeft: (isCurrentlyPlayingThisArtist && isPlaying) ? 0 : 3.5 }}
+                    />
+                  </Pressable>
+
+                  {/* Queue Button (right) */}
+                  <Pressable
+                    style={styles.artistHeroAuxBtn}
+                    onPress={onShowQueue}
+                    hitSlop={10}
+                  >
+                    <Feather name="list" size={20} color={Colors.accent.primary} />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            {/* Body Content (Dark theme #0B0D0A) */}
+            <View style={styles.artistModalBody}>
+              {/* Latest Release Card (If artist has albums/releases) */}
+              {artistProfileAlbums.length > 0 && (() => {
+                const latestRelease = artistProfileAlbums[0];
+                const releaseYear = latestRelease.release_date ? latestRelease.release_date.split('-')[0] : '';
+                const releaseType = latestRelease.album_type
+                  ? (latestRelease.album_type.charAt(0).toUpperCase() + latestRelease.album_type.slice(1))
+                  : 'Release';
+
+                return (
+                  <Pressable
+                    style={styles.artistLatestReleaseCard}
+                    onPress={() => handleOpenAlbumDetail(latestRelease)}
+                  >
+                    <ExpoImage
+                      source={{ uri: spotifyGetBestImage(latestRelease.images ?? [], 300) ?? '' }}
+                      style={styles.artistLatestReleaseCover}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      transition={200}
+                    />
+
+                    <View style={styles.artistLatestReleaseMetaWrap}>
+                      <Text style={styles.artistLatestReleaseBadge}>Latest Release</Text>
+                      <Text style={styles.artistLatestReleaseTitle} numberOfLines={1}>
+                        {latestRelease.name}
+                      </Text>
+                      <Text style={styles.artistLatestReleaseYear}>
+                        {releaseYear ? `${releaseYear} • ${releaseType}` : releaseType}
+                      </Text>
+                    </View>
+
+                    <Pressable
+                      style={styles.artistLatestReleasePlayIcon}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        handlePlayAlbum(latestRelease);
+                      }}
+                      hitSlop={10}
+                    >
+                      <Feather name="play" size={15} color="#FFFFFF" style={{ marginLeft: 2 }} />
+                    </Pressable>
+                  </Pressable>
+                );
+              })()}
+
+              {/* Loading Indicator or Tracks Section */}
+              {loadingArtistProfile ? (
+                <View style={styles.artistLoadingContainer}>
+                  <ActivityIndicator size="large" color={Colors.accent.primary} />
+                  <Text style={styles.artistLoadingText}>Loading artist catalog...</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Top Songs Section Header */}
+                  <View style={styles.artistSectionHeaderRow}>
+                    <Text style={styles.artistSectionHeading}>Top Songs</Text>
+                    {artistProfileTopTracks.length > 0 && (
+                      <Text style={styles.artistSectionCountBadge}>
+                        {artistProfileTopTracks.length} tracks
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Top Songs List */}
+                  {artistProfileTopTracks.length === 0 ? (
+                    <View style={styles.artistEmptyCatalogCard}>
+                      <Feather name="music" size={32} color="rgba(255, 255, 255, 0.3)" />
+                      <Text style={styles.artistEmptyCatalogTitle}>No tracks found</Text>
+                      <Text style={styles.artistEmptyCatalogDesc}>
+                        Unable to load Spotify tracks for this artist right now.
+                      </Text>
+                      <Pressable
+                        style={styles.artistRetryBtn}
+                        onPress={() => handleArtistSelect(selectedArtistProfile, true)}
+                      >
+                        <Feather name="refresh-cw" size={14} color={Colors.text.onAccent} />
+                        <Text style={styles.artistRetryBtnText}>Retry</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <View style={styles.artistTrackList}>
+                      {artistProfileTopTracks.map((item: any, index: number) => {
+                        const isCurrent = currentTrack?.id === 'spotify_' + item.id;
+                        const isCurrentPlaying = isCurrent && isPlaying;
+
+                        return (
+                          <Pressable
+                            key={item.id}
+                            style={[
+                              styles.artistTrackItem,
+                              isCurrent && styles.artistTrackItemActive,
+                            ]}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              handleTrackPressItem(item, artistProfileTopTracks, false);
+                            }}
+                          >
+                            {/* Track Index / Equalizer Indicator */}
+                            <View style={styles.artistTrackIndexSlot}>
+                              {isCurrentPlaying ? (
+                                <Feather name="volume-2" size={16} color={Colors.accent.primary} />
+                              ) : (
+                                <Text
+                                  style={[
+                                    styles.artistTrackIndexNum,
+                                    isCurrent && { color: Colors.accent.primary },
+                                  ]}
+                                >
+                                  {index + 1}
+                                </Text>
+                              )}
+                            </View>
+
+                            {/* Artwork Thumbnail */}
+                            <ExpoImage
+                              source={{
+                                uri: spotifyGetBestImage(item.album?.images ?? [], 160) ?? '',
+                              }}
+                              style={styles.artistTrackThumbnail}
+                              contentFit="cover"
+                              cachePolicy="memory-disk"
+                              transition={150}
+                            />
+
+                            {/* Track Title & Meta */}
+                            <View style={styles.artistTrackMeta}>
+                              <Text
+                                numberOfLines={1}
+                                style={[
+                                  styles.artistTrackTitle,
+                                  isCurrent && styles.artistTrackTitleActive,
+                                ]}
+                              >
+                                {item.name}
+                              </Text>
+                              <Text numberOfLines={1} style={styles.artistTrackSubline}>
+                                {item.album?.name || selectedArtistProfile.name}
+                              </Text>
+                            </View>
+
+                            {/* Duration & 3-Dot Options */}
+                            <View style={styles.artistTrackRight}>
+                              <Text style={styles.artistTrackDuration}>
+                                {spotifyFormatDur(item.duration_ms)}
+                              </Text>
+                              <Pressable
+                                hitSlop={12}
+                                style={styles.artistTrackMoreBtn}
+                                onPress={(e) => {
+                                  e.stopPropagation?.();
+                                  handleSpotifyMorePress(item);
+                                }}
+                              >
+                                <Feather
+                                  name="more-vertical"
+                                  size={18}
+                                  color="rgba(255, 255, 255, 0.55)"
+                                />
+                              </Pressable>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {/* Albums & Releases Shelf */}
+                  {artistProfileAlbums.length > 0 && (
+                    <View style={styles.artistAlbumsSection}>
+                      <View style={styles.artistSectionHeaderRow}>
+                        <Text style={styles.artistSectionHeading}>Albums & Releases</Text>
+                        <Text style={styles.artistSectionCountBadge}>
+                          {artistProfileAlbums.length}
+                        </Text>
+                      </View>
+
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.artistAlbumsScrollContent}
+                      >
+                        {artistProfileAlbums.map((album: any) => {
+                          const year = album.release_date ? album.release_date.split('-')[0] : '';
+                          return (
+                            <Pressable
+                              key={album.id}
+                              style={styles.artistAlbumShelfCard}
+                              onPress={() => handleOpenAlbumDetail(album)}
+                            >
+                              <ExpoImage
+                                source={{ uri: spotifyGetBestImage(album.images ?? [], 300) ?? '' }}
+                                style={styles.artistAlbumShelfCover}
+                                contentFit="cover"
+                                cachePolicy="memory-disk"
+                                transition={200}
+                              />
+                              <Text numberOfLines={1} style={styles.artistAlbumShelfTitle}>
+                                {album.name}
+                              </Text>
+                              <Text numberOfLines={1} style={styles.artistAlbumShelfYear}>
+                                {year ? `${year} • ${album.album_type || 'Album'}` : (album.album_type || 'Album')}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
+          </ScrollView>
+
+          {renderSpotifyToast(currentTrack ? 105 : 45)}
+        </Animated.View>
       )}
+
+      {/* Album Detail & Tracklist View */}
+      {selectedAlbumDetail && (
+        <Animated.View
+          style={[
+            styles.artistModalRoot,
+            {
+              position: 'absolute',
+              top: -screenPaddingTop,
+              left: -SCREEN_PADDING,
+              right: -SCREEN_PADDING,
+              bottom: 0,
+              zIndex: 50,
+            },
+            artistModalAnimatedStyle,
+          ]}
+        >
+          <ScrollView
+            style={styles.artistModalScroll}
+            contentContainerStyle={{
+              paddingBottom: currentTrack ? Math.max(insets.bottom, 16) + 90 : Math.max(insets.bottom, 24) + 32,
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Edge-to-Edge Full-Screen Banner Hero */}
+            <View style={styles.artistHeroBannerContainer}>
+              {/* High-Res Album Cover - Edge to Edge */}
+              <ExpoImage
+                source={{
+                  uri: spotifyGetBestImage(selectedAlbumDetail.images ?? [], 640)
+                    || (selectedAlbumDetail.images?.[0]?.url ?? ''),
+                }}
+                style={styles.artistHeroBannerImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={250}
+              />
+
+              {/* Multi-Stop Blurry Smooth Linear Gradient Blending into Theme */}
+              <LinearGradient
+                colors={[
+                  'rgba(11, 13, 10, 0.45)',
+                  'rgba(11, 13, 10, 0.0)',
+                  'rgba(11, 13, 10, 0.25)',
+                  'rgba(11, 13, 10, 0.65)',
+                  'rgba(11, 13, 10, 0.92)',
+                  '#0B0D0A',
+                ]}
+                locations={[0, 0.22, 0.52, 0.74, 0.90, 1.0]}
+                style={StyleSheet.absoluteFill}
+              />
+
+              {/* Frosted Top Navigation Bar Overlay */}
+              <View style={[styles.artistHeroNavRow, { paddingTop: Math.max(insets.top, 16) + 8 }]}>
+                <Pressable
+                  style={styles.artistNavCircleBtn}
+                  onPress={() => setSelectedAlbumDetail(null)}
+                  hitSlop={12}
+                >
+                  <Feather name="chevron-left" size={24} color={Colors.text.primary} />
+                </Pressable>
+                <View style={{ flex: 1, paddingHorizontal: 12 }}>
+                  <Text style={[styles.albumDetailNavEyebrow, { textAlign: 'center' }]}>
+                    {(selectedAlbumDetail.album_type || 'ALBUM').toUpperCase()}
+                  </Text>
+                </View>
+                <View style={{ width: 42 }} />
+              </View>
+
+              {/* Lower Hero Content: Album Title, Artist & Action Controls */}
+              <View style={styles.artistHeroContentBottom}>
+                <Text style={styles.artistHeroName} numberOfLines={2}>
+                  {selectedAlbumDetail.name}
+                </Text>
+
+                <Text style={styles.artistHeroSubline} numberOfLines={1}>
+                  {(selectedAlbumDetail.artists?.map((a: any) => a.name).join(', ') || selectedArtistProfile?.name || 'Artist')}
+                  {selectedAlbumDetail.release_date ? ` • ${selectedAlbumDetail.release_date.split('-')[0]}` : ''}
+                  {albumDetailTracks.length > 0 ? ` • ${albumDetailTracks.length} tracks` : ''}
+                </Text>
+
+                {/* Action Controls Row */}
+                <View style={styles.artistHeroActionRow}>
+                  {/* Shuffle Button (left) */}
+                  <Pressable
+                    style={styles.artistHeroAuxBtn}
+                    onPress={() => handleShufflePlayAlbum(selectedAlbumDetail)}
+                    hitSlop={10}
+                  >
+                    <Feather name="shuffle" size={20} color={Colors.accent.primary} />
+                  </Pressable>
+
+                  {/* Prominent Center Big Lime Play Button */}
+                  <Pressable
+                    style={styles.artistHeroBigPlayBtn}
+                    onPress={handlePlayAllAlbumTracks}
+                    hitSlop={10}
+                  >
+                    <Ionicons
+                      name={isCurrentlyPlayingThisAlbum && isPlaying ? "pause" : "play"}
+                      size={30}
+                      color={Colors.text.onAccent}
+                      style={{ marginLeft: (isCurrentlyPlayingThisAlbum && isPlaying) ? 0 : 3.5 }}
+                    />
+                  </Pressable>
+
+                  {/* Queue Button (right) */}
+                  <Pressable
+                    style={styles.artistHeroAuxBtn}
+                    onPress={onShowQueue}
+                    hitSlop={10}
+                  >
+                    <Feather name="list" size={20} color={Colors.accent.primary} />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            {/* Tracklist Section Matching Artist Profile "Top Songs" */}
+            <View style={styles.artistModalBody}>
+              <View style={styles.artistSectionHeaderRow}>
+                <Text style={styles.artistSectionHeading}>Album Tracks</Text>
+                {albumDetailTracks.length > 0 && (
+                  <Text style={styles.artistSectionCountBadge}>{albumDetailTracks.length} songs</Text>
+                )}
+              </View>
+
+              {loadingAlbumTracks ? (
+                <View style={styles.artistLoadingContainer}>
+                  <ActivityIndicator size="large" color={Colors.accent.primary} />
+                  <Text style={styles.artistLoadingText}>Loading tracks...</Text>
+                </View>
+              ) : albumDetailTracks.length === 0 ? (
+                <View style={styles.artistEmptyCatalogCard}>
+                  <Feather name="music" size={32} color="rgba(255, 255, 255, 0.3)" />
+                  <Text style={styles.artistEmptyCatalogTitle}>No tracks found</Text>
+                </View>
+              ) : (
+                <View style={styles.artistTrackList}>
+                  {albumDetailTracks.map((track: any, index: number) => {
+                    const isCurrent = currentTrack?.id === 'spotify_' + track.id;
+                    const isCurrentPlaying = isCurrent && isPlaying;
+                    const albumThumb = spotifyGetBestImage(selectedAlbumDetail.images ?? [], 160) ?? '';
+
+                    return (
+                      <Pressable
+                        key={track.id}
+                        style={[
+                          styles.artistTrackItem,
+                          isCurrent && styles.artistTrackItemActive,
+                        ]}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          handleTrackPressItem(
+                            track,
+                            albumDetailTracks,
+                            false,
+                            selectedAlbumDetail.uri || `spotify:album:${selectedAlbumDetail.id}`,
+                            track.uri
+                          );
+                        }}
+                      >
+                        {/* Track Index / Equalizer Indicator */}
+                        <View style={styles.artistTrackIndexSlot}>
+                          {isCurrentPlaying ? (
+                            <Feather name="volume-2" size={16} color={Colors.accent.primary} />
+                          ) : (
+                            <Text
+                              style={[
+                                styles.artistTrackIndexNum,
+                                isCurrent && { color: Colors.accent.primary },
+                              ]}
+                            >
+                              {index + 1}
+                            </Text>
+                          )}
+                        </View>
+
+                        {/* Artwork Thumbnail */}
+                        <ExpoImage
+                          source={{ uri: albumThumb }}
+                          style={styles.artistTrackThumbnail}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                          transition={150}
+                        />
+
+                        {/* Track Title & Meta */}
+                        <View style={styles.artistTrackMeta}>
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.artistTrackTitle,
+                              isCurrent && styles.artistTrackTitleActive,
+                            ]}
+                          >
+                            {track.name}
+                          </Text>
+                          <Text numberOfLines={1} style={styles.artistTrackSubline}>
+                            {track.artists?.map((a: any) => a.name).join(', ') || selectedArtistProfile?.name}
+                          </Text>
+                        </View>
+
+                        {/* Duration & 3-Dot Options */}
+                        <View style={styles.artistTrackRight}>
+                          <Text style={styles.artistTrackDuration}>
+                            {spotifyFormatDur(track.duration_ms)}
+                          </Text>
+                          <Pressable
+                            hitSlop={12}
+                            style={styles.artistTrackMoreBtn}
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              handleSpotifyMorePress({
+                                ...track,
+                                album: {
+                                  ...selectedAlbumDetail,
+                                  images: selectedAlbumDetail.images,
+                                },
+                              });
+                            }}
+                          >
+                            <Feather
+                              name="more-vertical"
+                              size={18}
+                              color="rgba(255, 255, 255, 0.55)"
+                            />
+                          </Pressable>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          </ScrollView>
+
+          {renderSpotifyToast(currentTrack ? 105 : 45)}
+        </Animated.View>
+      )}
+
+      {/* Spotify section local toast (when modals are not open) */}
+      {!selectedArtistProfile && !selectedAlbumDetail && renderSpotifyToast(130)}
     </View>
   );
 });
@@ -1989,7 +4226,7 @@ const RecommendedListView = React.memo(({
   onTrackPress: (track: Track, tracks: Track[], isShuffle?: boolean, contextUri?: string, offsetUri?: string, _isFromSearch?: boolean) => void;
   onSettingsPress: () => void;
   onShowQueue: () => void;
-  onAddToPlaylist?: (track: SpotifyTrackTarget) => void;
+  onAddToPlaylist?: (track: SpotifyTrackTarget, onSuccess?: (playlistName: string) => void) => void;
 }) => {
   const isVIP = useTierStore((s) => s.isVIP);
   const spotifyConnected = useTierStore((s) => s.spotifyConnected);
@@ -2137,12 +4374,12 @@ const RecommendedListView = React.memo(({
       const recs = vipRecs.length > 0
         ? vipRecs
         : getSmartRecommendations(
-            todayMood.moodType as any,
-            TRACKS_LIBRARY,
-            user?.id ?? null,
-            20,
-            options
-          );
+          todayMood.moodType as any,
+          TRACKS_LIBRARY,
+          user?.id ?? null,
+          20,
+          options
+        );
 
       if (recs && recs.length > 0) {
         const seen = Array.from(new Set([
@@ -2397,9 +4634,9 @@ const RecommendedListView = React.memo(({
                 <Feather
                   name={
                     rec.source === 'familiar' ? 'heart' :
-                    rec.source === 'personal' ? 'user' :
-                    rec.source === 'playlist' ? 'disc' :
-                    rec.source === 'discovery' ? 'compass' : 'star'
+                      rec.source === 'personal' ? 'user' :
+                        rec.source === 'playlist' ? 'disc' :
+                          rec.source === 'discovery' ? 'compass' : 'star'
                   }
                   size={10}
                   color={moodColor}
@@ -2427,154 +4664,123 @@ const RecommendedListView = React.memo(({
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Header */}
-      <View style={styles.navigationHeader}>
-        <View style={styles.absoluteTitleContainer} pointerEvents="none">
-          <Text style={styles.navigationTitleText} numberOfLines={1}>
-            {moodLabel}
-          </Text>
+      {/* Sleek Compact Header */}
+      <View style={styles.spotifyHubHeader}>
+        <Pressable
+          style={styles.spotifyHubIconButton}
+          onPress={onGoBack}
+          hitSlop={12}
+        >
+          <Feather name="chevron-left" size={24} color={Colors.text.primary} />
+        </Pressable>
+
+        <View style={styles.spotifyHubHeaderTitle}>
+          <Text style={styles.spotifyHubEyebrow}>MOOD RECOMMENDATIONS</Text>
+          <Text style={styles.spotifyHubTitle} numberOfLines={1}>{moodLabel}</Text>
         </View>
 
-        <View style={{ width: 96, alignItems: 'flex-start' }}>
-          <Pressable style={styles.closeBtn} onPress={onGoBack}>
-            <Feather name="chevron-left" size={24} color={Colors.text.primary} />
-          </Pressable>
-        </View>
-
-        <View style={{ width: 96, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: Spacing.sm }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Pressable
-            style={styles.closeBtn}
+            style={styles.spotifyHubIconButton}
             onPress={() => loadRecommendations(true)}
             disabled={refreshing}
+            hitSlop={10}
           >
             {refreshing ? (
-              <ActivityIndicator size="small" color={moodColor} />
+              <ActivityIndicator size="small" color={Colors.accent.primary} />
             ) : (
-              <Feather name="refresh-cw" size={18} color={moodColor} />
+              <Feather name="refresh-cw" size={17} color={Colors.accent.primary} />
             )}
           </Pressable>
-          <Pressable style={styles.closeBtn} onPress={onSettingsPress}>
-            <Feather name="settings" size={20} color={Colors.text.primary} />
+          <Pressable style={styles.spotifyHubIconButton} onPress={onSettingsPress} hitSlop={10}>
+            <Feather name="settings" size={18} color={Colors.text.primary} />
           </Pressable>
         </View>
       </View>
 
-      {/* Solid Vibrant Mood Hero Card */}
+      {/* Solid Vibrant Mood Banner */}
       {todayMood && (
-        <View style={[
-          styles.recommendedMoodBanner,
-          {
-            backgroundColor: moodColor,
-            shadowColor: moodColor,
-          }
-        ]}>
-          <View style={styles.recommendedMoodIconWrap}>
-            <Feather name={moodIcon as any} size={20} color="#0A0A0C" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-              <Text style={styles.recommendedMoodTitle}>{moodLabel}</Text>
-              <View style={styles.recommendedMoodBadge}>
-                <Text style={styles.recommendedMoodBadgeText}>
-                  {todayMood.moodType.toUpperCase()}
-                </Text>
-              </View>
+        <View style={styles.recommendedCollapsibleBannerWrap}>
+          <View
+            style={[
+              styles.recommendedSolidMoodBanner,
+              {
+                backgroundColor: moodColor,
+                shadowColor: moodColor,
+              },
+            ]}
+          >
+            <View style={styles.recommendedMoodIconWrap}>
+              <Feather name={moodIcon as any} size={20} color="#0B0D0A" />
             </View>
-            <Text style={styles.recommendedMoodSubtitle}>
-              {recommendedRecs.length} tracks • Fresh mix crafted for your vibe
-            </Text>
+            <View style={{ flex: 1, justifyContent: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                <Text style={styles.recommendedMoodTitle} numberOfLines={1}>{moodLabel}</Text>
+                <View style={styles.recommendedMoodBadge}>
+                  <Text style={styles.recommendedMoodBadgeText}>
+                    {todayMood.moodType.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.recommendedMoodSubtitle} numberOfLines={1}>
+                {recommendedRecs.length} tracks • Fresh mix for your vibe
+              </Text>
+            </View>
           </View>
         </View>
       )}
 
-      {/* Search Bar */}
-      <View style={[styles.searchBar, { borderColor: moodColor + '30', borderWidth: 1 }]}>
-        <Feather name="search" size={16} color="rgba(255,255,255,0.4)" style={styles.searchIcon} />
+      {/* Redesigned Modern Premium Search Bar */}
+      <View style={[styles.recommendedSearchWrap, { borderColor: moodColor + '38' }]}>
+        <View style={[styles.recommendedSearchIconSlot, { backgroundColor: moodColor + '20' }]}>
+          <Feather name="search" size={14} color={moodColor} />
+        </View>
         <TextInput
-          style={styles.searchInput}
-          placeholder="Search within recommendations..."
-          placeholderTextColor="rgba(255,255,255,0.4)"
+          style={styles.recommendedSearchInput}
+          placeholder="Search songs, artists, or vibe..."
+          placeholderTextColor="rgba(255, 255, 255, 0.45)"
           value={searchQuery}
           onChangeText={setSearchQuery}
           autoCapitalize="none"
           autoCorrect={false}
         />
         {searchQuery.length > 0 && (
-          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
-            <Feather name="x" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={10} style={styles.recommendedSearchClearBtn}>
+            <Feather name="x-circle" size={16} color="rgba(255, 255, 255, 0.6)" />
           </Pressable>
         )}
       </View>
 
-      {/* Action Buttons Row */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-between', gap: 8, paddingHorizontal: Spacing.sm, marginBottom: Spacing.md }}>
-        {/* Categories Back Button */}
-        <View style={{ flex: 1 }}>
-          <Pressable
-            style={{
-              width: '100%',
-              height: 38,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#FFFFFF',
-              borderRadius: Radius.md,
-              gap: 6,
-            }}
-            onPress={onGoBack}
-          >
-            <Feather name="arrow-left" size={14} color="#000000" />
-            <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
-              Music Hub
-            </Text>
-          </Pressable>
-        </View>
+      {/* Compact Action Buttons Row */}
+      <View style={styles.recommendedActionRow}>
+        {/* Play Mix Button */}
+        <Pressable
+          style={[styles.recommendedPlayBtn, { backgroundColor: Colors.accent.primary }]}
+          onPress={handlePlayAll}
+          disabled={allTracks.length === 0}
+        >
+          <Ionicons name="play" size={15} color={Colors.text.onAccent} style={{ marginLeft: 2 }} />
+          <Text style={styles.recommendedPlayBtnText}>Play Mix</Text>
+        </Pressable>
 
-        {/* Current Queue List Button */}
-        <View style={{ flex: 1 }}>
-          <Pressable
-            style={{
-              width: '100%',
-              height: 38,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#A3E635',
-              borderRadius: Radius.md,
-              gap: 6,
-            }}
-            onPress={onShowQueue}
-          >
-            <Feather name="list" size={14} color="#000000" />
-            <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
-              Queue
-            </Text>
-          </Pressable>
-        </View>
+        {/* Shuffle Button */}
+        <Pressable
+          style={[styles.recommendedAuxBtn, allTracks.length === 0 && { opacity: 0.5 }]}
+          onPress={handleShufflePlay}
+          disabled={allTracks.length === 0}
+        >
+          <Feather name="shuffle" size={14} color={Colors.accent.primary} />
+          <Text style={styles.recommendedAuxBtnText}>Shuffle</Text>
+        </Pressable>
 
-        {/* Shuffle Play Button */}
-        <View style={{ flex: 1 }}>
-          <Pressable
-            style={{
-              width: '100%',
-              height: 38,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: moodColor,
-              borderRadius: Radius.md,
-              gap: 6,
-              opacity: filteredRecs.length > 0 ? 1 : 0.5,
-            }}
-            onPress={handleShufflePlay}
-            disabled={filteredRecs.length === 0}
-          >
-            <Feather name="shuffle" size={14} color="#000000" />
-            <Text style={{ fontFamily: Fonts.bodyBold, fontSize: FontSizes.caption, color: '#000000' }}>
-              Shuffle
-            </Text>
-          </Pressable>
-        </View>
+        {/* Queue Button */}
+        <Pressable
+          style={styles.recommendedAuxBtn}
+          onPress={onShowQueue}
+        >
+          <Feather name="list" size={14} color={Colors.accent.primary} />
+          <Text style={styles.recommendedAuxBtnText}>Queue</Text>
+        </Pressable>
       </View>
 
       {/* Main Track List */}
@@ -2599,7 +4805,7 @@ const RecommendedListView = React.memo(({
             keyExtractor={(item, index) => `${item.track.id}-${index}`}
             renderItem={renderRecommendedItem}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listScroll}
+            contentContainerStyle={[styles.listScroll, { paddingBottom: currentTrack ? 140 : 50 }]}
             initialNumToRender={15}
             maxToRenderPerBatch={15}
             windowSize={10}
@@ -2783,6 +4989,8 @@ const RecommendedListView = React.memo(({
                       artist: target.artist,
                       cover: target.cover,
                       uri: target.url?.startsWith('spotify:') ? target.url : `spotify:track:${target.id.replace('spotify_', '')}`,
+                    }, (plName) => {
+                      showToast(`Added to "${plName}"`);
                     });
                   });
                 }}
@@ -3615,7 +5823,7 @@ const PlayerView = React.memo(({
   onGoBack: () => void;
   onShowQueue: () => void;
   isPlayerActive: boolean;
-  onAddToPlaylist?: (track: SpotifyTrackTarget) => void;
+  onAddToPlaylist?: (track: SpotifyTrackTarget, onSuccess?: (playlistName: string) => void) => void;
 }) => {
   const {
     currentTrack,
@@ -3791,7 +5999,6 @@ const PlayerView = React.memo(({
   const rotatedArtworkStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
-  if (!currentTrack) return null;
 
   const isCurrentFav = useMemo(() => {
     if (!currentTrack) return false;
@@ -3799,6 +6006,9 @@ const PlayerView = React.memo(({
     const id2 = id1.startsWith('spotify_') ? id1.replace('spotify_', '') : `spotify_${id1}`;
     return favorites.includes(id1) || favorites.includes(id2) || isTrackComfort(id1) || isTrackComfort(id2);
   }, [currentTrack, favorites, dataVersion]);
+
+  if (!currentTrack) return null;
+
   const isPosterMode = playerViewMode === 'poster';
 
   return (
@@ -4719,90 +6929,98 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   }), []);
 
   return (
-    <View style={styles.queuePopupBackdropOverlay}>
-      {/* Backdrop with Fade In/Out */}
-      <RNAnimated.View style={[StyleSheet.absoluteFill, { opacity: opacityAnim }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose}>
-          <View style={styles.queueBackdropBg} />
-        </Pressable>
-      </RNAnimated.View>
-      {/* Slide-up / Draggable Sheet Container */}
-      <RNAnimated.View
-        style={[
-          styles.queueSheetContainer,
-          {
-            transform: [{ translateY: slideAnim }]
-          }
-        ]}
-        pointerEvents="box-none"
-      >
-        <Animated.View style={[styles.queuePopupCard, animatedCardStyle]}>
-          {/* Top Drag Handle Bar */}
-          <Pressable onPress={toggleHeight} style={styles.queueTopHandleBar} hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}>
-            <View style={styles.queueDragHandlePill} />
+    <Modal
+      visible={true}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={handleClose}
+    >
+      <View style={styles.queuePopupBackdropOverlay}>
+        {/* Backdrop with Fade In/Out */}
+        <RNAnimated.View style={[StyleSheet.absoluteFill, { opacity: opacityAnim }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={handleClose}>
+            <View style={styles.queueBackdropBg} />
           </Pressable>
-
-          {/* Header */}
-          <View style={styles.queueHeaderRow}>
-            <View style={styles.queueHeaderLeft}>
-              <View style={styles.queueIconBadge}>
-                <Feather name="list" size={16} color="#1DB954" />
-              </View>
-              <View style={styles.queueHeaderTitles}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.queueTitleText}>Play Queue</Text>
-                  {isQueueRecommended && (
-                    <View style={styles.queueRecommendedBadge}>
-                      <Text style={styles.queueRecommendedBadgeText}>Recommended</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.queueSubtitleText}>
-                  {localQueue.length} {localQueue.length === 1 ? 'track' : 'tracks'} • Drag to reorder
-                </Text>
-              </View>
-            </View>
-
-            <Pressable onPress={handleClose} hitSlop={8} style={styles.queueCloseBtn}>
-              <Feather name="x" size={16} color="rgba(255, 255, 255, 0.7)" />
+        </RNAnimated.View>
+        {/* Slide-up / Draggable Sheet Container */}
+        <RNAnimated.View
+          style={[
+            styles.queueSheetContainer,
+            {
+              transform: [{ translateY: slideAnim }]
+            }
+          ]}
+          pointerEvents="box-none"
+        >
+          <Animated.View style={[styles.queuePopupCard, animatedCardStyle]}>
+            {/* Top Drag Handle Bar */}
+            <Pressable onPress={toggleHeight} style={styles.queueTopHandleBar} hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}>
+              <View style={styles.queueDragHandlePill} />
             </Pressable>
-          </View>
 
-          <View style={styles.queueHeaderDivider} />
-
-          {localQueue.length === 0 ? (
-            <View style={styles.queueEmptyContainer}>
-              <View style={styles.queueEmptyIconCircle}>
-                <Feather name="music" size={24} color="#1DB954" />
+            {/* Header */}
+            <View style={styles.queueHeaderRow}>
+              <View style={styles.queueHeaderLeft}>
+                <View style={styles.queueIconBadge}>
+                  <Feather name="list" size={16} color="#1DB954" />
+                </View>
+                <View style={styles.queueHeaderTitles}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.queueTitleText}>Play Queue</Text>
+                    {isQueueRecommended && (
+                      <View style={styles.queueRecommendedBadge}>
+                        <Text style={styles.queueRecommendedBadgeText}>Recommended</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.queueSubtitleText}>
+                    {localQueue.length} {localQueue.length === 1 ? 'track' : 'tracks'} • Drag to reorder
+                  </Text>
+                </View>
               </View>
-              <Text style={styles.queueEmptyTitle}>Queue is empty</Text>
-              <Text style={styles.queueEmptySubtitle}>Play a song from categories or Spotify to build your queue.</Text>
+
+              <Pressable onPress={handleClose} hitSlop={8} style={styles.queueCloseBtn}>
+                <Feather name="x" size={16} color="rgba(255, 255, 255, 0.7)" />
+              </Pressable>
             </View>
-          ) : (
-            <View ref={listContainerRef} style={styles.queueListWrapper} collapsable={false}>
-              <FlatList
-                ref={flatListRef}
-                data={localQueue}
-                keyExtractor={(item) => item.key}
-                renderItem={renderItem}
-                getItemLayout={getItemLayout}
-                style={styles.queueList}
-                showsVerticalScrollIndicator={true}
-                scrollEnabled={draggedIndex === null}
-                contentContainerStyle={styles.queueListContent}
-                removeClippedSubviews={Platform.OS === 'android'}
-                initialNumToRender={12}
-                maxToRenderPerBatch={10}
-                windowSize={5}
-                onScroll={handleScroll}
-                scrollEventThrottle={16}
-                onScrollToIndexFailed={() => { }}
-              />
-            </View>
-          )}
-        </Animated.View>
-      </RNAnimated.View>
-    </View>
+
+            <View style={styles.queueHeaderDivider} />
+
+            {localQueue.length === 0 ? (
+              <View style={styles.queueEmptyContainer}>
+                <View style={styles.queueEmptyIconCircle}>
+                  <Feather name="music" size={24} color="#1DB954" />
+                </View>
+                <Text style={styles.queueEmptyTitle}>Queue is empty</Text>
+                <Text style={styles.queueEmptySubtitle}>Play a song from categories or Spotify to build your queue.</Text>
+              </View>
+            ) : (
+              <View ref={listContainerRef} style={styles.queueListWrapper} collapsable={false}>
+                <FlatList
+                  ref={flatListRef}
+                  data={localQueue}
+                  keyExtractor={(item) => item.key}
+                  renderItem={renderItem}
+                  getItemLayout={getItemLayout}
+                  style={styles.queueList}
+                  showsVerticalScrollIndicator={true}
+                  scrollEnabled={draggedIndex === null}
+                  contentContainerStyle={styles.queueListContent}
+                  removeClippedSubviews={Platform.OS === 'android'}
+                  initialNumToRender={12}
+                  maxToRenderPerBatch={10}
+                  windowSize={5}
+                  onScroll={handleScroll}
+                  scrollEventThrottle={16}
+                  onScrollToIndexFailed={() => { }}
+                />
+              </View>
+            )}
+          </Animated.View>
+        </RNAnimated.View>
+      </View>
+    </Modal>
   );
 });
 
@@ -4975,9 +7193,11 @@ export default function MusicScreen() {
   // Spotify Add to Playlist Modal states
   const [showSpotifyPlaylistModal, setShowSpotifyPlaylistModal] = useState(false);
   const [spotifyPlaylistTargetTrack, setSpotifyPlaylistTargetTrack] = useState<SpotifyTrackTarget | null>(null);
+  const spotifyPlaylistOnSuccessRef = useRef<((plName: string) => void) | null>(null);
 
-  const handleOpenSpotifyPlaylistModal = useCallback((target: SpotifyTrackTarget) => {
+  const handleOpenSpotifyPlaylistModal = useCallback((target: SpotifyTrackTarget, customOnSuccess?: (plName: string) => void) => {
     setSpotifyPlaylistTargetTrack(target);
+    spotifyPlaylistOnSuccessRef.current = customOnSuccess || null;
     setShowSpotifyPlaylistModal(true);
   }, []);
 
@@ -5060,8 +7280,15 @@ export default function MusicScreen() {
     params.view === 'recommended' ? 'recommended' : 'categories'
   );
   const previousViewRef = useRef<'categories' | 'list' | 'recommended'>('categories');
+  const listBackHandlerRef = useRef<(() => boolean) | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('midnight');
   const [activeCategoryLabel, setActiveCategoryLabel] = useState<string>('Midnight Vibes');
+  const [spotifyBottomChromeVisible, setSpotifyBottomChromeVisible] = useState(false);
+  const shouldStackSpotifyMiniPlayer = view === 'list' && selectedCategory === 'spotify' && spotifyBottomChromeVisible;
+  const isFullCoverShared = useSharedValue(0);
+  const handleFullCoverChange = useCallback((isOpen: boolean) => {
+    isFullCoverShared.value = isOpen ? 1 : 0;
+  }, [isFullCoverShared]);
 
   // Sync route params with view
   useEffect(() => {
@@ -5201,7 +7428,7 @@ export default function MusicScreen() {
         display: 'none',
       };
     }
-    const translateX = (1 - viewIndex.value) * SCREEN_WIDTH;
+    const translateX = viewIndex.value <= 1 ? (1 - viewIndex.value) * SCREEN_WIDTH : 0;
     const scale = viewIndex.value > 1 ? 1 - (viewIndex.value - 1) * 0.05 : 1;
     const opacity = viewIndex.value <= 1 ? viewIndex.value : 2 - viewIndex.value;
     return {
@@ -5212,6 +7439,7 @@ export default function MusicScreen() {
       left: SCREEN_PADDING,
       right: SCREEN_PADDING,
       bottom: 0,
+      zIndex: 5,
       display: (viewIndex.value <= 0 || viewIndex.value >= 2) ? 'none' : 'flex',
     };
   });
@@ -5225,7 +7453,7 @@ export default function MusicScreen() {
       left: SCREEN_PADDING,
       right: SCREEN_PADDING,
       bottom: 0,
-      zIndex: 10,
+      zIndex: 100,
       display: viewIndex.value <= 1 ? 'none' : 'flex',
     };
   });
@@ -5235,6 +7463,22 @@ export default function MusicScreen() {
     return {
       opacity,
       display: opacity === 0 ? 'none' : 'flex',
+    };
+  });
+
+  const spotifyBackdropStyle = useAnimatedStyle(() => {
+    const isPlayerZooming = viewIndex.value > 1;
+    const isFullCover = isFullCoverShared.value === 1;
+    if (isFullCover && isPlayerZooming) {
+      const progress = Math.max(0, Math.min(1, (viewIndex.value - 1) * 3));
+      return {
+        opacity: progress,
+        display: 'flex',
+      };
+    }
+    return {
+      opacity: 0,
+      display: 'none',
     };
   });
 
@@ -5261,7 +7505,13 @@ export default function MusicScreen() {
           setView(prev);
         }
         return true;
-      } else if (view === 'list' || view === 'recommended') {
+      } else if (view === 'list') {
+        if (listBackHandlerRef.current && listBackHandlerRef.current()) {
+          return true;
+        }
+        setView('categories');
+        return true;
+      } else if (view === 'recommended') {
         setView('categories');
         return true;
       }
@@ -5317,7 +7567,12 @@ export default function MusicScreen() {
       } else {
         setView(prev);
       }
-    } else if (view === 'list' || view === 'recommended') {
+    } else if (view === 'list') {
+      if (listBackHandlerRef.current && listBackHandlerRef.current()) {
+        return;
+      }
+      setView('categories');
+    } else if (view === 'recommended') {
       setView('categories');
     } else {
       router.back();
@@ -5341,6 +7596,15 @@ export default function MusicScreen() {
 
   return (
     <GradientBackground variant="glow">
+      {/* Solid dark obsidian backdrop to prevent green glow from leaking behind scaled-down cards */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          { backgroundColor: '#0B0D0A' },
+          spotifyBackdropStyle,
+        ]}
+        pointerEvents="none"
+      />
       <Animated.View style={[StyleSheet.absoluteFill, playerBgStyle]} pointerEvents="none">
         <PlayerBackground currentTrack={currentTrack} />
       </Animated.View>
@@ -5369,6 +7633,13 @@ export default function MusicScreen() {
               onSettingsPress={handleOpenSpotifySettings}
               onShowQueue={handleShowQueue}
               onAddToPlaylist={handleOpenSpotifyPlaylistModal}
+              onBottomChromeChange={setSpotifyBottomChromeVisible}
+              onOpenPlayer={handleMiniPlayerPress}
+              onOpenRecommended={handleOpenRecommended}
+              isPlayerOpen={view === 'player'}
+              onRegisterBackHandler={(handler) => { listBackHandlerRef.current = handler; }}
+              onFullCoverChange={handleFullCoverChange}
+              playerProgress={viewIndex}
             />
           ) : (
             <ListView
@@ -5392,13 +7663,13 @@ export default function MusicScreen() {
           />
         </Animated.View>
       </View>
-      {currentTrack && (
+      {currentTrack && !shouldStackSpotifyMiniPlayer && (
         <Animated.View
           pointerEvents={view === 'player' ? 'none' : 'auto'}
           style={[
             {
               position: 'absolute',
-              bottom: Math.max(insets.bottom, 16),
+              bottom: Math.max(insets.bottom, 14) + 8,
               left: 14,
               right: 14,
               zIndex: 99,
@@ -5409,6 +7680,7 @@ export default function MusicScreen() {
           <FloatingMiniPlayer
             onPress={handleMiniPlayerPress}
             style={styles.miniPlayerContainerStyle}
+            variant={selectedCategory === 'spotify' || currentTrack?.category === 'spotify' ? 'spotify' : 'default'}
           />
         </Animated.View>
       )}
@@ -5655,9 +7927,18 @@ export default function MusicScreen() {
       {/* 5b. Spotify Add to Playlist Modal */}
       <AddToSpotifyPlaylistModal
         visible={showSpotifyPlaylistModal}
-        onClose={() => setShowSpotifyPlaylistModal(false)}
+        onClose={() => {
+          setShowSpotifyPlaylistModal(false);
+          spotifyPlaylistOnSuccessRef.current = null;
+        }}
         track={spotifyPlaylistTargetTrack}
-        onSuccess={(plName) => showToast(`Added to "${plName}"`)}
+        onSuccess={(plName) => {
+          if (spotifyPlaylistOnSuccessRef.current) {
+            spotifyPlaylistOnSuccessRef.current(plName);
+          } else {
+            showToast(`Added to "${plName}"`);
+          }
+        }}
       />
       {/* 6. Sort Overlay Bottom Sheet */}
       {showSortMenu && (
@@ -7286,6 +9567,907 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+  spotifyHubRoot: { flex: 1 },
+  spotifyHubHeader: { minHeight: 76, paddingHorizontal: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  spotifyHubIconButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(190, 255, 108, 0.07)', borderWidth: 0.5, borderColor: 'rgba(190, 255, 108, 0.28)', shadowColor: '#BEFF6C', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 7 },
+  spotifyHubHeaderTitle: { flex: 1, alignItems: 'flex-start', paddingHorizontal: 13 },
+  spotifyHubEyebrow: { fontFamily: Fonts.bodyBold, fontSize: 8.5, letterSpacing: 1.7, color: Colors.accent.primary },
+  spotifyHubTitle: { marginTop: 3, fontFamily: Fonts.heading, fontSize: 18, letterSpacing: -0.45, color: Colors.text.primary },
+  spotifyPlaylistTools: { paddingHorizontal: Spacing.sm, marginBottom: 10 },
+  spotifyPlaylistSearchToggle: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(190,255,108,0.09)', borderWidth: 1, borderColor: 'rgba(190,255,108,0.18)' },
+  spotifyPlaylistSearchToggleText: { fontFamily: Fonts.bodyBold, fontSize: 11, color: Colors.accent.primary },
+  spotifyPlaylistInlineSearch: { height: 47, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, paddingHorizontal: 14, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' },
+  // Clears the floating navigation bar and compact controls with comfortable breathing room.
+  spotifyHubScroll: { paddingBottom: 135 },
+  spotifyHeroShell: { marginBottom: 29, padding: 1.5, borderRadius: 31, backgroundColor: 'rgba(190, 255, 108, 0.18)', shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 6 },
+  spotifyHeroCard: { overflow: 'hidden', minHeight: 214, borderRadius: 29.5, backgroundColor: '#161C13', flexDirection: 'row' },
+  spotifyHeroContent: { zIndex: 2, width: '67%', padding: 22, justifyContent: 'center' },
+  spotifyHeroGlow: { position: 'absolute', width: 230, height: 230, borderRadius: 115, right: -100, top: -75, backgroundColor: 'rgba(190, 255, 108, 0.22)' },
+  spotifyHeroKicker: { fontFamily: Fonts.bodyBold, fontSize: 10, letterSpacing: 1.55, color: Colors.accent.primary },
+  spotifyHeroTitle: { marginTop: 9, fontFamily: Fonts.heading, fontSize: 25, letterSpacing: -0.9, lineHeight: 30, color: Colors.text.primary },
+  spotifyHeroCopy: { marginTop: 9, fontFamily: Fonts.bodyMedium, fontSize: 11.5, lineHeight: 17, color: 'rgba(255,255,255,0.66)' },
+  spotifyHeroQueueButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 18, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 999, backgroundColor: Colors.accent.primary },
+  spotifyHeroQueueText: { fontFamily: Fonts.bodyBold, fontSize: 12, color: Colors.text.onAccent },
+  spotifyHeroArtworkWrap: { position: 'absolute', right: -25, bottom: -25, width: 155, height: 155, padding: 5, borderRadius: 31, backgroundColor: 'rgba(255,255,255,0.13)', transform: [{ rotate: '8deg' }] },
+  spotifyHeroArtwork: { width: '100%', height: '100%', borderRadius: 26, backgroundColor: '#293021' },
+  spotifyHeroArtworkHighlight: { position: 'absolute', top: 7, left: 7, right: 7, height: 24, borderTopLeftRadius: 25, borderTopRightRadius: 25, backgroundColor: 'rgba(255,255,255,0.12)' },
+  spotifySectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 2 },
+  spotifySectionTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text.primary },
+  spotifySectionHint: { fontFamily: Fonts.bodyMedium, fontSize: 11, color: Colors.text.secondary },
+  spotifySectionAction: { fontFamily: Fonts.bodyBold, fontSize: 12, color: Colors.accent.primary },
+  spotifyHorizontalRail: { gap: 14, paddingRight: 18, paddingBottom: 26 },
+  spotifyRecentCard: { width: 120 },
+  spotifyRecentCover: { width: 120, height: 120, borderRadius: 21, backgroundColor: Colors.background.elevated },
+  spotifyRecentTitle: { marginTop: 8, fontFamily: Fonts.bodyBold, fontSize: 12.5, color: Colors.text.primary },
+  spotifyRecentMeta: { marginTop: 2, marginBottom: 5, lineHeight: 14, fontFamily: Fonts.bodyMedium, fontSize: 10.5, color: Colors.text.secondary },
+  spotifyEmptyRailText: { paddingVertical: 18, fontFamily: Fonts.bodyMedium, fontSize: 12, color: Colors.text.secondary },
+  spotifyPulseCard: { borderRadius: 24, overflow: 'hidden' },
+  spotifyPulseRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 15, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  spotifyPulseIndex: { width: 20, fontFamily: Fonts.bodyBold, fontSize: 10, color: Colors.accent.primary },
+  spotifyPulseCover: { width: 40, height: 40, borderRadius: 12, backgroundColor: Colors.background.elevated },
+  spotifyPulseName: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text.primary },
+  spotifyPulseArtist: { marginTop: 2, fontFamily: Fonts.bodyMedium, fontSize: 11, color: Colors.text.secondary },
+  spotifyArtistIntro: { marginBottom: 19, paddingHorizontal: 3 },
+  spotifyArtistIntroRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 19,
+    paddingHorizontal: 3,
+  },
+  artistTasteHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(190, 255, 108, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.3)',
+    shadowColor: '#BEFF6C',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+  },
+  artistTasteHeaderBtnText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 12,
+    color: Colors.accent.primary,
+  },
+  moodRecSectionIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spotifyMoodRecCard: {
+    width: 128,
+  },
+  spotifyMoodRecCoverWrap: {
+    width: 128,
+    height: 128,
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: Colors.background.elevated,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  spotifyMoodRecCover: {
+    width: '100%',
+    height: '100%',
+  },
+  spotifyMoodRecPlayingOverlay: {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spotifyMoodReasonChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(190, 255, 108, 0.09)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(190, 255, 108, 0.22)',
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    overflow: 'hidden',
+  },
+  spotifyMoodReasonText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 9.5,
+    color: Colors.accent.primary,
+    flexShrink: 1,
+  },
+  spotifyMoodPromptCard: {
+    marginBottom: 20,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.18)',
+    backgroundColor: 'rgba(20, 25, 17, 0.85)',
+  },
+  spotifyMoodPromptInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
+  },
+  spotifyMoodPromptIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
+  },
+  spotifyMoodPromptTitle: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 14,
+    color: Colors.text.primary,
+  },
+  spotifyMoodPromptDesc: {
+    marginTop: 2,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: Colors.text.secondary,
+  },
+  spotifyMoodEmptyWrap: {
+    paddingVertical: 18,
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  spotifyArtistIntroTitle: { marginTop: 7, fontFamily: Fonts.heading, fontSize: 28, color: Colors.text.primary },
+  spotifyArtistIntroCopy: { marginTop: 6, fontFamily: Fonts.bodyMedium, fontSize: 13, lineHeight: 19, color: Colors.text.secondary },
+  spotifyArtistEmpty: { alignItems: 'center', gap: 9, paddingVertical: 34, borderRadius: 26 },
+  spotifyArtistLoading: { minHeight: 230, marginBottom: 15, padding: 18, borderRadius: 26, backgroundColor: 'rgba(190,255,108,0.055)', borderWidth: 0.5, borderColor: 'rgba(190,255,108,0.16)', justifyContent: 'center', gap: 13 },
+  spotifySkeletonAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: 'rgba(190,255,108,0.15)' },
+  spotifySkeletonLine: { height: 12, width: '76%', borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.1)' },
+  spotifySurveyButton: { marginTop: 7, paddingVertical: 11, paddingHorizontal: 15, borderRadius: 999, backgroundColor: Colors.accent.primary },
+  spotifySurveyButtonText: { fontFamily: Fonts.bodyBold, fontSize: 12, color: Colors.text.onAccent },
+  spotifyArtistCard: { marginBottom: 15, padding: 16, borderRadius: 26 },
+  spotifyArtistCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  spotifyArtistAvatar: { width: 54, height: 54, borderRadius: 27, backgroundColor: Colors.background.elevated },
+  spotifyArtistName: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text.primary },
+  spotifyArtistGenre: { marginTop: 3, fontFamily: Fonts.bodyMedium, fontSize: 11.5, color: Colors.text.secondary },
+  spotifyArtistLabel: { marginTop: 18, marginBottom: 10, fontFamily: Fonts.bodyBold, fontSize: 11, letterSpacing: .7, color: Colors.accent.primary },
+  spotifyAlbumRail: { gap: 10, paddingBottom: 15 },
+  spotifyAlbumItem: { width: 91 },
+  spotifyAlbumCover: { width: 91, height: 91, borderRadius: 14, backgroundColor: Colors.background.elevated },
+  spotifyAlbumName: { marginTop: 6, fontFamily: Fonts.bodyBold, fontSize: 10.5, color: Colors.text.primary },
+  spotifyAlbumMeta: { marginTop: 1, fontFamily: Fonts.bodyMedium, fontSize: 9.5, color: Colors.text.secondary },
+  spotifyArtistTrack: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 47 },
+  // Full-Screen Artist Profile Modal Styles
+  artistModalRoot: {
+    flex: 1,
+    backgroundColor: '#0B0D0A',
+    overflow: 'hidden',
+  },
+  artistModalScroll: {
+    flex: 1,
+    backgroundColor: '#0B0D0A',
+  },
+  artistHeroBannerContainer: {
+    width: SCREEN_WIDTH,
+    height: Math.round(SCREEN_WIDTH * 1.14),
+    position: 'relative',
+    backgroundColor: '#0B0D0A',
+  },
+  artistHeroBannerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  artistHeroNavRow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    zIndex: 10,
+  },
+  artistNavCircleBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(20, 25, 17, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+  },
+  artistHeroContentBottom: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 10,
+  },
+  artistHeroName: {
+    fontFamily: Fonts.heading,
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    letterSpacing: -0.6,
+    textShadowColor: 'rgba(0, 0, 0, 0.65)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  artistHeroSubline: {
+    marginTop: 4,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12.5,
+    color: 'rgba(255, 255, 255, 0.65)',
+    textAlign: 'center',
+    letterSpacing: 0.2,
+  },
+  artistHeroActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 22,
+    marginTop: 18,
+  },
+  artistHeroAuxBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(20, 25, 17, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+  },
+  artistHeroBigPlayBtn: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: Colors.accent.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.accent.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  artistModalBody: {
+    backgroundColor: '#0B0D0A',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  artistLatestReleaseCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.11)',
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  artistLatestReleaseCover: {
+    width: 64,
+    height: 64,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  artistLatestReleaseMetaWrap: {
+    flex: 1,
+    marginLeft: 14,
+    marginRight: 10,
+  },
+  artistLatestReleaseBadge: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 10.5,
+    color: 'rgba(255, 255, 255, 0.55)',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  artistLatestReleaseTitle: {
+    marginTop: 3,
+    fontFamily: Fonts.bodyBold,
+    fontSize: 15,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  artistLatestReleaseYear: {
+    marginTop: 3,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  artistLatestReleasePlayIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  artistLoadingContainer: {
+    paddingVertical: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  artistLoadingText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  artistSectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingHorizontal: 2,
+  },
+  artistSectionHeading: {
+    fontFamily: Fonts.heading,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.4,
+  },
+  artistSectionCountBadge: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.45)',
+  },
+  artistEmptyCatalogCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 36,
+    paddingHorizontal: 20,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 10,
+    marginVertical: 12,
+  },
+  artistEmptyCatalogTitle: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 15,
+    color: '#FFFFFF',
+    marginTop: 4,
+  },
+  artistEmptyCatalogDesc: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.55)',
+    textAlign: 'center',
+    maxWidth: 260,
+  },
+  artistRetryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.accent.primary,
+  },
+  artistRetryBtnText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 13,
+    color: Colors.text.onAccent,
+  },
+  artistTrackList: {
+    gap: 4,
+    marginBottom: 24,
+  },
+  artistTrackItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  artistTrackItemActive: {
+    backgroundColor: 'rgba(190, 255, 108, 0.09)',
+  },
+  artistTrackIndexSlot: {
+    width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  artistTrackIndexNum: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.45)',
+  },
+  artistTrackThumbnail: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    marginLeft: 10,
+    marginRight: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  artistTrackMeta: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  artistTrackTitle: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 14,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  artistTrackTitleActive: {
+    color: Colors.accent.primary,
+  },
+  artistTrackSubline: {
+    marginTop: 2,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 11.5,
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  artistTrackRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 8,
+  },
+  artistTrackDuration: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 11.5,
+    color: 'rgba(255, 255, 255, 0.45)',
+  },
+  artistTrackMoreBtn: {
+    padding: 6,
+  },
+  artistAlbumsSection: {
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  artistAlbumsScrollContent: {
+    paddingVertical: 8,
+    gap: 14,
+  },
+  artistAlbumShelfCard: {
+    width: 132,
+  },
+  artistAlbumShelfCover: {
+    width: 132,
+    height: 132,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  artistAlbumShelfTitle: {
+    marginTop: 8,
+    fontFamily: Fonts.bodyBold,
+    fontSize: 12.5,
+    color: '#FFFFFF',
+  },
+  artistAlbumShelfYear: {
+    marginTop: 2,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.5)',
+    textTransform: 'capitalize',
+  },
+  artistModalMiniPlayerContainer: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    zIndex: 50,
+  },
+  artistGridSkeletonCircle: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: 'rgba(190, 255, 108, 0.1)',
+  },
+  artistGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 24,
+    paddingVertical: 12,
+  },
+  artistGridItem: {
+    width: '31%',
+    alignItems: 'center',
+  },
+  artistGridAvatarContainer: {
+    width: 92,
+    height: 92,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  artistGridAvatarWrap: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(20, 25, 17, 0.85)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(190, 255, 108, 0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  artistGridAvatarWrapActive: {
+    borderColor: Colors.accent.primary,
+    borderWidth: 2,
+    shadowColor: Colors.accent.primary,
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+  },
+  artistGridPlayingBadge: {
+    position: 'absolute',
+    bottom: -1,
+    right: -1,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.accent.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#0B0D0A',
+    zIndex: 10,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+  },
+  artistGridAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  artistGridName: {
+    marginTop: 8,
+    fontFamily: Fonts.bodyBold,
+    fontSize: 12,
+    color: Colors.text.primary,
+    textAlign: 'center',
+  },
+  artistGridGenrePill: {
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  artistGridGenre: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 10,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    textTransform: 'capitalize',
+  },
+  // Album Detail Modal Styles
+  albumDetailNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  albumDetailNavTitleWrap: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  albumDetailNavEyebrow: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 9,
+    letterSpacing: 1.6,
+    color: Colors.accent.primary,
+  },
+  albumDetailNavTitle: {
+    marginTop: 2,
+    fontFamily: Fonts.heading,
+    fontSize: 16,
+    color: Colors.text.primary,
+  },
+  albumDetailHero: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 22,
+  },
+  albumDetailCover: {
+    width: 175,
+    height: 175,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+  },
+  albumDetailTitle: {
+    marginTop: 16,
+    fontFamily: Fonts.heading,
+    fontSize: 22,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    letterSpacing: -0.5,
+  },
+  albumDetailArtist: {
+    marginTop: 4,
+    fontFamily: Fonts.bodyBold,
+    fontSize: 14,
+    color: Colors.accent.primary,
+    textAlign: 'center',
+  },
+  albumDetailMeta: {
+    marginTop: 4,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.5)',
+    textAlign: 'center',
+  },
+  albumDetailActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 18,
+  },
+  albumDetailPlayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 999,
+    backgroundColor: Colors.accent.primary,
+  },
+  albumDetailPlayBtnText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 14,
+    color: Colors.text.onAccent,
+  },
+  albumDetailShuffleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(190, 255, 108, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.28)',
+  },
+  albumTracklistWrap: {
+    paddingHorizontal: 16,
+    gap: 4,
+  },
+  // Recommended List Styles
+  recommendedCollapsibleBannerWrap: {
+    width: '100%',
+    marginBottom: 10,
+  },
+  recommendedSolidMoodBanner: {
+    width: '100%',
+    height: 74,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 12,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  recommendedSearchWrap: {
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    gap: 8,
+    marginBottom: 10,
+  },
+  recommendedSearchIconSlot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recommendedSearchInput: {
+    flex: 1,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 13.5,
+    color: Colors.text.primary,
+    paddingVertical: 0,
+  },
+  recommendedSearchClearBtn: {
+    padding: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recommendedActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  recommendedPlayBtn: {
+    flex: 1.2,
+    height: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: Colors.accent.primary,
+  },
+  recommendedPlayBtnText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 12.5,
+    color: Colors.text.onAccent,
+  },
+  recommendedAuxBtn: {
+    flex: 1,
+    height: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(190, 255, 108, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.28)',
+  },
+  recommendedAuxBtnText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 11.5,
+    color: Colors.accent.primary,
+  },
+  artistGridSectionWrap: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  artistPagination: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginTop: 22,
+    marginBottom: 8,
+  },
+  artistPaginationCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  artistPageDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
+  artistPageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  artistPageDotActive: {
+    width: 16,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.accent.primary,
+  },
+  artistPageBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(190, 255, 108, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(190, 255, 108, 0.3)',
+  },
+  artistPageBtnDisabled: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  artistPageIndicator: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 13,
+    color: Colors.text.primary,
+    minWidth: 50,
+    textAlign: 'center',
+  },
+  artistUpdateTasteLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 18,
+    paddingVertical: 10,
+  },
+  artistUpdateTasteText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: Colors.accent.primary,
+  },
+  spotifySearchSheet: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 1, marginBottom: 15, paddingHorizontal: 15, height: 54, borderRadius: 27, backgroundColor: 'rgba(190,255,108,0.09)', borderWidth: 1, borderColor: 'rgba(190,255,108,0.26)' },
+  spotifySearchInput: { flex: 1, fontFamily: Fonts.bodyMedium, fontSize: 14, color: Colors.text.primary },
+  spotifySearchEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 34 },
+  spotifySearchEmptyIcon: { width: 61, height: 61, borderRadius: 31, alignItems: 'center', justifyContent: 'center', marginBottom: 15, backgroundColor: 'rgba(190,255,108,0.1)' },
+  spotifyFloatingNav: { position: 'absolute', left: 0, right: 0, zIndex: 35, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  spotifyNavPill: { height: 62, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 0, borderRadius: 31, overflow: 'hidden', backgroundColor: 'rgba(20, 25, 17, 0.92)', borderWidth: 1, borderColor: 'rgba(190, 255, 108, 0.22)', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },
+  spotifyNavIndicatorTrack: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center' },
+  spotifyNavActiveIndicator: { left: 5, width: 65, height: 52, borderRadius: 26, backgroundColor: Colors.accent.primary, zIndex: 1, shadowColor: Colors.accent.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 5, elevation: 3 },
+  spotifyNavItem: { width: 65, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', gap: 3, zIndex: 2 },
+  spotifyNavItemActive: { backgroundColor: Colors.accent.primary },
+  spotifyNavLabel: { fontFamily: Fonts.bodyBold, fontSize: 9.5, lineHeight: 12, includeFontPadding: false, textAlign: 'center', color: 'rgba(255, 255, 255, 0.68)' },
+  spotifyNavLabelActive: { color: Colors.text.onAccent },
+  spotifyHubScrollArtists: { paddingBottom: 72, flexGrow: 1 },
+  spotifySearchOrb: { width: 62, height: 62, borderRadius: 31, overflow: 'hidden', backgroundColor: 'rgba(20, 25, 17, 0.92)', borderWidth: 1, borderColor: 'rgba(190, 255, 108, 0.25)', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },
+  spotifySearchOrbPressable: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  spotifyCoverOrb: { width: 62, height: 62, borderRadius: 31, overflow: 'hidden', backgroundColor: 'rgba(20, 25, 17, 0.92)', borderWidth: 1, borderColor: 'rgba(190, 255, 108, 0.28)', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },
+  spotifyCoverOrbActive: { borderColor: Colors.accent.primary },
+  spotifyCoverOrbPressable: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  spotifyCoverDiscBacking: { position: 'absolute', width: 38, height: 38, borderRadius: 19, backgroundColor: '#141A12' },
+  spotifyCoverRotatingDisc: { width: 38, height: 38, borderRadius: 19, overflow: 'hidden' },
+  spotifyCoverCenterPin: { position: 'absolute', width: 6.5, height: 6.5, borderRadius: 3.25, backgroundColor: '#141A12', borderWidth: 1, borderColor: 'rgba(190, 255, 108, 0.45)' },
+  // Expanded Mini Player Styles (matching dimensions with the bottom floating nav dock: 345px width, 62px height, 31px borderRadius)
+  spotifyDropletPlayerContainer: { position: 'absolute', left: 0, right: 0, zIndex: 40, alignItems: 'center' },
+  spotifyDropletCard: { width: 345, height: 62, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 13, borderRadius: 31, backgroundColor: 'rgba(18, 23, 15, 0.96)', borderWidth: 1, borderColor: 'rgba(190, 255, 108, 0.26)', shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 7, overflow: 'hidden' },
+  spotifyDropletTrackInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9, paddingRight: 6 },
+  spotifyDropletCoverWrap: { width: 40, height: 40, borderRadius: 12, overflow: 'hidden', backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+  spotifyDropletCover: { width: '100%', height: '100%' },
+  spotifyDropletMeta: { flex: 1, justifyContent: 'center' },
+  spotifyDropletTitle: { fontFamily: Fonts.bodyBold, fontSize: 12.5, color: Colors.text.primary },
+  spotifyDropletArtist: { fontFamily: Fonts.bodyMedium, fontSize: 10.5, color: 'rgba(255, 255, 255, 0.65)', marginTop: 1 },
+  spotifyDropletControls: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  spotifyDropletCtrlBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  spotifyDropletPlayBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.accent.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 3 },
   recommendedMoodIconWrap: {
     width: 44,
     height: 44,
