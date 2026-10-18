@@ -58,5 +58,8 @@ scripts/
 # Implementation plan
 implementation_plan.md
 
+# Design references
+DESIGN_REFERENCES.md
+
 # ESLint
 eslint.config.js
