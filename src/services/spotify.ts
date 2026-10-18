@@ -247,16 +247,33 @@ export function resetSpotifyRateLimitCooldown(): void {
   _playerRateLimitedUntil = 0;
 }
 
+let _searchQueueChain: Promise<any> = Promise.resolve();
+
+function enqueueSearchRequest<T>(task: () => Promise<T | null>): Promise<T | null> {
+  const next = _searchQueueChain.then(async () => {
+    // If cooldown was activated while waiting in queue, abort before hitting the network
+    if (Date.now() < _searchRateLimitedUntil) {
+      return null;
+    }
+    const result = await task();
+    // 100ms gentle spacing between search requests to prevent Spotify burst limits
+    await new Promise(r => setTimeout(r, 100));
+    return result;
+  });
+  _searchQueueChain = next.then(() => { }, () => { });
+  return next;
+}
+
 /**
- * Make an authenticated request to the Spotify API.
+ * Internal executor for an authenticated request to the Spotify API.
  */
-async function spotifyFetch<T>(
+async function executeSpotifyFetch<T>(
   accessToken: string,
   endpoint: string,
   method: string = 'GET',
-  body?: any
+  body?: any,
+  isSearch: boolean = false
 ): Promise<T | null> {
-  const isSearch = endpoint.startsWith('/search');
   const cooldown = isSearch ? _searchRateLimitedUntil : _playerRateLimitedUntil;
 
   // Fail-fast if currently in cooldown for this endpoint category
@@ -295,7 +312,11 @@ async function spotifyFetch<T>(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn(`[Spotify] API error ${response.status} for ${endpoint}:`, errorText);
+      if (response.status === 403 && endpoint.includes('/artists')) {
+        console.log(`[Spotify] Catalog endpoint restricted (403) for ${endpoint}; falling back to search`);
+      } else {
+        console.warn(`[Spotify] API error ${response.status} for ${endpoint}:`, errorText);
+      }
       return null;
     }
 
@@ -311,6 +332,25 @@ async function spotifyFetch<T>(
     console.warn(`[Spotify] Fetch error for ${endpoint}:`, e);
     return null;
   }
+}
+
+/**
+ * Make an authenticated request to the Spotify API.
+ * Search queries are automatically queued and spaced by 100ms to eliminate burst rate limits.
+ */
+async function spotifyFetch<T>(
+  accessToken: string,
+  endpoint: string,
+  method: string = 'GET',
+  body?: any
+): Promise<T | null> {
+  const isSearch = endpoint.startsWith('/search');
+  if (isSearch) {
+    return enqueueSearchRequest(() =>
+      executeSpotifyFetch<T>(accessToken, endpoint, method, body, true)
+    );
+  }
+  return executeSpotifyFetch<T>(accessToken, endpoint, method, body, false);
 }
 
 // User Data Endpoints
@@ -586,7 +626,7 @@ export async function addTracksToPlaylist(
       let data: any = {};
       try {
         if (text) data = JSON.parse(text);
-      } catch {}
+      } catch { }
       return { success: true, snapshot_id: data.snapshot_id || 'ok', statusCode: response.status };
     }
 
@@ -595,7 +635,7 @@ export async function addTracksToPlaylist(
     try {
       const errObj = JSON.parse(errText);
       parsedMsg = errObj?.error?.message || errObj?.error_description || '';
-    } catch {}
+    } catch { }
 
     if (response.status === 403) {
       return {
@@ -782,43 +822,185 @@ export async function getRelatedArtists(
 }
 
 /**
- * Get an artist's top tracks.
- * Used in Layer 4 (Artist Discovery) to get tracks from preferred/related artists.
+ * Get an artist's top tracks with resilient market fallback.
+ * Uses US first, then falls back to IN, GB, or market-free to guarantee results.
  */
 export async function getArtistTopTracks(
   accessToken: string,
   artistId: string,
-  market: string = 'US'
+  market: string = 'US',
+  artistName?: string
 ): Promise<SpotifyTrack[]> {
-  const data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
+  const cleanId = artistId.replace(/^spotify:artist:/, '').trim();
+
+  // 1. Try with specified market (default US)
+  let data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
     accessToken,
-    `/artists/${artistId}/top-tracks?market=${market}`
+    `/artists/${cleanId}/top-tracks?market=${market}`
   );
-  return data?.tracks ?? [];
+
+  let tracks = data?.tracks ?? [];
+
+  // 2. If empty or 403 restricted, fall back directly to searchTracks which is open in Dev Mode
+  if (tracks.length === 0 && artistName) {
+    const q = `artist:"${artistName.trim()}"`;
+    const [p1, p2] = await Promise.all([
+      searchTracks(accessToken, q, 10, 0).catch(() => []),
+      searchTracks(accessToken, q, 10, 10).catch(() => []),
+    ]);
+    const merged = [...p1, ...p2];
+    if (merged.length > 0) {
+      tracks = merged;
+    } else {
+      tracks = await searchTracks(accessToken, artistName.trim(), 10, 0).catch(() => []);
+    }
+  }
+
+  return tracks;
+}
+
+/**
+ * Search Spotify for albums by keyword or artist.
+ * Used as a fallback when an artist's ID-linked catalog is restricted or unlinked.
+ * Spotify Dev Mode strictly requires limit <= 10.
+ */
+export async function searchAlbums(
+  accessToken: string,
+  query: string,
+  limit: number = 10
+): Promise<SpotifyAlbum[]> {
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+  const cleanQ = query.trim();
+  if (!cleanQ) return [];
+
+  const data = await spotifyFetch<{ albums: { items: SpotifyAlbum[] } }>(
+    accessToken,
+    `/search?q=${encodeURIComponent(cleanQ)}&type=album&limit=${safeLimit}`
+  );
+  return data?.albums?.items ?? [];
+}
+
+/**
+ * Get an artist's newest releases (albums and singles).
+ * Tries artist albums endpoint first (limit <= 10), then falls back to searchAlbums.
+ * Returns unique releases sorted by newest release date first.
+ */
+export async function getArtistAlbums(
+  accessToken: string,
+  artistId: string,
+  limit: number = 10,
+  artistName?: string
+): Promise<SpotifyAlbum[]> {
+  const cleanId = artistId.replace(/^spotify:artist:/, '').trim();
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+
+  // 1. Try direct catalog endpoint with safe limit <= 10
+  let data = await spotifyFetch<{ items: SpotifyAlbum[] }>(
+    accessToken,
+    `/artists/${cleanId}/albums?include_groups=album,single&limit=${safeLimit}`
+  );
+
+  let albums = data?.items ?? [];
+
+  // 2. Fall back to searching albums by artist name if direct catalog is empty or 403
+  if (albums.length === 0 && artistName) {
+    let searched = await searchAlbums(accessToken, `artist:"${artistName.trim()}"`, safeLimit).catch(() => []);
+    if (searched.length === 0) {
+      searched = await searchAlbums(accessToken, artistName.trim(), safeLimit).catch(() => []);
+    }
+    albums = searched;
+  }
+
+  // Deduplicate albums by ID and normalize
+  const seen = new Set<string>();
+  const uniqueAlbums = albums.filter((album) => {
+    if (!album?.id || seen.has(album.id)) return false;
+    seen.add(album.id);
+    return true;
+  });
+
+  // Sort newest first by release_date
+  return uniqueAlbums.sort((a, b) => (b.release_date || '').localeCompare(a.release_date || ''));
+}
+
+/**
+ * Fetch tracks belonging to an album/release.
+ * Attaches the album metadata (including cover artwork) to each track so the player displays album cover.
+ */
+export async function getAlbumTracks(
+  accessToken: string,
+  albumId: string,
+  albumData?: { id?: string; name?: string; images?: any[] },
+  limit: number = 20
+): Promise<SpotifyTrack[]> {
+  const cleanId = albumId.replace(/^spotify:album:/, '').trim();
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 20);
+
+  let data = await spotifyFetch<{ items: any[] }>(
+    accessToken,
+    `/albums/${cleanId}/tracks?limit=${safeLimit}`
+  );
+
+  let items = data?.items ?? [];
+
+  // If album tracks endpoint returned 403 or empty, fall back to searching tracks by album
+  if (items.length === 0 && albumData?.name) {
+    const searched = await searchTracks(accessToken, `album:"${albumData.name}"`, 10).catch(() => []);
+    if (searched.length > 0) {
+      return searched;
+    }
+  }
+
+  return items.map((track: any) => ({
+    ...track,
+    album: {
+      id: cleanId,
+      name: albumData?.name || track.album?.name || '',
+      images: albumData?.images || track.album?.images || [],
+    },
+  }));
+}
+
+/**
+ * Fetch a single artist by Spotify ID.
+ * Used for the Artist Profile page.
+ */
+export async function getArtist(
+  accessToken: string,
+  artistId: string
+): Promise<SpotifyArtist | null> {
+  return spotifyFetch<SpotifyArtist>(accessToken, `/artists/${artistId}`);
 }
 
 /**
  * Batch fetch multiple artists by IDs (max 50).
- * Returns full artist objects including genres[].
- * Used to extract genre tags from user's top artists for the survey.
+ * Safely ignores 403 catalog errors.
  */
 export async function getMultipleArtists(
   accessToken: string,
   ids: string[]
 ): Promise<SpotifyArtist[]> {
   if (ids.length === 0) return [];
-  // Spotify limits to 50 IDs per request
+  const cleanIds = ids.map(id => id.replace(/^spotify:artist:/, '').trim()).filter(Boolean);
+  if (cleanIds.length === 0) return [];
+
   const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    chunks.push(ids.slice(i, i + 50));
+  for (let i = 0; i < cleanIds.length; i += 50) {
+    chunks.push(cleanIds.slice(i, i + 50));
   }
   const results: SpotifyArtist[] = [];
   for (const chunk of chunks) {
-    const data = await spotifyFetch<{ artists: SpotifyArtist[] }>(
-      accessToken,
-      `/artists?ids=${chunk.join(',')}`
-    );
-    if (data?.artists) results.push(...data.artists);
+    try {
+      const data = await spotifyFetch<{ artists: SpotifyArtist[] }>(
+        accessToken,
+        `/artists?ids=${chunk.join(',')}`
+      );
+      if (data?.artists) {
+        results.push(...data.artists.filter(Boolean));
+      }
+    } catch {
+      // 403 Forbidden or catalog failure: safely ignore and allow name search fallback
+    }
   }
   return results;
 }

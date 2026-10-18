@@ -120,6 +120,8 @@ const NOW_PLAYING_POLL_MS = 10000; // 10 seconds — avoids Spotify 429 rate lim
 
 // Hook
 
+const _surveyArtistSearchCache = new Map<string, SpotifyArtist[]>();
+
 export function useSpotify(): UseSpotifyReturn {
   const isVIP = useTierStore((s) => s.isVIP);
   const spotifyConnected = useTierStore((s) => s.spotifyConnected);
@@ -587,6 +589,11 @@ export function useSpotify(): UseSpotifyReturn {
       const q = query.trim();
       if (!q) return [];
 
+      const cacheKey = q.toLowerCase();
+      if (_surveyArtistSearchCache.has(cacheKey)) {
+        return _surveyArtistSearchCache.get(cacheKey)!;
+      }
+
       let spotifyResults: SpotifyArtist[] = [];
       try {
         const token = await getValidAccessToken();
@@ -614,6 +621,7 @@ export function useSpotify(): UseSpotifyReturn {
             }));
 
             if (spotifyResults.length === 0) {
+              _surveyArtistSearchCache.set(cacheKey, deezerArtists);
               return deezerArtists;
             }
 
@@ -622,7 +630,7 @@ export function useSpotify(): UseSpotifyReturn {
               deezerArtists.map((d) => [d.name.toLowerCase().replace(/[^a-z0-9]/g, ''), d])
             );
 
-            return spotifyResults.map((sArtist) => {
+            const enriched = spotifyResults.map((sArtist) => {
               const hasPhoto = sArtist.images && sArtist.images.length > 0 && !!sArtist.images[0]?.url;
               if (hasPhoto) return sArtist;
 
@@ -633,13 +641,18 @@ export function useSpotify(): UseSpotifyReturn {
               }
               return sArtist;
             });
+            _surveyArtistSearchCache.set(cacheKey, enriched);
+            return enriched;
           }
         }
       } catch (e) {
         console.warn('[useSpotify] Deezer photo enrichment failed:', e);
       }
 
-      if (spotifyResults.length > 0) return spotifyResults;
+      if (spotifyResults.length > 0) {
+        _surveyArtistSearchCache.set(cacheKey, spotifyResults);
+        return spotifyResults;
+      }
 
       // iTunes 3rd fallback
       try {
@@ -649,7 +662,7 @@ export function useSpotify(): UseSpotifyReturn {
         if (itunesRes.ok) {
           const data = await itunesRes.json();
           if (data?.results && data.results.length > 0) {
-            return data.results.map((item: any) => {
+            const itunesArtists = data.results.map((item: any) => {
               // iTunes returns artworkUrl100 — upscale to 600x600 for HD
               const itunesImg = item.artworkUrl100
                 ? item.artworkUrl100.replace('100x100', '600x600')
@@ -661,6 +674,8 @@ export function useSpotify(): UseSpotifyReturn {
                 images: itunesImg ? [{ url: itunesImg, width: 600, height: 600 }] : [],
               };
             });
+            _surveyArtistSearchCache.set(cacheKey, itunesArtists);
+            return itunesArtists;
           }
         }
       } catch (e) {
