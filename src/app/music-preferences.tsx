@@ -84,7 +84,7 @@ const POPULAR_SEED_ARTISTS: SpotifyArtist[] = [
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5ebdf1b6068222956cfb9e2c6ba', width: 300, height: 300 }],
   },
   {
-    id: '4bU1KXEZzZ9wLkoR9oW3Vn',
+    id: '4npEfmQ6YuiwW1GpUmaq3F',
     name: 'Ava Max',
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5eb6046e7f22ddcf3d1ebdd1c09', width: 300, height: 300 }],
   },
@@ -124,27 +124,27 @@ const POPULAR_SEED_ARTISTS: SpotifyArtist[] = [
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5eb8ae7f2aaa9817a704a87ea36', width: 300, height: 300 }],
   },
   {
-    id: '0o181nEjdFjiT76u8qF9zX',
+    id: '3YvoFOIiL4PPMGCZLSkQ9T',
     name: 'Shreya Ghoshal',
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5eb9b417c88b90ed74f7be33f57', width: 300, height: 300 }],
   },
   {
-    id: '1mYsTxn3TcF09yipuXW4oN',
+    id: '1mYsTxnqsietFxj1OgoGbG',
     name: 'A.R. Rahman',
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5ebb8e8a60ffcbb43bf7e23114d', width: 300, height: 300 }],
   },
   {
-    id: '2fMonJ4acFi2FFqD2i8z19',
+    id: '2oSONSC9zQ4UonDKnLqksx',
     name: 'Atif Aslam',
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5eb16d1f05786ed655f4625ae78', width: 300, height: 300 }],
   },
   {
-    id: '48S5eJ5y2D2Z1W0142hN11',
+    id: '4K6blSRoklNdpw4mzLxwfn',
     name: 'Kumar Sanu',
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5eb9df370eeeb425712f5a65fae', width: 300, height: 300 }],
   },
   {
-    id: '70B8039TxF3VjVT2dSp512',
+    id: '4YgUVg4p7xtMOrOS4GjiJZ',
     name: 'Udit Narayan',
     images: [{ url: 'https://i.scdn.co/image/ab6761610000e5ebb7e1e6992d9d1be693952d7e', width: 300, height: 300 }],
   },
@@ -310,7 +310,7 @@ export default function MusicPreferencesSurveyScreen() {
       } finally {
         setIsSearchingArtists(false);
       }
-    }, 150);
+    }, 250);
 
     return () => clearTimeout(timer);
   }, [artistSearchQuery, searchArtistsForSurvey]);
