@@ -13,6 +13,7 @@
 
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import { File, Paths } from 'expo-file-system';
 
 // Config
 
@@ -240,11 +241,100 @@ let _searchRateLimitedUntil = 0;
 let _playerRateLimitedUntil = 0;
 
 /**
+ * Check whether Spotify Search API is currently in a rate-limit cooldown.
+ */
+export function isSpotifySearchRateLimited(): boolean {
+  return Date.now() < _searchRateLimitedUntil;
+}
+
+/**
  * Reset any active in-memory Spotify rate-limit cooldown.
  */
 export function resetSpotifyRateLimitCooldown(): void {
   _searchRateLimitedUntil = 0;
   _playerRateLimitedUntil = 0;
+}
+
+export const SPOTIFY_ARTIST_CACHE_FILE = new File(Paths.document, 'spotify_artist_cache.json');
+
+/**
+ * Load artists from the persistent disk cache.
+ * Cleanses any stale Deezer remnants so cache only holds Spotify data.
+ */
+export async function loadArtistsFromPersistentCache(): Promise<Record<string, any>> {
+  try {
+    if (SPOTIFY_ARTIST_CACHE_FILE.exists) {
+      const text = await SPOTIFY_ARTIST_CACHE_FILE.text();
+      if (text) {
+        const raw = JSON.parse(text);
+        const clean: Record<string, any> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          if (k.startsWith('deezer_') || k.startsWith('dz_') || k.startsWith('itunes_')) continue;
+          if (v && typeof v === 'object') {
+            const item = { ...v as any };
+            const url = item.images?.[0]?.url;
+            if (typeof url === 'string' && (url.includes('dzcdn.net') || url.includes('deezer.com'))) {
+              item.images = [];
+            }
+            clean[k] = item;
+          }
+        }
+        return clean;
+      }
+    }
+  } catch (err) {
+    console.warn('[Spotify] Error loading persistent artist cache:', err);
+  }
+  return {};
+}
+
+/**
+ * Save artist objects into the persistent JSON cache file.
+ * Cache is strictly for Spotify data. Never saves Deezer fallback data.
+ */
+export async function saveArtistsToPersistentCache(artists: SpotifyArtist[]): Promise<void> {
+  if (!artists || artists.length === 0) return;
+  try {
+    const existingCache = await loadArtistsFromPersistentCache();
+    let modified = false;
+
+    for (const a of artists) {
+      if (!a || !a.name) continue;
+      // Never cache Deezer/fallback IDs
+      if (a.id && (a.id.startsWith('deezer_') || a.id.startsWith('dz_') || a.id.startsWith('itunes_'))) continue;
+
+      const normKey = a.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const existing = (a.id && existingCache[a.id]) || (normKey && existingCache[`name:${normKey}`]);
+
+      // Filter out any Deezer images — only save Spotify CDN images
+      const rawImgUrl = a.images?.[0]?.url;
+      const isDeezer = typeof rawImgUrl === 'string' && (rawImgUrl.includes('dzcdn.net') || rawImgUrl.includes('deezer.com'));
+      const hasValidSpotifyImg = a.images && a.images.length > 0 && !!rawImgUrl && !isDeezer;
+      const images = hasValidSpotifyImg ? a.images : (existing?.images || []);
+
+      const entry = {
+        ...existing,
+        ...a,
+        images,
+        updatedAt: Date.now(),
+      };
+
+      if (a.id) {
+        existingCache[a.id] = entry;
+        modified = true;
+      }
+      if (normKey) {
+        existingCache[`name:${normKey}`] = entry;
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      SPOTIFY_ARTIST_CACHE_FILE.write(JSON.stringify(existingCache));
+    }
+  } catch (err) {
+    console.warn('[Spotify] Failed to save artists to persistent cache:', err);
+  }
 }
 
 let _searchQueueChain: Promise<any> = Promise.resolve();
@@ -746,6 +836,242 @@ export async function resolveSpotifyTrackUri(
   return formatted || null;
 }
 
+// Public Quota-Free Deezer Fallback Methods
+
+/**
+ * Search Deezer for artists as an ultra-fast, quota-free fallback.
+ * Maps results to standard SpotifyArtist structure with high-res photos.
+ */
+export async function searchDeezerArtists(
+  query: string,
+  limit: number = 10
+): Promise<SpotifyArtist[]> {
+  const cleanQ = query.trim();
+  if (!cleanQ) return [];
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(
+      `https://api.deezer.com/search/artist?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 25)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data?.data || !Array.isArray(data.data)) return [];
+
+    return data.data.map((item: any) => ({
+      id: `deezer_${item.id}`,
+      name: item.name,
+      images: [
+        {
+          url: item.picture_xl || item.picture_big || item.picture_medium || item.picture_small || '',
+          width: 300,
+          height: 300,
+        },
+      ],
+      genres: ['Artist'],
+      popularity: item.nb_fan ? Math.min(100, Math.round(Math.log10(item.nb_fan) * 15)) : 50,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Search Deezer for tracks as a quota-free fallback.
+ * Maps results to SpotifyTrack format with audio preview and cover artwork.
+ */
+export async function searchDeezerTracks(
+  query: string,
+  limit: number = 15
+): Promise<SpotifyTrack[]> {
+  const cleanQ = query.replace(/^artist:"(.*)"$/, '$1').trim();
+  if (!cleanQ) return [];
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(
+      `https://api.deezer.com/search?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 30)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data?.data || !Array.isArray(data.data)) return [];
+
+    return data.data.map((item: any) => ({
+      id: `dz_${item.id}`,
+      name: item.title,
+      artists: [
+        {
+          id: item.artist?.id ? `deezer_${item.artist.id}` : 'dz_artist',
+          name: item.artist?.name || 'Artist',
+          images: item.artist?.picture_big
+            ? [{ url: item.artist.picture_big, width: 300, height: 300 }]
+            : [],
+        },
+      ],
+      album: {
+        id: item.album?.id ? `dz_album_${item.album.id}` : 'dz_album',
+        name: item.album?.title || 'Single',
+        images: [
+          {
+            url: item.album?.cover_big || item.album?.cover_medium || item.album?.cover_small || '',
+            width: 300,
+            height: 300,
+          },
+        ],
+        release_date: item.release_date || '',
+        album_type: 'album',
+      },
+      duration_ms: (item.duration || 180) * 1000,
+      uri: item.preview || item.link || '',
+      preview_url: item.preview || null,
+      external_urls: { spotify: item.link || '' },
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Search Deezer for albums by artist or album name as quota-free fallback.
+ */
+export async function searchDeezerAlbums(
+  query: string,
+  limit: number = 10
+): Promise<SpotifyAlbum[]> {
+  const cleanQ = query.replace(/^artist:"(.*)"$/, '$1').trim();
+  if (!cleanQ) return [];
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(
+      `https://api.deezer.com/search/album?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 25)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data?.data || !Array.isArray(data.data)) return [];
+
+    return data.data.map((item: any) => ({
+      id: `dz_album_${item.id}`,
+      name: item.title,
+      images: [
+        {
+          url: item.cover_xl || item.cover_big || item.cover_medium || item.cover_small || '',
+          width: 300,
+          height: 300,
+        },
+      ],
+      release_date: item.release_date || '',
+      album_type: 'album',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch top tracks for an artist via iTunes stream rankings.
+ * Used when Deezer is geo-blocked to guarantee authentic, most-listened top songs.
+ */
+export async function getArtistiTunesTopTracks(
+  artistName: string,
+  limit: number = 15
+): Promise<SpotifyTrack[]> {
+  const cleanName = artistName.trim();
+  if (!cleanName) return [];
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(cleanName)}&entity=song&limit=${Math.min(limit, 25)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data?.results || !Array.isArray(data.results)) return [];
+
+    const tracks: SpotifyTrack[] = [];
+    const seen = new Set<string>();
+
+    for (const item of data.results) {
+      if (!item || !item.trackName || !item.trackId) continue;
+      const tKey = item.trackName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (seen.has(tKey)) continue;
+      seen.add(tKey);
+
+      const hiResArt = (item.artworkUrl100 || item.artworkUrl60 || '')
+        .replace(/\/\d+x\d+bb\.jpg$/, '/600x600bb.jpg');
+
+      tracks.push({
+        id: `itunes_${item.trackId}`,
+        name: item.trackName,
+        artists: [
+          {
+            id: item.artistId ? `itunes_artist_${item.artistId}` : 'itunes_artist',
+            name: item.artistName || cleanName,
+            images: [],
+          },
+        ],
+        album: {
+          id: item.collectionId ? `itunes_album_${item.collectionId}` : 'itunes_album',
+          name: item.collectionName || item.trackName,
+          images: hiResArt ? [{ url: hiResArt, width: 600, height: 600 }] : [],
+          release_date: item.releaseDate ? item.releaseDate.slice(0, 10) : '',
+          album_type: 'album',
+        },
+        duration_ms: item.trackTimeMillis || 180000,
+        uri: item.previewUrl || `itunes:track:${item.trackId}`,
+        preview_url: item.previewUrl || null,
+        external_urls: { spotify: item.trackViewUrl || '' },
+      });
+
+      if (tracks.length >= limit) break;
+    }
+    return tracks;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch top tracks for an artist by name via Deezer (with resilient stream-ranked fallback).
+ * Delivers authentic, most-listened stream-ranked top tracks.
+ */
+export async function getArtistDeezerTopTracks(
+  artistName: string,
+  limit: number = 15
+): Promise<SpotifyTrack[]> {
+  const cleanName = artistName.trim();
+  if (!cleanName) return [];
+
+  // 1. Try Deezer ranking-ordered search
+  let tracks = await searchDeezerTracks(`artist:"${cleanName}"`, limit);
+  if (tracks.length === 0) {
+    tracks = await searchDeezerTracks(cleanName, limit);
+  }
+  if (tracks.length > 0) {
+    return tracks;
+  }
+
+  // 2. Global stream-ranked top tracks fallback (guarantees proper top songs if Deezer is geo-blocked)
+  return getArtistiTunesTopTracks(cleanName, limit);
+}
+
+
 // Search Endpoint
 
 export interface SpotifySearchResult {
@@ -758,11 +1084,14 @@ export async function searchTracks(
   limit: number = 10,
   offset: number = 0,
 ): Promise<SpotifyTrack[]> {
-  // Spotify Search API enforces max limit of 10 for standard developer applications
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
   const cleanQ = query.trim();
   if (!cleanQ) return [];
   const safeOffset = Math.max(0, Math.min(Math.floor(offset) || 0, 990));
+
+  if (Date.now() < _searchRateLimitedUntil) {
+    return [];
+  }
 
   const data = await spotifyFetch<SpotifySearchResult>(
     accessToken,
@@ -780,7 +1109,6 @@ export async function searchForMood(
   keywords: string[],
   limit: number = 10
 ): Promise<SpotifyTrack[]> {
-  // Build a search query from genres and keywords
   const genreQuery = genres.slice(0, 2).map((g) => g).join(' ');
   const keywordQuery = keywords.slice(0, 2).join(' ');
   const query = `${genreQuery} ${keywordQuery}`.trim();
@@ -790,23 +1118,26 @@ export async function searchForMood(
 }
 
 /**
- * Search for artists by name.
- * Used in the music preference survey for artist selection.
+ * Search for artists by name on Spotify.
  */
 export async function searchArtists(
   accessToken: string,
   query: string,
   limit: number = 10
 ): Promise<SpotifyArtist[]> {
-  // Spotify Search API enforces max limit of 10 for standard developer applications
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
   const cleanQ = query.trim();
   if (!cleanQ) return [];
+
+  if (Date.now() < _searchRateLimitedUntil) {
+    return [];
+  }
 
   const data = await spotifyFetch<{ artists: { items: SpotifyArtist[] } }>(
     accessToken,
     `/search?q=${encodeURIComponent(cleanQ)}&type=artist&limit=${safeLimit}`
   );
+
   return data?.artists?.items ?? [];
 }
 
@@ -821,48 +1152,91 @@ export async function getRelatedArtists(
   return [];
 }
 
+export interface ArtistTopTracksResult {
+  tracks: SpotifyTrack[];
+  isLatestFallback: boolean;
+}
+
 /**
- * Get an artist's top tracks with resilient market fallback.
- * Uses US first, then falls back to IN, GB, or market-free to guarantee results.
+ * Get an artist's genuine top tracks:
+ * 1. Direct Spotify /top-tracks (market=from_token then market=${market})
+ * 2. Spotify track search (ordered by track popularity) if not in rate limit cooldown
+ * 3. Fallback ONLY if Spotify is unavailable/rate-limited: Deezer top tracks
  */
+export async function getArtistTopTracksResult(
+  accessToken: string,
+  artistId: string,
+  market: string = 'US',
+  artistName?: string
+): Promise<ArtistTopTracksResult> {
+  const cleanId = artistId ? artistId.replace(/^spotify:artist:/, '').trim() : '';
+  const isValidSpotifyId = /^[A-Za-z0-9]{22}$/.test(cleanId);
+
+  // Tier 1: Try direct Spotify top-tracks endpoint
+  if (isValidSpotifyId && accessToken) {
+    try {
+      let data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
+        accessToken,
+        `/artists/${cleanId}/top-tracks?market=from_token`
+      );
+      if (!data?.tracks || data.tracks.length === 0) {
+        data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
+          accessToken,
+          `/artists/${cleanId}/top-tracks?market=${market}`
+        );
+      }
+      if (data?.tracks && data.tracks.length > 0) {
+        return { tracks: data.tracks, isLatestFallback: false };
+      }
+    } catch { }
+  }
+
+  // Tier 2: Search Spotify tracks by artist name if token available and not in cooldown
+  // In Spotify, track search ordered by popularity returns true top tracks (e.g. Blinding Lights, Starboy)
+  if (accessToken && artistName && Date.now() >= _searchRateLimitedUntil) {
+    try {
+      const q = `artist:"${artistName.trim()}"`;
+      const [p1, p2] = await Promise.all([
+        searchTracks(accessToken, q, 10, 0).catch(() => []),
+        searchTracks(accessToken, q, 10, 10).catch(() => []),
+      ]);
+      const merged = [...p1, ...p2];
+      if (merged.length > 0) {
+        return { tracks: merged, isLatestFallback: false };
+      }
+      const generalSearch = await searchTracks(accessToken, artistName.trim(), 10, 0).catch(() => []);
+      if (generalSearch.length > 0) {
+        return { tracks: generalSearch, isLatestFallback: false };
+      }
+    } catch { }
+  }
+
+  // Tier 3: Deezer top tracks fallback ONLY if Spotify is unavailable or returned 0 tracks
+  if (artistName) {
+    try {
+      const deezerTracks = await getArtistDeezerTopTracks(artistName, 15);
+      if (deezerTracks.length > 0) {
+        return { tracks: deezerTracks, isLatestFallback: false };
+      }
+    } catch { }
+  }
+
+  // Return authentic top tracks only (no latest album releases extraction)
+  return { tracks: [], isLatestFallback: false };
+}
+
 export async function getArtistTopTracks(
   accessToken: string,
   artistId: string,
   market: string = 'US',
   artistName?: string
 ): Promise<SpotifyTrack[]> {
-  const cleanId = artistId.replace(/^spotify:artist:/, '').trim();
-
-  // 1. Try with specified market (default US)
-  let data = await spotifyFetch<{ tracks: SpotifyTrack[] }>(
-    accessToken,
-    `/artists/${cleanId}/top-tracks?market=${market}`
-  );
-
-  let tracks = data?.tracks ?? [];
-
-  // 2. If empty or 403 restricted, fall back directly to searchTracks which is open in Dev Mode
-  if (tracks.length === 0 && artistName) {
-    const q = `artist:"${artistName.trim()}"`;
-    const [p1, p2] = await Promise.all([
-      searchTracks(accessToken, q, 10, 0).catch(() => []),
-      searchTracks(accessToken, q, 10, 10).catch(() => []),
-    ]);
-    const merged = [...p1, ...p2];
-    if (merged.length > 0) {
-      tracks = merged;
-    } else {
-      tracks = await searchTracks(accessToken, artistName.trim(), 10, 0).catch(() => []);
-    }
-  }
-
-  return tracks;
+  const result = await getArtistTopTracksResult(accessToken, artistId, market, artistName);
+  return result.tracks;
 }
 
 /**
  * Search Spotify for albums by keyword or artist.
- * Used as a fallback when an artist's ID-linked catalog is restricted or unlinked.
- * Spotify Dev Mode strictly requires limit <= 10.
  */
 export async function searchAlbums(
   accessToken: string,
@@ -873,6 +1247,10 @@ export async function searchAlbums(
   const cleanQ = query.trim();
   if (!cleanQ) return [];
 
+  if (Date.now() < _searchRateLimitedUntil) {
+    return [];
+  }
+
   const data = await spotifyFetch<{ albums: { items: SpotifyAlbum[] } }>(
     accessToken,
     `/search?q=${encodeURIComponent(cleanQ)}&type=album&limit=${safeLimit}`
@@ -881,9 +1259,7 @@ export async function searchAlbums(
 }
 
 /**
- * Get an artist's newest releases (albums and singles).
- * Tries artist albums endpoint first (limit <= 10), then falls back to searchAlbums.
- * Returns unique releases sorted by newest release date first.
+ * Get an artist's newest releases (albums and singles) from Spotify.
  */
 export async function getArtistAlbums(
   accessToken: string,
@@ -893,17 +1269,21 @@ export async function getArtistAlbums(
 ): Promise<SpotifyAlbum[]> {
   const cleanId = artistId.replace(/^spotify:artist:/, '').trim();
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+  const isValidSpotifyId = /^[A-Za-z0-9]{22}$/.test(cleanId);
+
+  let albums: SpotifyAlbum[] = [];
 
   // 1. Try direct catalog endpoint with safe limit <= 10
-  let data = await spotifyFetch<{ items: SpotifyAlbum[] }>(
-    accessToken,
-    `/artists/${cleanId}/albums?include_groups=album,single&limit=${safeLimit}`
-  );
+  if (isValidSpotifyId) {
+    let data = await spotifyFetch<{ items: SpotifyAlbum[] }>(
+      accessToken,
+      `/artists/${cleanId}/albums?include_groups=album,single&limit=${safeLimit}`
+    );
+    albums = data?.items ?? [];
+  }
 
-  let albums = data?.items ?? [];
-
-  // 2. Fall back to searching albums by artist name if direct catalog is empty or 403
-  if (albums.length === 0 && artistName) {
+  // 2. Fall back to searching albums by artist name on Spotify if direct catalog is empty or 403
+  if (albums.length === 0 && artistName && Date.now() >= _searchRateLimitedUntil) {
     let searched = await searchAlbums(accessToken, `artist:"${artistName.trim()}"`, safeLimit).catch(() => []);
     if (searched.length === 0) {
       searched = await searchAlbums(accessToken, artistName.trim(), safeLimit).catch(() => []);
@@ -935,16 +1315,19 @@ export async function getAlbumTracks(
 ): Promise<SpotifyTrack[]> {
   const cleanId = albumId.replace(/^spotify:album:/, '').trim();
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 20);
+  const isValidSpotifyId = /^[A-Za-z0-9]{22}$/.test(cleanId);
 
-  let data = await spotifyFetch<{ items: any[] }>(
-    accessToken,
-    `/albums/${cleanId}/tracks?limit=${safeLimit}`
-  );
-
-  let items = data?.items ?? [];
+  let items: any[] = [];
+  if (isValidSpotifyId) {
+    let data = await spotifyFetch<{ items: any[] }>(
+      accessToken,
+      `/albums/${cleanId}/tracks?limit=${safeLimit}`
+    );
+    items = data?.items ?? [];
+  }
 
   // If album tracks endpoint returned 403 or empty, fall back to searching tracks by album
-  if (items.length === 0 && albumData?.name) {
+  if (items.length === 0 && albumData?.name && Date.now() >= _searchRateLimitedUntil) {
     const searched = await searchTracks(accessToken, `album:"${albumData.name}"`, 10).catch(() => []);
     if (searched.length > 0) {
       return searched;
@@ -969,7 +1352,13 @@ export async function getArtist(
   accessToken: string,
   artistId: string
 ): Promise<SpotifyArtist | null> {
-  return spotifyFetch<SpotifyArtist>(accessToken, `/artists/${artistId}`);
+  const cleanId = artistId.replace(/^spotify:artist:/, '').trim();
+
+  if (/^[A-Za-z0-9]{22}$/.test(cleanId)) {
+    return spotifyFetch<SpotifyArtist>(accessToken, `/artists/${cleanId}`);
+  }
+
+  return null;
 }
 
 /**

@@ -1031,8 +1031,42 @@ const OverviewSkeleton = React.memo(() => {
 });
 OverviewSkeleton.displayName = 'OverviewSkeleton';
 
+const ArtistGridSkeleton = React.memo(() => {
+  return (
+    <View style={styles.artistGridSectionWrap}>
+      <View style={styles.artistGrid}>
+        {Array.from({ length: 9 }).map((_, i) => (
+          <View key={`skel-artist-${i}`} style={styles.artistGridItem}>
+            <View style={styles.artistGridAvatarContainer}>
+              <View style={[styles.artistGridAvatarWrap, { borderColor: 'rgba(255, 255, 255, 0.08)' }]}>
+                <SkeletonBlock style={{ width: '100%', height: '100%', borderRadius: 46 }} />
+              </View>
+            </View>
+            <SkeletonBlock style={{ width: 68, height: 12, borderRadius: 6, marginTop: 8 }} />
+            <SkeletonBlock style={{ width: 44, height: 10, borderRadius: 5, marginTop: 5 }} />
+          </View>
+        ))}
+      </View>
+      <View style={[styles.artistPagination, { opacity: 0.6 }]}>
+        <SkeletonBlock style={{ width: 32, height: 32, borderRadius: 16 }} />
+        <View style={styles.artistPaginationCenter}>
+          <SkeletonBlock style={{ width: 48, height: 12, borderRadius: 6, marginBottom: 6 }} />
+          <View style={styles.artistPageDotsRow}>
+            {[0, 1, 2, 3, 4].map((d) => (
+              <SkeletonBlock key={d} style={{ width: 6, height: 6, borderRadius: 3, marginHorizontal: 2 }} />
+            ))}
+          </View>
+        </View>
+        <SkeletonBlock style={{ width: 32, height: 32, borderRadius: 16 }} />
+      </View>
+    </View>
+  );
+});
+ArtistGridSkeleton.displayName = 'ArtistGridSkeleton';
+
 const normalizeArtistKey = (name?: string) => (name ? name.toLowerCase().replace(/[^a-z0-9]/g, '') : '');
 const isSpotifyId = (id?: string) => !!(id && /^[A-Za-z0-9]{22}$/.test(id));
+const isDeezerImage = (url?: string) => typeof url === 'string' && (url.includes('dzcdn.net') || url.includes('deezer.com'));
 
 const ArtistGridCard = React.memo(({
   artist,
@@ -1067,13 +1101,22 @@ const ArtistGridCard = React.memo(({
           styles.artistGridAvatarWrap,
           isPlaying && styles.artistGridAvatarWrapActive,
         ]}>
-          <ExpoImage
-            source={{ uri: bestImage }}
-            style={styles.artistGridAvatar}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-          />
+          {bestImage ? (
+            <ExpoImage
+              source={{ uri: bestImage }}
+              style={styles.artistGridAvatar}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
+            />
+          ) : (
+            <View style={[styles.artistGridAvatar, { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}>
+              <SkeletonBlock style={[StyleSheet.absoluteFill, { borderRadius: 46 }]} />
+              <Text style={{ fontSize: 26, fontWeight: '700', color: Colors.accent.primary, letterSpacing: -0.5 }}>
+                {(artist?.name || '?').charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
         </View>
         {isPlaying && (
           <View style={styles.artistGridPlayingBadge}>
@@ -1188,10 +1231,18 @@ const SpotifyListView = React.memo(({
   const insets = useSafeAreaInsets();
   const screenPaddingTop = Math.max(insets.top, Spacing.lg);
   const [activeSpotifyTab, setActiveSpotifyTab] = useState<'overview' | 'artists' | 'playlists'>('overview');
+  const spotifyScrollRef = useRef<ScrollView>(null);
+
+  const selectSpotifyTab = useCallback((tab: 'overview' | 'artists' | 'playlists') => {
+    if (activeSpotifyTab !== tab) {
+      spotifyScrollRef.current?.scrollTo({ y: 0, animated: false });
+      setActiveSpotifyTab(tab);
+    }
+  }, [activeSpotifyTab]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isMiniPlayerExpanded, setIsMiniPlayerExpanded] = useState(false);
   const [artistSpotlights, setArtistSpotlights] = useState<any[]>([]);
-  const [loadingArtists, setLoadingArtists] = useState(false);
+  const [loadingArtists, setLoadingArtists] = useState(() => isConnected);
   const [artistLoadError, setArtistLoadError] = useState(false);
   const [artistRefreshKey, setArtistRefreshKey] = useState(0);
   const [overviewMoodRecs, setOverviewMoodRecs] = useState<any[]>([]);
@@ -1261,9 +1312,242 @@ const SpotifyListView = React.memo(({
 
   // Artist grid pagination & swipe navigation
   const [artistPage, setArtistPage] = useState(0);
+  const artistPageRef = useRef(0);
+  useEffect(() => {
+    artistPageRef.current = artistPage;
+  }, [artistPage]);
   const ARTISTS_PER_PAGE = 9;
   const artistPagerRef = useRef<FlatList>(null);
   const [artistContainerWidth, setArtistContainerWidth] = useState(SCREEN_WIDTH - 2 * SCREEN_PADDING);
+  const artistSpotlightsRef = useRef<any[]>([]);
+  const resolvedPagesRef = useRef<Set<number>>(new Set());
+  const resolvingPagesRef = useRef<Set<number>>(new Set());
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const resolveArtistPage = useCallback(async (pageIndex: number, force: boolean = false) => {
+    if (pageIndex < 0) return;
+    if (!force && resolvedPagesRef.current.has(pageIndex)) return;
+    if (resolvingPagesRef.current.has(pageIndex)) return;
+
+    const currentList = artistSpotlightsRef.current;
+    const startIndex = pageIndex * ARTISTS_PER_PAGE;
+    const endIndex = Math.min(startIndex + ARTISTS_PER_PAGE, currentList.length);
+    if (startIndex >= currentList.length) return;
+
+    const pageSlice = currentList.slice(startIndex, endIndex);
+
+    // If every artist on this page already has valid photo and 22-char Spotify ID, 0 network needed
+    const allHaveImages = pageSlice.length > 0 && pageSlice.every(
+      (a) => a && a.images && a.images.length > 0 && !!a.images[0]?.url && isSpotifyId(a.id)
+    );
+    if (allHaveImages && !force) {
+      resolvedPagesRef.current.add(pageIndex);
+      return;
+    }
+
+    resolvingPagesRef.current.add(pageIndex);
+
+    try {
+      const token = await useTierStore.getState().getValidAccessToken();
+      const {
+        getMultipleArtists,
+        searchArtists,
+        isSpotifySearchRateLimited,
+      } = require('../services/spotify');
+
+      // 1. Direct Spotify IDs on this page (if any exist that are 22-char Spotify IDs)
+      const rawSpotifyIds = pageSlice
+        .filter((a) => a && isSpotifyId(a.id) && (!a.images?.length || !a.images[0]?.url || force))
+        .map((a) => a.id);
+      const spotifyIds = Array.from(new Set(rawSpotifyIds));
+
+      let directMap = new Map<string, any>();
+      if (token && spotifyIds.length > 0) {
+        try {
+          const directArtists = await getMultipleArtists(token, spotifyIds);
+          directArtists.forEach((a: any) => {
+            if (a?.id) directMap.set(a.id, a);
+          });
+        } catch (e) {
+          console.warn('[SpotifyListView] Direct artist batch error:', e);
+        }
+      }
+
+      // 2. Identify missing artists on this page that need resolution (at most 9)
+      const itemsToResolve: { indexInSlice: number; artist: any }[] = [];
+      pageSlice.forEach((item, idx) => {
+        if (!item?.name) return;
+        if (directMap.has(item.id) && directMap.get(item.id)?.images?.length) return;
+        if (!force && item.images && item.images.length > 0 && !!item.images[0]?.url && isSpotifyId(item.id)) return;
+        itemsToResolve.push({ indexInSlice: idx, artist: item });
+      });
+
+      const newlyResolvedMap = new Map<number, any>();
+
+      // Batch call of 5: max 2 calls for one full page (e.g. 5 and 4), one after another
+      const BATCH_SIZE = 5;
+      for (let b = 0; b < itemsToResolve.length; b += BATCH_SIZE) {
+        const batch = itemsToResolve.slice(b, b + BATCH_SIZE);
+
+        const batchResults = await Promise.all(
+          batch.map(async ({ indexInSlice, artist }) => {
+            const name = artist.name;
+            const normalized = normalizeArtistKey(name);
+
+            // 1. Check persistent cache first
+            const cached =
+              (artist.id && spotifyArtistCache[artist.id]) ||
+              spotifyArtistCache[`name:${normalized}`] ||
+              spotifyArtistCache[`pref_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`];
+
+            // If not forcing refresh, and cached has valid images, return cached directly (instant, 0 network)
+            if (cached && cached.images && cached.images.length > 0 && !!cached.images[0]?.url && !force) {
+              return { indexInSlice, resolved: cached };
+            }
+
+            // 2. Try Spotify first when refreshing or if not in cache
+            let match: any = null;
+            if (token && !isSpotifySearchRateLimited()) {
+              try {
+                const matches = await searchArtists(token, name, 3);
+                match = matches.find((m: any) => normalizeArtistKey(m?.name) === normalized) ?? matches[0] ?? null;
+              } catch { }
+            }
+
+            // 3. If Spotify returned a match with genuine photos, update app and cache with latest Spotify data!
+            if (match && match.images && match.images.length > 0 && !!match.images[0]?.url) {
+              return {
+                indexInSlice,
+                resolved: {
+                  ...artist,
+                  ...match,
+                  updatedAt: Date.now(),
+                },
+              };
+            }
+
+            // 4. If Spotify is in rate-limit cooldown, offline, or search gave no photo:
+            // Safely keep cached memory of artist so nothing changes or overlaps!
+            if (cached && cached.images && cached.images.length > 0 && !!cached.images[0]?.url) {
+              return { indexInSlice, resolved: cached };
+            }
+
+            if (artist.images && artist.images.length > 0 && !!artist.images[0]?.url) {
+              return { indexInSlice, resolved: artist };
+            }
+
+            if (match) {
+              return {
+                indexInSlice,
+                resolved: {
+                  ...artist,
+                  ...match,
+                  images: (cached?.images && cached.images.length > 0) ? cached.images : (artist.images || []),
+                  updatedAt: Date.now(),
+                },
+              };
+            }
+
+            return { indexInSlice, resolved: cached || artist };
+          })
+        );
+
+        batchResults.forEach((res) => {
+          if (res?.resolved) {
+            newlyResolvedMap.set(res.indexInSlice, res.resolved);
+          }
+        });
+
+        // 200ms spacing between batch 1 (up to 5) and batch 2 (up to 4)
+        if (b + BATCH_SIZE < itemsToResolve.length) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
+
+      // Merge into updated slice
+      const updatedSlice = pageSlice.map((origItem, idx) => {
+        if (directMap.has(origItem.id)) {
+          const direct = directMap.get(origItem.id);
+          return { ...origItem, ...direct, updatedAt: Date.now() };
+        }
+        if (newlyResolvedMap.has(idx)) {
+          return newlyResolvedMap.get(idx);
+        }
+        return origItem;
+      });
+
+      // Write strictly authentic Spotify data to in-memory cache and persistent disk cache
+      updatedSlice.forEach((a: any) => {
+        if (a?.id && !a.id.startsWith('deezer_') && !a.id.startsWith('dz_')) {
+          const hasDeezerImg = a.images?.[0]?.url && isDeezerImage(a.images[0].url);
+          const images = hasDeezerImg ? [] : (a.images || []);
+          spotifyArtistCache[a.id] = { ...a, images, updatedAt: a.updatedAt || Date.now() };
+          if (a.name) {
+            spotifyArtistCache[`name:${normalizeArtistKey(a.name)}`] = spotifyArtistCache[a.id];
+          }
+          if (isSpotifyId(a.id) && a.name) {
+            const oldPrefKey = `pref_${a.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+            if (spotifyArtistCache[oldPrefKey]) {
+              delete spotifyArtistCache[oldPrefKey];
+            }
+          }
+        }
+      });
+      try {
+        SPOTIFY_ARTIST_CACHE_FILE.write(JSON.stringify(spotifyArtistCache));
+      } catch { }
+
+      // Upgrade preferences in database if any placeholder IDs became valid Spotify IDs
+      if (user?.id) {
+        try {
+          const currentPrefs = getMusicPreferences(user.id);
+          if (currentPrefs && currentPrefs.favoriteArtistIds?.length) {
+            let hasUpgrades = false;
+            const upgradedIds = currentPrefs.favoriteArtistIds.map((curId, idx) => {
+              const name = currentPrefs.favoriteArtistNames?.[idx];
+              const matched = updatedSlice.find(a => normalizeArtistKey(a.name) === normalizeArtistKey(name));
+              if (matched && isSpotifyId(matched.id) && curId !== matched.id) {
+                hasUpgrades = true;
+                return matched.id;
+              }
+              return curId;
+            });
+            if (hasUpgrades) {
+              saveMusicPreferences(user.id, { favoriteArtistIds: upgradedIds });
+            }
+          }
+        } catch { }
+      }
+
+      if (!isMountedRef.current) return;
+
+      // Update state and ref
+      setArtistSpotlights((prev) => {
+        const nextList = [...prev];
+        for (let i = 0; i < updatedSlice.length; i++) {
+          const targetIdx = startIndex + i;
+          if (targetIdx < nextList.length) {
+            nextList[targetIdx] = updatedSlice[i];
+          }
+        }
+        artistSpotlightsRef.current = nextList;
+        return nextList;
+      });
+
+      resolvedPagesRef.current.add(pageIndex);
+    } catch (err) {
+      console.warn(`[SpotifyListView] Failed to resolve artist page ${pageIndex}:`, err);
+    } finally {
+      resolvingPagesRef.current.delete(pageIndex);
+    }
+  }, [user?.id]);
 
   const artistPages = useMemo(() => {
     const pages: any[][] = [];
@@ -1286,32 +1570,51 @@ const SpotifyListView = React.memo(({
     if (targetPage < 0 || targetPage >= artistPages.length) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setArtistPage(targetPage);
+    artistPageRef.current = targetPage;
     artistPagerRef.current?.scrollToOffset({
       offset: targetPage * artistContainerWidth,
       animated: true,
     });
-  }, [artistPages.length, artistContainerWidth]);
+    resolveArtistPage(targetPage);
+  }, [artistPages.length, artistContainerWidth, resolveArtistPage]);
 
   const handleArtistPagerMomentumEnd = useCallback((e: any) => {
     const offsetX = e.nativeEvent.contentOffset.x;
     const pageIndex = Math.round(offsetX / (artistContainerWidth || 1));
-    if (pageIndex >= 0 && pageIndex < artistPages.length && pageIndex !== artistPage) {
-      setArtistPage(pageIndex);
+    if (pageIndex >= 0 && pageIndex < artistPages.length) {
+      if (pageIndex !== artistPageRef.current) {
+        setArtistPage(pageIndex);
+        artistPageRef.current = pageIndex;
+      }
+      resolveArtistPage(pageIndex);
     }
-  }, [artistContainerWidth, artistPages.length, artistPage]);
+  }, [artistContainerWidth, artistPages.length, resolveArtistPage]);
+
+  // Gentle idle pre-fetch for next page when user stays on current page
+  useEffect(() => {
+    const nextPage = artistPage + 1;
+    if (nextPage >= artistPages.length) return;
+    if (resolvedPagesRef.current.has(nextPage)) return;
+
+    const timer = setTimeout(() => {
+      resolveArtistPage(nextPage);
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [artistPage, artistPages.length, resolveArtistPage]);
   // Artist profile state
   const [selectedArtistProfile, setSelectedArtistProfile] = useState<any | null>(null);
   const [artistProfileTopTracks, setArtistProfileTopTracks] = useState<any[]>([]);
   const [artistProfileAlbums, setArtistProfileAlbums] = useState<any[]>([]);
+  const [artistProfileTrackHeading, setArtistProfileTrackHeading] = useState<'Top Songs' | 'Latest Songs'>('Top Songs');
   const [loadingArtistProfile, setLoadingArtistProfile] = useState(false);
   const [refreshingArtistProfile, setRefreshingArtistProfile] = useState(false);
-  const forceArtistRevalidateRef = useRef(false);
   // Album detail state
   const [selectedAlbumDetail, setSelectedAlbumDetail] = useState<any | null>(null);
   const [albumDetailTracks, setAlbumDetailTracks] = useState<any[]>([]);
   const [loadingAlbumTracks, setLoadingAlbumTracks] = useState(false);
   // In-memory cache for artist profile data (avoids re-fetching on revisit)
-  const artistProfileCacheRef = useRef<Record<string, { topTracks: any[]; albums: any[]; updatedAt?: number }>>({});
+  const artistProfileCacheRef = useRef<Record<string, { topTracks: any[]; albums: any[]; trackHeading?: 'Top Songs' | 'Latest Songs'; updatedAt?: number }>>({});
   const liquidGlassAvailable = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 
   // Animation values for rotating cover and expanding droplet player
@@ -1321,7 +1624,6 @@ const SpotifyListView = React.memo(({
   // Tab indicator & content animations for smooth switching
   const tabIndexValue = useSharedValue(activeSpotifyTab === 'overview' ? 0 : activeSpotifyTab === 'artists' ? 1 : 2);
   const tabContentOpacity = useSharedValue(1);
-  const tabContentTranslateY = useSharedValue(0);
 
   useEffect(() => {
     const idx = activeSpotifyTab === 'overview' ? 0 : activeSpotifyTab === 'artists' ? 1 : 2;
@@ -1331,11 +1633,9 @@ const SpotifyListView = React.memo(({
       mass: 0.8,
     });
 
-    tabContentOpacity.value = 0.55;
-    tabContentTranslateY.value = 6;
-    tabContentOpacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.ease) });
-    tabContentTranslateY.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.ease) });
-  }, [activeSpotifyTab, tabIndexValue, tabContentOpacity, tabContentTranslateY]);
+    tabContentOpacity.value = 0.65;
+    tabContentOpacity.value = withTiming(1, { duration: 180, easing: Easing.out(Easing.ease) });
+  }, [activeSpotifyTab, tabIndexValue, tabContentOpacity]);
 
   const navIndicatorStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tabIndexValue.value * 65 }],
@@ -1343,7 +1643,6 @@ const SpotifyListView = React.memo(({
 
   const animatedTabContentStyle = useAnimatedStyle(() => ({
     opacity: tabContentOpacity.value,
-    transform: [{ translateY: tabContentTranslateY.value }],
   }));
 
   // Animate rotating vinyl cover when track is playing
@@ -1603,7 +1902,20 @@ const SpotifyListView = React.memo(({
         if (SPOTIFY_ARTIST_CACHE_FILE.exists) {
           const content = await SPOTIFY_ARTIST_CACHE_FILE.text();
           if (content) {
-            spotifyArtistCache = JSON.parse(content);
+            const raw = JSON.parse(content);
+            const clean: Record<string, any> = {};
+            for (const [k, v] of Object.entries(raw)) {
+              if (k.startsWith('deezer_') || k.startsWith('dz_') || k.startsWith('itunes_')) continue;
+              if (v && typeof v === 'object') {
+                const item = { ...v as any };
+                const url = item.images?.[0]?.url;
+                if (typeof url === 'string' && (url.includes('dzcdn.net') || url.includes('deezer.com'))) {
+                  item.images = [];
+                }
+                clean[k] = item;
+              }
+            }
+            spotifyArtistCache = clean;
           }
         }
       } catch (err) {
@@ -1698,8 +2010,16 @@ const SpotifyListView = React.memo(({
     setRefreshingPlaylists(true);
     try {
       if (activeSpotifyTab === 'artists') {
-        forceArtistRevalidateRef.current = true;
-        setArtistRefreshKey((k) => k + 1);
+        const currentPage = artistPageRef.current;
+        // Invalidate resolved cache status for ONLY this specific active page
+        resolvedPagesRef.current.delete(currentPage);
+        resolvingPagesRef.current.delete(currentPage);
+        // Force refresh only the specific page the user is currently viewing
+        await Promise.all([
+          resolveArtistPage(currentPage, true),
+          new Promise((r) => setTimeout(r, 450)),
+        ]);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       } else {
         await loadSpotifyPlaylists();
         if (activeSpotifyTab === 'overview') {
@@ -1714,7 +2034,7 @@ const SpotifyListView = React.memo(({
     } finally {
       setRefreshingPlaylists(false);
     }
-  }, [activeSpotifyTab, loadSpotifyPlaylists, loadRecentlyPlayed, loadTopTracks]);
+  }, [activeSpotifyTab, resolveArtistPage, loadSpotifyPlaylists, loadRecentlyPlayed, loadTopTracks]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -1752,22 +2072,29 @@ const SpotifyListView = React.memo(({
       const artistNames = preferences?.favoriteArtistNames ?? [];
       if (!isConnected || (artistIds.length === 0 && artistNames.length === 0)) {
         setArtistSpotlights([]);
+        artistSpotlightsRef.current = [];
+        resolvedPagesRef.current.clear();
+        resolvingPagesRef.current.clear();
         setArtistLoadError(false);
         return;
       }
 
-      const forceRevalidate = forceArtistRevalidateRef.current;
-      forceArtistRevalidateRef.current = false;
-
       // Helper to search cache without hitting profile keys
       const findInCache = (id?: string, name?: string) => {
-        if (id && !id.startsWith('profile_') && spotifyArtistCache[id]?.name) {
-          return spotifyArtistCache[id];
-        }
         const normKey = normalizeArtistKey(name);
+        if (id && !id.startsWith('profile_') && !id.startsWith('deezer_') && spotifyArtistCache[id]?.name) {
+          const item = spotifyArtistCache[id];
+          if (item?.images?.length && isDeezerImage(item.images[0]?.url)) {
+            return { ...item, images: [] };
+          }
+          return item;
+        }
         if (normKey) {
           for (const [key, val] of Object.entries(spotifyArtistCache)) {
-            if (!key.startsWith('profile_') && val?.name && normalizeArtistKey(val.name) === normKey) {
+            if (!key.startsWith('profile_') && !key.startsWith('deezer_') && val?.name && normalizeArtistKey(val.name) === normKey) {
+              if (val?.images?.length && isDeezerImage(val.images[0]?.url)) {
+                return { ...val, images: [] };
+              }
               return val;
             }
           }
@@ -1775,219 +2102,90 @@ const SpotifyListView = React.memo(({
         return null;
       };
 
-      // 1. Instant load from cache if available (deduplicated by both ID and normalized name)
-      const cachedMatches: any[] = [];
-      const cachedSeenIds = new Set<string>();
-      const cachedSeenKeys = new Set<string>();
-
+      // 1. Immediately build the full list of all favorite artists
+      // Populated with cache data wherever available, or structured placeholder
+      const initialArtists: any[] = [];
+      const seenIds = new Set<string>();
+      const seenKeys = new Set<string>();
       const totalTarget = Math.max(artistIds.length, artistNames.length);
+
       for (let i = 0; i < totalTarget; i++) {
         const id = artistIds[i];
         const name = artistNames[i];
         const cached = findInCache(id, name);
+
+        let artistObj: any = null;
         if (cached) {
-          const cId = cached.id;
-          const cKey = normalizeArtistKey(cached.name);
-          if ((cId && cachedSeenIds.has(cId)) || (cKey && cachedSeenKeys.has(cKey))) {
-            continue;
-          }
-          if (cId) cachedSeenIds.add(cId);
-          if (cKey) cachedSeenKeys.add(cKey);
-          cachedMatches.push(cached);
+          artistObj = cached;
+        } else {
+          artistObj = {
+            id: id || (name ? `pref_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : `artist_${i}`),
+            name: name || 'Artist',
+            genres: ['Artist'],
+            images: [],
+          };
         }
+
+        const aId = artistObj.id;
+        const aKey = normalizeArtistKey(artistObj.name);
+
+        if ((aId && seenIds.has(aId)) || (aKey && seenKeys.has(aKey))) {
+          continue;
+        }
+        if (aId) seenIds.add(aId);
+        if (aKey) seenKeys.add(aKey);
+        initialArtists.push(artistObj);
       }
 
-      if (cachedMatches.length > 0 && !cancelled) {
-        setArtistSpotlights(cachedMatches);
-      } else {
-        setLoadingArtists(true);
-      }
+      if (cancelled) return;
+
+      // Set state and ref immediately so layout renders all pages and dots right away
+      setArtistSpotlights(initialArtists);
+      artistSpotlightsRef.current = initialArtists;
       setArtistLoadError(false);
 
-      const isAnyStale = cachedMatches.length === 0 || cachedMatches.some((a: any) => !a?.updatedAt || (Date.now() - a.updatedAt > ARTIST_SPOTLIGHT_TTL));
-
-      // If all survey artists are already found in cache AND fresh AND not manual refresh, we're completely done! Zero network needed.
-      if (cachedMatches.length >= totalTarget && cachedMatches.length > 0 && !isAnyStale && !forceRevalidate) {
-        if (!cancelled) setLoadingArtists(false);
-        return;
+      // Pre-mark any pages that are already 100% resolved in cache
+      const numPages = Math.ceil(initialArtists.length / ARTISTS_PER_PAGE);
+      for (let p = 0; p < numPages; p++) {
+        const pSlice = initialArtists.slice(p * ARTISTS_PER_PAGE, (p + 1) * ARTISTS_PER_PAGE);
+        if (
+          pSlice.length > 0 &&
+          pSlice.every((a) => a && a.images && a.images.length > 0 && !!a.images[0]?.url && isSpotifyId(a.id))
+        ) {
+          resolvedPagesRef.current.add(p);
+        }
       }
 
-      try {
-        const { useTierStore } = require('../stores/tierStore');
-        const token = await useTierStore.getState().getValidAccessToken();
-        if (!token || cancelled) return;
-        const { getMultipleArtists, searchArtists } = require('../services/spotify');
+      // Check if visible page is already resolved from cache
+      const targetPage = artistPageRef.current;
+      const targetSlice = initialArtists.slice(targetPage * ARTISTS_PER_PAGE, (targetPage + 1) * ARTISTS_PER_PAGE);
+      const isTargetReady = targetSlice.length > 0 && targetSlice.every(
+        (a) => a && a.images && a.images.length > 0 && !!a.images[0]?.url && isSpotifyId(a.id)
+      );
 
-        // Check if any direct Spotify IDs can be batch fetched (including cached artists to refresh pictures)
-        const rawIds = [
-          ...artistIds,
-          ...cachedMatches.map((a: any) => a?.id),
-        ].filter(Boolean);
-        const spotifyIds = Array.from(new Set(rawIds.filter((id: string) => isSpotifyId(id))));
-        const directArtists = spotifyIds.length ? await getMultipleArtists(token, spotifyIds) : [];
-
-        // Identify which artist names are still missing and need resolution
-        const knownKeys = new Set<string>();
-        directArtists.forEach((a: any) => {
-          const k = normalizeArtistKey(a?.name);
-          if (k) knownKeys.add(k);
-        });
-        cachedMatches.forEach((a: any) => {
-          if (isSpotifyId(a?.id) && a?.updatedAt && (Date.now() - a.updatedAt <= ARTIST_SPOTLIGHT_TTL)) {
-            const k = normalizeArtistKey(a?.name);
-            if (k) knownKeys.add(k);
-          }
-        });
-
-        const missingNames = artistNames.filter((name: string) => name && !knownKeys.has(normalizeArtistKey(name)));
-
-        // Resolve missing artists in controlled chunks of 5 (avoids 429 rate limit even with 50-100 artists)
-        const newlyResolved: any[] = [];
-        const CHUNK_SIZE = 5;
-        for (let i = 0; i < missingNames.length; i += CHUNK_SIZE) {
-          if (cancelled) return;
-          const chunk = missingNames.slice(i, i + CHUNK_SIZE);
-          const chunkResults = await Promise.all(
-            chunk.map(async (name: string) => {
-              const matches = await searchArtists(token, name, 3).catch(() => []);
-              const normalized = normalizeArtistKey(name);
-              const match = matches.find((artist: any) => normalizeArtistKey(artist?.name) === normalized) ?? matches[0] ?? null;
-              if (match) return match;
-              // Reliable fallback representation so user's chosen artist is never lost
-              return {
-                id: `pref_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
-                name,
-                genres: ['Artist'],
-                images: [],
-              };
-            })
-          );
-          newlyResolved.push(...chunkResults.filter(Boolean));
-        }
-
-        // Unified pool: fresh artists take priority over cached matches
-        const artistById = new Map<string, any>();
-        const artistByKey = new Map<string, any>();
-
-        for (const cached of cachedMatches) {
-          if (!cached) continue;
-          const k = normalizeArtistKey(cached.name);
-          if (cached.id) artistById.set(cached.id, cached);
-          if (k) artistByKey.set(k, cached);
-        }
-
-        const freshList = [...directArtists, ...newlyResolved];
-        for (const fresh of freshList) {
-          if (!fresh) continue;
-          const k = normalizeArtistKey(fresh.name);
-          const freshWithTimestamp = { ...fresh, updatedAt: Date.now() };
-          if (fresh.id) artistById.set(fresh.id, freshWithTimestamp);
-          if (k) artistByKey.set(k, freshWithTimestamp);
-        }
-
-        // Reconstruct allArtists in user preference order, strictly deduplicating by ID and normalized name
-        const allArtists: any[] = [];
-        const seenFinalIds = new Set<string>();
-        const seenFinalKeys = new Set<string>();
-
-        for (let i = 0; i < totalTarget; i++) {
-          const prefId = artistIds[i];
-          const prefName = artistNames[i];
-          const normKey = normalizeArtistKey(prefName);
-
-          let bestMatch = (prefId && artistById.get(prefId)) ||
-                          (normKey && artistByKey.get(normKey)) ||
-                          null;
-
-          if (!bestMatch) {
-            const fallbackId = prefId || (prefName ? `pref_${prefName.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : `artist_${i}`);
-            bestMatch = {
-              id: fallbackId,
-              name: prefName || 'Artist',
-              genres: ['Artist'],
-              images: [],
-            };
-          }
-
-          const bId = bestMatch.id;
-          const bKey = normalizeArtistKey(bestMatch.name);
-
-          if ((bId && seenFinalIds.has(bId)) || (bKey && seenFinalKeys.has(bKey))) {
-            continue;
-          }
-
-          if (bId) seenFinalIds.add(bId);
-          if (bKey) seenFinalKeys.add(bKey);
-          allArtists.push(bestMatch);
-        }
-
-        // If any extra fresh artists were resolved that were not in preferences, add them without duplicating
-        for (const extra of freshList) {
-          if (!extra || !extra.id) continue;
-          const eKey = normalizeArtistKey(extra.name);
-          if (seenFinalIds.has(extra.id) || (eKey && seenFinalKeys.has(eKey))) {
-            continue;
-          }
-          seenFinalIds.add(extra.id);
-          if (eKey) seenFinalKeys.add(eKey);
-          allArtists.push(extra);
-        }
-
-        // Clean up cache: remove old pref_ keys when real Spotify IDs are established
-        allArtists.forEach((a: any) => {
-          if (a?.id) {
-            spotifyArtistCache[a.id] = { ...a, updatedAt: a.updatedAt || Date.now() };
-            if (isSpotifyId(a.id) && a.name) {
-              const oldPrefKey = `pref_${a.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-              if (spotifyArtistCache[oldPrefKey]) {
-                delete spotifyArtistCache[oldPrefKey];
-              }
-            }
-          }
-        });
+      // If visible page needs network resolution, keep skeleton visible gracefully during loading
+      if (!isTargetReady) {
+        setLoadingArtists(true);
         try {
-          SPOTIFY_ARTIST_CACHE_FILE.write(JSON.stringify(spotifyArtistCache));
+          await Promise.all([
+            resolveArtistPage(targetPage, false),
+            new Promise((r) => setTimeout(r, 450)),
+          ]);
         } catch { }
+      } else {
+        await resolveArtistPage(targetPage, false);
+      }
 
-        // Upgrade preferences in database if any placeholder IDs became valid Spotify IDs
-        if (user?.id) {
-          try {
-            const currentPrefs = getMusicPreferences(user.id);
-            if (currentPrefs && currentPrefs.favoriteArtistIds?.length) {
-              let hasUpgrades = false;
-              const upgradedIds = currentPrefs.favoriteArtistIds.map((curId, idx) => {
-                const name = currentPrefs.favoriteArtistNames?.[idx];
-                const matched = allArtists.find(a => normalizeArtistKey(a.name) === normalizeArtistKey(name));
-                if (matched && isSpotifyId(matched.id) && curId !== matched.id) {
-                  hasUpgrades = true;
-                  return matched.id;
-                }
-                return curId;
-              });
-              if (hasUpgrades) {
-                saveMusicPreferences(user.id, { favoriteArtistIds: upgradedIds });
-              }
-            }
-          } catch { }
-        }
-
-        if (!cancelled) {
-          setArtistSpotlights(allArtists);
-          if (forceRevalidate) {
-            setArtistPage(0);
-            artistPagerRef.current?.scrollToOffset({ offset: 0, animated: false });
-          }
-        }
-      } catch (error) {
-        console.warn('[SpotifyListView] Failed to load favourite artist spotlights:', error);
-        if (!cancelled && cachedMatches.length === 0) setArtistLoadError(true);
-      } finally {
-        if (!cancelled) setLoadingArtists(false);
+      if (!cancelled) {
+        setLoadingArtists(false);
       }
     };
+
     loadArtistSpotlights();
-    return () => { cancelled = true; };
-  }, [isConnected, user?.id, dataVersion, artistRefreshKey]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isConnected, user?.id, dataVersion, artistRefreshKey, resolveArtistPage]);
 
   useEffect(() => {
     onBottomChromeChange?.(!selectedPlaylist && !isSearchOpen && !selectedArtistProfile && !selectedAlbumDetail);
@@ -2094,44 +2292,74 @@ const SpotifyListView = React.memo(({
 
     // Check in-memory and persistent cache first
     const cached = artistProfileCacheRef.current[artist.id] || spotifyArtistCache[`profile_${artist.id}`];
-    const hasCachedContent = cached && ((cached.topTracks?.length ?? 0) >= 3 || (cached.albums?.length ?? 0) > 0);
+    const hasCompleteCachedContent = cached && ((cached.topTracks?.length ?? 0) >= 3) && ((cached.albums?.length ?? 0) > 0);
     const isStale = !cached?.updatedAt || (Date.now() - cached.updatedAt > ARTIST_PROFILE_TTL);
 
-    if (hasCachedContent) {
-      setArtistProfileTopTracks(cached.topTracks || []);
-      setArtistProfileAlbums(cached.albums || []);
+    if (cached) {
+      if (cached.topTracks?.length) setArtistProfileTopTracks(cached.topTracks);
+      if (cached.albums?.length) setArtistProfileAlbums(cached.albums);
+      setArtistProfileTrackHeading(cached.trackHeading || 'Top Songs');
     }
 
-    // If we already have fresh cached data and this is not a manual force refresh, return immediately (0ms instant tap!)
-    if (hasCachedContent && !isStale && !forceFresh) {
+    // If we already have complete, fresh cached data and this is not a manual force refresh, return immediately
+    if (hasCompleteCachedContent && !isStale && !forceFresh) {
       return;
     }
 
-    // If no cached content, show full loader. If already cached, show subtle pull-to-refresh spinner (if manual) or do quiet background sync
-    if (!hasCachedContent) {
+    // If no cached content at all, show full loader. If partially cached, do smooth background enrichment
+    if (!cached || ((cached.topTracks?.length ?? 0) === 0 && (cached.albums?.length ?? 0) === 0)) {
       setLoadingArtistProfile(true);
       setArtistProfileTopTracks([]);
       setArtistProfileAlbums([]);
+      setArtistProfileTrackHeading('Top Songs');
     } else if (forceFresh) {
       setRefreshingArtistProfile(true);
     }
 
     try {
       const token = await useTierStore.getState().getValidAccessToken();
-      if (!token) return;
-      const { getArtistTopTracks, getArtistAlbums, getArtist, searchArtists, searchTracks, searchAlbums } = require('../services/spotify');
+      if (!token) {
+        if (artist.name) {
+          const { getArtistTopTracksResult } = require('../services/spotify');
+          const topResult = await getArtistTopTracksResult('', '', 'US', artist.name).catch(() => ({ tracks: [], isLatestFallback: false }));
+          if (topResult.tracks.length > 0) {
+            setArtistProfileTopTracks(topResult.tracks);
+            setArtistProfileTrackHeading(topResult.isLatestFallback ? 'Latest Songs' : 'Top Songs');
+          }
+        }
+        return;
+      }
+      const {
+        getArtistTopTracksResult,
+        getArtistAlbums,
+        getArtist,
+        searchArtists,
+      } = require('../services/spotify');
 
       let realArtistId = artist.id;
       let realArtistObj = artist;
 
-      // Fetch tracks, albums, and fresh artist object (to capture any updated profile photo or followers)
-      let [tracks, albums, freshArtistProfile] = await Promise.all([
-        getArtistTopTracks(token, realArtistId, 'US', artist.name).catch(() => []),
+      // If artist ID is not a 22-char Spotify ID, check persistent cache first
+      if (!/^[A-Za-z0-9]{22}$/.test(realArtistId) && artist.name) {
+        const cached = spotifyArtistCache[artist.id] || spotifyArtistCache[`name:${normalizeArtistKey(artist.name)}`];
+        if (cached && /^[A-Za-z0-9]{22}$/.test(cached.id)) {
+          realArtistId = cached.id;
+          realArtistObj = { ...realArtistObj, ...cached };
+          setSelectedArtistProfile(realArtistObj);
+        }
+      }
+
+      // Fetch tracks, albums, and fresh artist object from Spotify
+      let [topTracksRes, albums, freshArtistProfile] = await Promise.all([
+        getArtistTopTracksResult(token, realArtistId, 'US', artist.name).catch(() => ({ tracks: [], isLatestFallback: false })),
         getArtistAlbums(token, realArtistId, 10, artist.name).catch(() => []),
         /^[A-Za-z0-9]{22}$/.test(realArtistId) ? getArtist(token, realArtistId).catch(() => null) : Promise.resolve(null),
       ]);
 
-      if (freshArtistProfile?.images?.length) {
+      let tracks = topTracksRes.tracks;
+      let isLatestFallback = topTracksRes.isLatestFallback;
+
+      if (freshArtistProfile?.images?.length && !isDeezerImage(freshArtistProfile.images[0]?.url)) {
         realArtistObj = { ...realArtistObj, ...freshArtistProfile };
         setSelectedArtistProfile(realArtistObj);
       }
@@ -2141,7 +2369,7 @@ const SpotifyListView = React.memo(({
         console.log(`[SpotifyListView] Resolving real artist for "${artist.name}"...`);
         const searchMatches = await searchArtists(token, artist.name, 3).catch(() => []);
         const match = searchMatches.find(
-          (a: any) => a.name?.toLowerCase().trim() === artist.name.toLowerCase().trim()
+          (a: any) => normalizeArtistKey(a?.name) === normalizeArtistKey(artist.name)
         ) || searchMatches[0];
 
         if (match && match.id) {
@@ -2149,32 +2377,12 @@ const SpotifyListView = React.memo(({
           realArtistObj = { ...artist, ...match };
           setSelectedArtistProfile(realArtistObj);
 
-          [tracks, albums] = await Promise.all([
-            getArtistTopTracks(token, realArtistId, 'US', artist.name).catch(() => []),
+          [topTracksRes, albums] = await Promise.all([
+            getArtistTopTracksResult(token, realArtistId, 'US', artist.name).catch(() => ({ tracks: [], isLatestFallback: false })),
             getArtistAlbums(token, realArtistId, 10, artist.name).catch(() => []),
           ]);
-        }
-      }
-
-      // If top tracks are fewer than 10, search for tracks by artist query to enrich catalog to 10-15+ songs
-      if (tracks.length < 10 && artist.name) {
-        const [p1, p2] = await Promise.all([
-          searchTracks(token, `artist:"${artist.name}"`, 10, 0).catch(() => []),
-          searchTracks(token, `artist:"${artist.name}"`, 10, 10).catch(() => []),
-        ]);
-        let candidateTracks = [...p1, ...p2];
-        if (candidateTracks.length === 0) {
-          candidateTracks = await searchTracks(token, artist.name, 10, 0).catch(() => []);
-        }
-        if (candidateTracks.length > 0) {
-          const trackIds = new Set(tracks.map((t: any) => t.id));
-          for (const st of candidateTracks) {
-            if (!trackIds.has(st.id)) {
-              trackIds.add(st.id);
-              tracks.push(st);
-              if (tracks.length >= 15) break;
-            }
-          }
+          tracks = topTracksRes.tracks;
+          isLatestFallback = topTracksRes.isLatestFallback;
         }
       }
 
@@ -2182,7 +2390,7 @@ const SpotifyListView = React.memo(({
       const trackAlbums: any[] = [];
       const seenAlbumIds = new Set(albums.map((a: any) => a.id));
       tracks.forEach((t: any) => {
-        if (t.album && t.album.id && !seenAlbumIds.has(t.album.id)) {
+        if (t.album && isSpotifyId(t.album.id) && !seenAlbumIds.has(t.album.id)) {
           seenAlbumIds.add(t.album.id);
           trackAlbums.push({
             id: t.album.id,
@@ -2197,21 +2405,10 @@ const SpotifyListView = React.memo(({
         albums = [...albums, ...trackAlbums];
       }
 
-      // If albums are still empty, search Spotify for albums by artist query as guaranteed fallback
-      if (albums.length === 0 && artist.name) {
-        let searchedAlbums = await searchAlbums(token, `artist:"${artist.name}"`, 10).catch(() => []);
-        if (searchedAlbums.length === 0) {
-          searchedAlbums = await searchAlbums(token, artist.name, 10).catch(() => []);
-        }
-        if (searchedAlbums.length > 0) {
-          albums = searchedAlbums;
-        }
-      }
-
       // Ensure albums are sorted newest first so latest drops always lead
       albums.sort((a: any, b: any) => (b.release_date || '').localeCompare(a.release_date || ''));
 
-      // If artist image was missing, attach album art as fallback
+      // If artist image was missing, attach album art as fallback from Spotify tracks
       if ((!realArtistObj.images || realArtistObj.images.length === 0) && tracks.length > 0 && tracks[0].album?.images?.length) {
         realArtistObj = {
           ...realArtistObj,
@@ -2222,21 +2419,28 @@ const SpotifyListView = React.memo(({
 
       setArtistProfileTopTracks(tracks);
       setArtistProfileAlbums(albums);
+      setArtistProfileTrackHeading(isLatestFallback ? 'Latest Songs' : 'Top Songs');
 
-      // Persist profile data with updatedAt timestamp
-      if (tracks.length > 0 || albums.length > 0) {
-        const profileData = {
-          topTracks: tracks,
-          albums,
-          updatedAt: Date.now(),
-        };
-        artistProfileCacheRef.current[artist.id] = profileData;
-        if (realArtistId !== artist.id) {
-          artistProfileCacheRef.current[realArtistId] = profileData;
-        }
+      // Session in-memory cache for fast modal re-opening
+      const profileData = {
+        topTracks: tracks,
+        albums,
+        trackHeading: (isLatestFallback ? 'Latest Songs' : 'Top Songs') as ('Top Songs' | 'Latest Songs'),
+        updatedAt: Date.now(),
+      };
+      artistProfileCacheRef.current[artist.id] = profileData;
+      if (realArtistId !== artist.id) {
+        artistProfileCacheRef.current[realArtistId] = profileData;
+      }
+
+      // no need to save Deezer or fallback data to persistent cache
+      const isFallbackTracks = tracks.some((t: any) => t.id?.startsWith('dz_') || t.id?.startsWith('deezer_') || t.id?.startsWith('itunes_'));
+      const isDeezerImageObj = isDeezerImage(realArtistObj.images?.[0]?.url);
+
+      if (!isFallbackTracks && (tracks.length > 0 || albums.length > 0)) {
         spotifyArtistCache[`profile_${artist.id}`] = profileData;
         spotifyArtistCache[`profile_${realArtistId}`] = profileData;
-        if (spotifyArtistCache[artist.id] && realArtistObj.images?.length) {
+        if (spotifyArtistCache[artist.id] && realArtistObj.images?.length && !isDeezerImageObj) {
           spotifyArtistCache[artist.id] = {
             ...spotifyArtistCache[artist.id],
             images: realArtistObj.images,
@@ -2786,14 +2990,14 @@ const SpotifyListView = React.memo(({
       ) : (
         /* Three-tab Spotify home */
         <ScrollView
+          ref={spotifyScrollRef}
           contentContainerStyle={[
             styles.listScroll,
             styles.spotifyHubScroll,
-            activeSpotifyTab === 'artists' && styles.spotifyHubScrollArtists,
           ]}
           showsVerticalScrollIndicator={false}
           bounces={true}
-          alwaysBounceVertical={true}
+          alwaysBounceVertical={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshingPlaylists}
@@ -2967,7 +3171,7 @@ const SpotifyListView = React.memo(({
                     })}
                     {recentlyPlayed.length === 0 && <Text style={styles.spotifyEmptyRailText}>Recent listening will appear here.</Text>}
                   </ScrollView>
-                  <View style={styles.spotifySectionHeading}><Text style={styles.spotifySectionTitle}>Your listening pulse</Text><Pressable onPress={() => setActiveSpotifyTab('artists')}><Text style={styles.spotifySectionAction}>Artists</Text></Pressable></View>
+                  <View style={styles.spotifySectionHeading}><Text style={styles.spotifySectionTitle}>Your listening pulse</Text><Pressable onPress={() => selectSpotifyTab('artists')}><Text style={styles.spotifySectionAction}>Artists</Text></Pressable></View>
                   <GlassCard intensity="medium" padding="none" style={styles.spotifyPulseCard}>
                     {(topTracks.length ? topTracks : recentlyPlayed.map((entry: any) => entry.track)).slice(0, 4).map((track: any, index: number) => <Pressable
                       key={`${track.id}-${index}`}
@@ -3006,14 +3210,7 @@ const SpotifyListView = React.memo(({
                     </Pressable>
                   </View>
                   {loadingArtists ? (
-                    <View style={styles.spotifyArtistLoading}>
-                      <View style={{ flexDirection: 'row', gap: 16, justifyContent: 'center' }}>
-                        {[0, 1, 2].map(i => <View key={i} style={styles.artistGridSkeletonCircle} />)}
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 16, justifyContent: 'center', marginTop: 20 }}>
-                        {[3, 4, 5].map(i => <View key={i} style={styles.artistGridSkeletonCircle} />)}
-                      </View>
-                    </View>
+                    <ArtistGridSkeleton />
                   ) : artistLoadError ? (
                     <GlassCard intensity="medium" style={styles.spotifyArtistEmpty}>
                       <Feather name="wifi-off" size={28} color={Colors.accent.primary} />
@@ -3058,6 +3255,7 @@ const SpotifyListView = React.memo(({
                         directionalLockEnabled={true}
                         scrollEnabled={artistPages.length > 1}
                         onMomentumScrollEnd={handleArtistPagerMomentumEnd}
+                        onScrollEndDrag={handleArtistPagerMomentumEnd}
                         getItemLayout={getArtistItemLayout}
                         initialNumToRender={2}
                         maxToRenderPerBatch={2}
@@ -3290,7 +3488,7 @@ const SpotifyListView = React.memo(({
                   key={tab}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setActiveSpotifyTab(tab);
+                    selectSpotifyTab(tab);
                   }}
                   style={styles.spotifyNavItem}
                 >
@@ -3669,7 +3867,7 @@ const SpotifyListView = React.memo(({
                 <>
                   {/* Top Songs Section Header */}
                   <View style={styles.artistSectionHeaderRow}>
-                    <Text style={styles.artistSectionHeading}>Top Songs</Text>
+                    <Text style={styles.artistSectionHeading}>{artistProfileTrackHeading}</Text>
                     {artistProfileTopTracks.length > 0 && (
                       <Text style={styles.artistSectionCountBadge}>
                         {artistProfileTopTracks.length} tracks
@@ -5975,10 +6173,7 @@ const PlayerView = React.memo(({
     } else {
       await resume();
     }
-    setTimeout(() => {
-      refreshNowPlaying();
-    }, 500);
-  }, [isTrackPlaying, pause, resume, refreshNowPlaying]);
+  }, [isTrackPlaying, pause, resume]);
 
   const handleNextPress = useCallback(async () => {
     await next();
@@ -9730,9 +9925,6 @@ const styles = StyleSheet.create({
   spotifyArtistIntroTitle: { marginTop: 7, fontFamily: Fonts.heading, fontSize: 28, color: Colors.text.primary },
   spotifyArtistIntroCopy: { marginTop: 6, fontFamily: Fonts.bodyMedium, fontSize: 13, lineHeight: 19, color: Colors.text.secondary },
   spotifyArtistEmpty: { alignItems: 'center', gap: 9, paddingVertical: 34, borderRadius: 26 },
-  spotifyArtistLoading: { minHeight: 230, marginBottom: 15, padding: 18, borderRadius: 26, backgroundColor: 'rgba(190,255,108,0.055)', borderWidth: 0.5, borderColor: 'rgba(190,255,108,0.16)', justifyContent: 'center', gap: 13 },
-  spotifySkeletonAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: 'rgba(190,255,108,0.15)' },
-  spotifySkeletonLine: { height: 12, width: '76%', borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.1)' },
   spotifySurveyButton: { marginTop: 7, paddingVertical: 11, paddingHorizontal: 15, borderRadius: 999, backgroundColor: Colors.accent.primary },
   spotifySurveyButtonText: { fontFamily: Fonts.bodyBold, fontSize: 12, color: Colors.text.onAccent },
   spotifyArtistCard: { marginBottom: 15, padding: 16, borderRadius: 26 },
@@ -10088,12 +10280,6 @@ const styles = StyleSheet.create({
     right: 14,
     zIndex: 50,
   },
-  artistGridSkeletonCircle: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: 'rgba(190, 255, 108, 0.1)',
-  },
   artistGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -10447,7 +10633,6 @@ const styles = StyleSheet.create({
   spotifyNavItemActive: { backgroundColor: Colors.accent.primary },
   spotifyNavLabel: { fontFamily: Fonts.bodyBold, fontSize: 9.5, lineHeight: 12, includeFontPadding: false, textAlign: 'center', color: 'rgba(255, 255, 255, 0.68)' },
   spotifyNavLabelActive: { color: Colors.text.onAccent },
-  spotifyHubScrollArtists: { paddingBottom: 72, flexGrow: 1 },
   spotifySearchOrb: { width: 62, height: 62, borderRadius: 31, overflow: 'hidden', backgroundColor: 'rgba(20, 25, 17, 0.92)', borderWidth: 1, borderColor: 'rgba(190, 255, 108, 0.25)', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },
   spotifySearchOrbPressable: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   spotifyCoverOrb: { width: 62, height: 62, borderRadius: 31, overflow: 'hidden', backgroundColor: 'rgba(20, 25, 17, 0.92)', borderWidth: 1, borderColor: 'rgba(190, 255, 108, 0.28)', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },

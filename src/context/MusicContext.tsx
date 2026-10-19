@@ -340,6 +340,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const lastInsertIndexRef = useRef<number | null>(null);
   const isSkippingRef = useRef(false);
   const lastActionTimeRef = useRef<number>(0);
+  const userExplicitPlayStateRef = useRef<boolean | null>(null);
+  const userExplicitActionTimeRef = useRef<number>(0);
 
   // Ref to track if the next track has been silently queued on Spotify
   const nextTrackQueuedRef = useRef<string | null>(null);
@@ -513,6 +515,23 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   ) => {
     const timeSinceLastAction = Date.now() - lastActionTimeRef.current;
     const isWithinActionWindow = timeSinceLastAction < 5000; // 5-second action window
+
+    // Reconcile user explicit play/pause intent vs Spotify's async reported state
+    let effectivePlaying = playing;
+    const timeSinceExplicitAction = Date.now() - userExplicitActionTimeRef.current;
+    if (userExplicitPlayStateRef.current !== null && timeSinceExplicitAction < 3500) {
+      if (playing === userExplicitPlayStateRef.current) {
+        // Spotify has caught up with user's explicit action, Clear lock.
+        userExplicitPlayStateRef.current = null;
+      } else {
+        // Spotify is still returning stale playback state (e.g. user paused, but Spotify still reports playing: true).
+        // Preserve user's explicit action so UI never flickers back and forth.
+        effectivePlaying = userExplicitPlayStateRef.current;
+      }
+    } else if (userExplicitPlayStateRef.current !== null && timeSinceExplicitAction >= 3500) {
+      // Window expired, accept Spotify truth
+      userExplicitPlayStateRef.current = null;
+    }
 
     if (trackInfo) {
       const isTrackMatch = currentTrackRef.current?.id === trackInfo.id;
@@ -707,7 +726,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Now, sync playing state and currentTime if appropriate.
     // If we are within the action window, we only sync if the track matches.
     if (!isWithinActionWindow || (trackInfo && currentTrackRef.current?.id === trackInfo.id)) {
-      setPlaying(prev => (prev === playing ? prev : playing));
+      setPlaying(prev => (prev === effectivePlaying ? prev : effectivePlaying));
       setCurrentTime(prev => {
         // Only update if there is a significant difference (> 2 seconds) to prevent progress bar jitter
         const diff = Math.abs(prev - progressSec);
@@ -960,6 +979,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       setShouldPlay(true);
       lastActionTimeRef.current = Date.now();
+      userExplicitPlayStateRef.current = true;
+      userExplicitActionTimeRef.current = Date.now();
 
       // Handle Spotify remote playback
       if (track.category === 'spotify') {
@@ -1388,6 +1409,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const pause = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     lastActionTimeRef.current = Date.now();
+    userExplicitPlayStateRef.current = false;
+    userExplicitActionTimeRef.current = Date.now();
+
+    // Instant optimistic UI update
+    setPlaying(false);
+    setShouldPlay(false);
+
     if (currentTrackRef.current?.category === 'spotify') {
       try {
         const { useTierStore } = require('../stores/tierStore');
@@ -1403,19 +1431,22 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch (err) {
         console.warn('[MusicContext] Spotify pause error:', err);
       }
-      setPlaying(false);
-      setShouldPlay(false);
       return;
     }
     if (!playerRef.current) return;
     playerRef.current.pause();
-    setPlaying(false);
-    setShouldPlay(false);
   }, []);
 
   const resume = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     lastActionTimeRef.current = Date.now();
+    userExplicitPlayStateRef.current = true;
+    userExplicitActionTimeRef.current = Date.now();
+
+    // Instant optimistic UI update
+    setPlaying(true);
+    setShouldPlay(true);
+
     if (currentTrackRef.current?.category === 'spotify') {
       try {
         const { useTierStore } = require('../stores/tierStore');
@@ -1431,19 +1462,17 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch (err) {
         console.warn('[MusicContext] Spotify resume error:', err);
       }
-      setPlaying(true);
-      setShouldPlay(true);
       return;
     }
     if (!playerRef.current) return;
     playerRef.current.play();
-    setPlaying(true);
-    setShouldPlay(true);
   }, []);
 
   const next = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     lastActionTimeRef.current = Date.now();
+    userExplicitPlayStateRef.current = true;
+    userExplicitActionTimeRef.current = Date.now();
 
     const isSpotify = currentTrackRef.current?.category === 'spotify';
 
@@ -1505,6 +1534,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const prev = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     lastActionTimeRef.current = Date.now();
+    userExplicitPlayStateRef.current = true;
+    userExplicitActionTimeRef.current = Date.now();
 
     const isSpotify = currentTrackRef.current?.category === 'spotify';
 
