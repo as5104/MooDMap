@@ -61,5 +61,8 @@ implementation_plan.md
 # Design references
 DESIGN_REFERENCES.md
 
+# Local documentation and audit reports
+/docs/
+
 # ESLint
 eslint.config.js
