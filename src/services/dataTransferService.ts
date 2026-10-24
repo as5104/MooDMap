@@ -549,6 +549,12 @@ export async function importUserData(currentUserId: string): Promise<boolean> {
                 // 10. Restore Profile Picture
                 if (profile_picture_base64 && profile_picture_ext) {
                   try {
+                    // Backup files are untrusted; never interpolate a supplied
+                    // extension into a path until it passes an exact allowlist.
+                    if (!['.jpg', '.jpeg', '.png', '.webp'].includes(profile_picture_ext.toLowerCase())) {
+                      throw new Error('Unsupported avatar extension in backup.');
+                    }
+                    if (profile_picture_base64.length > 7 * 1024 * 1024) throw new Error('Avatar in backup exceeds the size limit.');
                     const tempFileName = `import_avatar_${Date.now()}${profile_picture_ext}`;
                     const tempFile = new File(Paths.cache, tempFileName);
 

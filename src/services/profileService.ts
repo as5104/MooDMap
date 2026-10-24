@@ -213,6 +213,8 @@ export async function saveCustomAvatar(
   ext?: string
 ): Promise<AvatarSaveResult> {
   try {
+    const fileExt = (ext || getExtension(sourceUri) || (mimeType === 'image/png' ? '.png' : mimeType === 'image/webp' ? '.webp' : '.jpg')).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(fileExt)) return { success: false, error: 'Unsupported avatar extension.' };
     const avatarDir = getAvatarDirectory();
 
     // Ensure avatar directory exists
@@ -221,7 +223,6 @@ export async function saveCustomAvatar(
       await LegacyFileSystem.makeDirectoryAsync(avatarDir, { intermediates: true });
     }
 
-    const fileExt = ext || getExtension(sourceUri) || (mimeType === 'image/png' ? '.png' : mimeType === 'image/webp' ? '.webp' : '.jpg');
     const destUri = `${avatarDir}/${AVATAR_FILENAME}${fileExt}`;
 
     // Delete old avatar if it exists with a different extension
