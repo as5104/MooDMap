@@ -47,6 +47,7 @@ export interface SpotifyUserDataSnapshot {
 
 // Cache TTL: 24 hours
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const refreshes = new Map<string, Promise<SpotifyUserDataSnapshot | null>>();
 
 /**
  * Check if a fresh Spotify data fetch is needed (cache is stale or missing).
@@ -82,6 +83,19 @@ export async function refreshSpotifyUserData(
   userId: string,
   accessToken: string,
 ): Promise<SpotifyUserDataSnapshot | null> {
+  const key = `${userId}:${accessToken}`;
+  const pending = refreshes.get(key);
+  if (pending) return pending;
+  const request = fetchSpotifyUserData(userId, accessToken);
+  refreshes.set(key, request);
+  try { return await request; }
+  finally { if (refreshes.get(key) === request) refreshes.delete(key); }
+}
+
+async function fetchSpotifyUserData(
+  userId: string,
+  accessToken: string,
+): Promise<SpotifyUserDataSnapshot | null> {
   if (!accessToken) return getLatestSpotifyUserData(userId);
   if (!isSpotifyDataStale(userId)) return getLatestSpotifyUserData(userId);
 
@@ -90,6 +104,7 @@ export async function refreshSpotifyUserData(
       getTopTracks,
       getTopArtists,
       getRecentlyPlayed,
+      isSpotifySearchRateLimited,
     } = require('./spotify');
 
     // Fetch all 4 data sources in parallel
@@ -99,6 +114,9 @@ export async function refreshSpotifyUserData(
       getRecentlyPlayed(accessToken, 50).catch(() => []),
       getTopArtists(accessToken, 'short_term', 20).catch(() => []),
     ]);
+
+    // Do not turn a temporary API cooldown into an empty 24-hour snapshot.
+    if (isSpotifySearchRateLimited()) return getLatestSpotifyUserData(userId);
 
     // Convert SpotifyTrack to CachedSpotifyTrack with cover, duration, and URI
     const mapTrack = (t: any): CachedSpotifyTrack => {

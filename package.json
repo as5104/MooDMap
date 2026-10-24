@@ -66,6 +66,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "test:spotify": "node --test tests/spotify-playback.test.cjs tests/spotify-artist-navigation.test.cjs",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",

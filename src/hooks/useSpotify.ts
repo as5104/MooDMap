@@ -21,6 +21,7 @@ import {
   getCurrentUser,
   getCurrentlyPlaying,
   getRecentlyPlayed,
+  getTrack,
   getTopArtists,
   getTopTracks,
   getUserPlaylists,
@@ -29,13 +30,11 @@ import {
   searchArtists,
   searchForMood,
   searchTracks,
-  addToQueue as spotifyAddToQueue,
   formatDuration as spotifyFormatDuration,
   getBestImage as spotifyGetBestImage,
   nextTrack as spotifyNext,
   pause as spotifyPause,
   play as spotifyPlay,
-  resetSpotifyRateLimitCooldown,
   type SpotifyArtist,
   type SpotifyCurrentTrack,
   type SpotifyPlayHistory,
@@ -48,10 +47,13 @@ import {
   refreshSpotifyUserData
 } from '@/services/spotifyDataCacheService';
 import { useAppStore } from '@/stores/appStore';
-import { useTierStore } from '@/stores/tierStore';
+import { createSpotifyPoller } from '@/services/spotifyPolling';
+import { fetchWithDeadline } from '@/services/spotifyNetwork';
+import { normalizePlaybackUris } from '@/services/spotifyPlayback';
+import { getSpotifySessionGeneration, useTierStore } from '@/stores/tierStore';
 import * as AuthSession from 'expo-auth-session';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AppState, Linking } from 'react-native';
 
 
@@ -115,8 +117,12 @@ interface UseSpotifyReturn {
   refreshDailySpotifyData: () => Promise<void>;
 }
 
-// Now Playing Poll Interval
-const NOW_PLAYING_POLL_MS = 10000; // 10 seconds — avoids Spotify 429 rate limits while staying responsive
+const playbackPoller = createSpotifyPoller<SpotifyCurrentTrack>(async () => {
+  const store = useTierStore.getState();
+  if (!store.isVIP || !store.spotifyConnected) return null;
+  const token = await store.getValidAccessToken();
+  return token ? getCurrentlyPlaying(token, true) : null;
+});
 
 // Hook
 
@@ -128,7 +134,7 @@ export function useSpotify(): UseSpotifyReturn {
   const getValidAccessToken = useTierStore((s) => s.getValidAccessToken);
   const setSpotifyTokens = useTierStore((s) => s.setSpotifyTokens);
   const clearSpotifyTokens = useTierStore((s) => s.clearSpotifyTokens);
-  const { currentTrack, isPlaying, updateSpotifyPlayback, playbackRefreshRequest } = useMusic();
+  const { currentTrack, isPlaying, updateSpotifyPlayback, playbackRefreshRequest, addToQueue: addMusicTrackToQueue } = useMusic();
 
   const [isConnecting, setIsConnecting] = useState(false);
   const [spotifyUser, setSpotifyUser] = useState<SpotifyUser | null>(null);
@@ -137,8 +143,6 @@ export function useSpotify(): UseSpotifyReturn {
   const [topTracks, setTopTracks] = useState<SpotifyTrack[]>([]);
   const [recentlyPlayed, setRecentlyPlayed] = useState<SpotifyPlayHistory[]>([]);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const codeVerifierRef = useRef<string | null>(null);
 
   // Auth request setup
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
@@ -159,15 +163,25 @@ export function useSpotify(): UseSpotifyReturn {
       return;
     }
 
+    let cancelled = false;
+    const generation = getSpotifySessionGeneration();
+    const appUserId = useAppStore.getState().user?.id;
+    const isCurrentSession = () => !cancelled
+      && generation === getSpotifySessionGeneration()
+      && useTierStore.getState().isVIP
+      && useAppStore.getState().user?.id === appUserId;
+
     (async () => {
       setIsConnecting(true);
       try {
         const tokens = await exchangeCodeForTokens(code, verifier);
-        if (tokens) {
+        if (tokens && isCurrentSession()) {
           await setSpotifyTokens(tokens);
+          if (!isCurrentSession()) return;
 
           // Fetch user profile
           const user = await getCurrentUser(tokens.accessToken);
+          if (!isCurrentSession()) return;
           if (user) setSpotifyUser(user);
 
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -175,10 +189,11 @@ export function useSpotify(): UseSpotifyReturn {
       } catch (e) {
         console.warn('[Spotify] OAuth completion error:', e);
       } finally {
-        setIsConnecting(false);
+        if (!cancelled) setIsConnecting(false);
       }
     })();
-  }, [response]);
+    return () => { cancelled = true; };
+  }, [response, request?.codeVerifier, setSpotifyTokens]);
 
   // Load User on Connect
 
@@ -186,16 +201,21 @@ export function useSpotify(): UseSpotifyReturn {
     if (!isVIP || !spotifyConnected) {
       setSpotifyUser(null);
       setPlaylists([]);
+      setTopTracks([]);
+      setRecentlyPlayed([]);
       return;
     }
-
+    let cancelled = false;
     (async () => {
       try {
         const token = await getValidAccessToken();
+        if (cancelled) return;
         if (token) {
           const user = await getCurrentUser(token);
+          if (cancelled) return;
           if (user) setSpotifyUser(user);
           const data = await getUserPlaylists(token);
+          if (cancelled) return;
           if (data && data.length > 0) setPlaylists(data);
 
           // Trigger daily Spotify user data cache refresh
@@ -210,124 +230,44 @@ export function useSpotify(): UseSpotifyReturn {
         console.warn('[useSpotify] Failed to load user profile & playlists on connect:', err);
       }
     })();
+    return () => { cancelled = true; };
   }, [isVIP, spotifyConnected, getValidAccessToken]);
 
   // Now Playing Polling
 
-  const refreshNowPlaying = useCallback(async () => {
-    if (!isVIP || !spotifyConnected) return;
-
-    try {
-      const token = await getValidAccessToken();
-      if (!token) return;
-
-      const current = await getCurrentlyPlaying(token);
-      if (current) {
-        setNowPlaying(current);
-
-        // Sync playback state back to MusicContext if playing Spotify
-        if (currentTrack?.category === 'spotify' || (!currentTrack && current.is_playing)) {
-          if (current.item) {
-            const progressSec = current.progress_ms / 1000;
-            const durationSec = current.item.duration_ms / 1000;
-
-            const trackInfo = {
-              id: 'spotify_' + current.item.id,
-              title: current.item.name,
-              artist: current.item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist',
-              url: current.item.uri,
-              cover: spotifyGetBestImage(current.item.album?.images || [], 300) ?? '',
-              duration: spotifyFormatDuration(current.item.duration_ms),
-              durationSec: Math.floor(current.item.duration_ms / 1000),
-            };
-
-            updateSpotifyPlayback(progressSec, durationSec, current.is_playing, trackInfo);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[useSpotify] Error refreshing now playing state:', err);
-    }
-  }, [isVIP, spotifyConnected, getValidAccessToken, currentTrack, updateSpotifyPlayback]);
+  const refreshNowPlaying = useCallback(() => playbackPoller.refresh(), []);
 
   useEffect(() => {
     if (!isVIP || !spotifyConnected) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
       setNowPlaying(null);
       return;
     }
-
-    // Always attempt initial fetch and load playlists on mount/connect
-    refreshNowPlaying().catch(err => {
-      console.warn('[useSpotify] Initial now playing refresh failed:', err);
-    });
-
-    const isSpotifyActive = currentTrack?.category === 'spotify' || !!nowPlaying?.is_playing;
-    const pollInterval = isPlaying ? 5000 : 12000;
-
-    // Start polling while Spotify is connected and active
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-    }
-    pollRef.current = setInterval(() => {
-      refreshNowPlaying().catch(err => {
-        console.warn('[useSpotify] Polled now playing refresh failed:', err);
-      });
-    }, pollInterval);
-
-    // Sync state and resume polling automatically on app foregrounding (coming from RAM)
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        refreshNowPlaying().catch(err => {
-          console.warn('[useSpotify] App active now playing refresh failed:', err);
-        });
-
-        // Ensure user playlists are loaded if state was empty
-        if (playlists.length === 0) {
-          getValidAccessToken().then(token => {
-            if (token) {
-              getUserPlaylists(token).then(data => {
-                if (data && data.length > 0) setPlaylists(data);
-              }).catch(() => { });
-            }
-          }).catch(() => { });
-        }
-
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-        }
-        pollRef.current = setInterval(() => {
-          refreshNowPlaying().catch(err => {
-            console.warn('[useSpotify] App active polled now playing refresh failed:', err);
-          });
-        }, pollInterval);
+    playbackPoller.setForeground(AppState.currentState !== 'background' && AppState.currentState !== 'inactive');
+    const unsubscribe = playbackPoller.subscribe((current, requestedAt) => {
+      if (!current) return;
+      setNowPlaying(current);
+      if (currentTrack?.category !== 'spotify' && (currentTrack?.category || !current.is_playing)) return;
+      if (current.item) {
+        const item = current.item;
+        updateSpotifyPlayback(current.progress_ms / 1000, item.duration_ms / 1000, current.is_playing, {
+          id: 'spotify_' + item.id,
+          title: item.name,
+          artist: item.artists?.map(a => a.name).join(', ') ?? 'Unknown Artist',
+          url: item.uri,
+          cover: spotifyGetBestImage(item.album?.images || [], 300) ?? '',
+          duration: spotifyFormatDuration(item.duration_ms),
+          durationSec: Math.floor(item.duration_ms / 1000),
+        }, requestedAt);
       } else {
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
+        updateSpotifyPlayback(0, 0, current.is_playing, undefined, requestedAt);
       }
-    });
+    }, isPlaying ? 5000 : 12000);
+    const appState = AppState.addEventListener('change', state => playbackPoller.setForeground(state === 'active'));
+    return () => { unsubscribe(); appState.remove(); };
+  }, [isVIP, spotifyConnected, currentTrack?.category, isPlaying, updateSpotifyPlayback]);
 
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      sub.remove();
-    };
-  }, [isVIP, spotifyConnected, refreshNowPlaying, currentTrack?.id, isPlaying]);
-
-  // Trigger immediate refresh when the playback timer reaches the end of the song
   useEffect(() => {
-    if (playbackRefreshRequest > 0 && spotifyConnected && isVIP) {
-      refreshNowPlaying().catch(err => {
-        console.warn('[useSpotify] Immediate end-of-track refresh failed:', err);
-      });
-    }
+    if (playbackRefreshRequest > 0 && spotifyConnected && isVIP) void refreshNowPlaying();
   }, [playbackRefreshRequest, spotifyConnected, isVIP, refreshNowPlaying]);
 
   // Auth Actions
@@ -335,7 +275,6 @@ export function useSpotify(): UseSpotifyReturn {
   const connect = useCallback(async () => {
     if (!isVIP || !request) return;
 
-    resetSpotifyRateLimitCooldown();
     setIsConnecting(true);
     try {
       await promptAsync();
@@ -407,15 +346,25 @@ export function useSpotify(): UseSpotifyReturn {
   }, [getValidAccessToken]);
 
   const addToQueue = useCallback(async (uri: string) => {
-    try {
-      const token = await getValidAccessToken();
-      if (token) {
-        await spotifyAddToQueue(token, uri);
-      }
-    } catch (err) {
-      console.warn('[useSpotify] Add to queue error:', err);
-    }
-  }, [getValidAccessToken]);
+    // URI-only callers must use the same queue editor as track menus, never
+    // Spotify's separate manual queue (which survives playlist replacements).
+    const [normalized] = normalizePlaybackUris(uri);
+    const token = await getValidAccessToken();
+    if (!token) throw new Error('Spotify session expired. Please reconnect Spotify.');
+    const track = await getTrack(token, normalized.split(':')[2]);
+    if (!track) throw new Error('Unable to load this Spotify song. Please try again.');
+    const added = await addMusicTrackToQueue({
+      id: 'spotify_' + track.id,
+      title: track.name,
+      artist: track.artists?.map(a => a.name).join(', ') ?? 'Unknown Artist',
+      url: normalized,
+      cover: spotifyGetBestImage(track.album?.images || [], 300) ?? '',
+      duration: spotifyFormatDuration(track.duration_ms),
+      durationSec: Math.floor(track.duration_ms / 1000),
+      category: 'spotify',
+    });
+    if (!added) throw new Error('Unable to update the Spotify queue.');
+  }, [getValidAccessToken, addMusicTrackToQueue]);
 
   const getQueueList = useCallback(async () => {
     try {
@@ -540,7 +489,6 @@ export function useSpotify(): UseSpotifyReturn {
 
   const refreshSession = useCallback(async () => {
     try {
-      resetSpotifyRateLimitCooldown();
       const token = await getValidAccessToken();
       if (token) {
         await Promise.all([
@@ -606,11 +554,11 @@ export function useSpotify(): UseSpotifyReturn {
 
       // Fetch Deezer HD artist photos as universal photo enrichment & fallback
       try {
-        const deezerRes = await fetch(
-          `https://api.deezer.com/search/artist?q=${encodeURIComponent(q)}&limit=30`
+        const deezerData = await fetchWithDeadline(
+          `https://api.deezer.com/search/artist?q=${encodeURIComponent(q)}&limit=30`, {},
+          async response => response.ok ? response.json() : null, 4000,
         );
-        if (deezerRes.ok) {
-          const deezerData = await deezerRes.json();
+        if (deezerData) {
           if (deezerData?.data && deezerData.data.length > 0) {
             const deezerArtists: SpotifyArtist[] = deezerData.data.map((item: any) => ({
               id: `deezer_${item.id}`,
@@ -656,11 +604,11 @@ export function useSpotify(): UseSpotifyReturn {
 
       // iTunes 3rd fallback
       try {
-        const itunesRes = await fetch(
-          `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=musicArtist&limit=30`
+        const data = await fetchWithDeadline(
+          `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=musicArtist&limit=30`, {},
+          async response => response.ok ? response.json() : null, 4000,
         );
-        if (itunesRes.ok) {
-          const data = await itunesRes.json();
+        if (data) {
           if (data?.results && data.results.length > 0) {
             const itunesArtists = data.results.map((item: any) => {
               // iTunes returns artworkUrl100 — upscale to 600x600 for HD

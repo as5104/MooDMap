@@ -209,6 +209,9 @@ export default function RootLayout() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (event === 'SIGNED_OUT') {
+          // Stop Spotify work immediately so another app account cannot retain
+          // access to the previous user's connected Spotify session.
+          void useTierStore.getState().deactivateVIP();
           // Clear all user data from the store
           resetForSignOut();
         } else {

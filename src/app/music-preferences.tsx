@@ -292,7 +292,7 @@ export default function MusicPreferencesSurveyScreen() {
     })();
   }, [user?.id, loadTopArtistsForSurvey, searchArtistsForSurvey]);
 
-  // Handle Artist Search debounced (150ms for instant search feel)
+  // Wait for a typing pause before spending an artist-search request.
   useEffect(() => {
     if (!artistSearchQuery.trim()) {
       setArtistSearchResults([]);
@@ -300,19 +300,20 @@ export default function MusicPreferencesSurveyScreen() {
       return;
     }
 
+    let cancelled = false;
     const timer = setTimeout(async () => {
       setIsSearchingArtists(true);
       try {
         const results = await searchArtistsForSurvey(artistSearchQuery);
-        setArtistSearchResults(results);
+        if (!cancelled) setArtistSearchResults(results);
       } catch (e) {
         console.warn('[Survey] Artist search error:', e);
       } finally {
-        setIsSearchingArtists(false);
+        if (!cancelled) setIsSearchingArtists(false);
       }
-    }, 250);
+    }, 450);
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [artistSearchQuery, searchArtistsForSurvey]);
 
   // Extract suggested genres dynamically from top artists' genre arrays

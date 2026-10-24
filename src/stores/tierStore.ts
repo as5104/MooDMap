@@ -4,6 +4,7 @@
 
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+import { cancelPendingPlayback, clearSpotifyRequestCache } from '../services/spotify';
 
 // SecureStore keys
 const KEYS = {
@@ -17,6 +18,16 @@ const KEYS = {
 
 // Dedup concurrent token refresh calls to avoid race conditions
 let _refreshPromise: Promise<string | null> | null = null;
+let credentialRevision = 0;
+let spotifySessionGeneration = 0;
+export function getSpotifySessionGeneration(): number { return spotifySessionGeneration; }
+let refreshRetryAt = 0;
+let credentialWrites: Promise<unknown> = Promise.resolve();
+function persistCredentials(task: () => Promise<unknown>): Promise<unknown> {
+  const result = credentialWrites.then(task);
+  credentialWrites = result.catch(() => {});
+  return result;
+}
 
 interface SpotifyTokens {
   accessToken: string;
@@ -58,6 +69,7 @@ export const useTierStore = create<TierState>((set, get) => ({
    * Load persisted VIP state and Spotify tokens from SecureStore
    */
   loadTierState: async () => {
+    const revision = credentialRevision;
     try {
       const [isVip, status, unlockedAt, accessToken, refreshToken, expiry] =
         await Promise.all([
@@ -69,6 +81,7 @@ export const useTierStore = create<TierState>((set, get) => ({
           SecureStore.getItemAsync(KEYS.SPOTIFY_TOKEN_EXPIRY),
         ]);
 
+      if (revision !== credentialRevision) return;
       const vipActive = isVip === 'true';
       const hasSpotify = !!(accessToken && refreshToken);
 
@@ -96,6 +109,7 @@ export const useTierStore = create<TierState>((set, get) => ({
    * Check VIP approval status from Supabase backend
    */
   checkVIPStatus: async (userId: string, email?: string) => {
+    const generation = spotifySessionGeneration;
     try {
       const { supabase } = require('../lib/supabase');
       const { data, error } = await supabase
@@ -105,20 +119,22 @@ export const useTierStore = create<TierState>((set, get) => ({
         .maybeSingle();
 
       if (error) throw error;
+      if (generation !== spotifySessionGeneration) return;
 
       if (data) {
         const status = data.status as 'pending' | 'approved' | 'declined';
         const isVip = status === 'approved';
         const unlockedAt = isVip ? data.updated_at : null;
 
-        await Promise.all([
+        await persistCredentials(() => Promise.all([
           SecureStore.setItemAsync(KEYS.IS_VIP, isVip ? 'true' : 'false'),
           SecureStore.setItemAsync(KEYS.VIP_STATUS, status),
           unlockedAt
             ? SecureStore.setItemAsync(KEYS.VIP_UNLOCKED_AT, unlockedAt)
             : SecureStore.deleteItemAsync(KEYS.VIP_UNLOCKED_AT),
-        ]);
+        ]));
 
+        if (generation !== spotifySessionGeneration) return;
         set({
           vipStatus: status,
           isVIP: isVip,
@@ -126,12 +142,13 @@ export const useTierStore = create<TierState>((set, get) => ({
         });
       } else {
         // If no request exists, default to none
-        await Promise.all([
+        await persistCredentials(() => Promise.all([
           SecureStore.setItemAsync(KEYS.IS_VIP, 'false'),
           SecureStore.setItemAsync(KEYS.VIP_STATUS, 'none'),
           SecureStore.deleteItemAsync(KEYS.VIP_UNLOCKED_AT),
-        ]);
+        ]));
 
+        if (generation !== spotifySessionGeneration) return;
         set({ vipStatus: 'none', isVIP: false, vipUnlockedAt: null });
       }
     } catch (e) {
@@ -143,6 +160,7 @@ export const useTierStore = create<TierState>((set, get) => ({
    * Create/Upsert a VIP request in Supabase
    */
   requestVIPAccess: async (userId: string, email: string): Promise<boolean> => {
+    const generation = spotifySessionGeneration;
     try {
       const { supabase } = require('../lib/supabase');
       const now = new Date().toISOString();
@@ -156,12 +174,14 @@ export const useTierStore = create<TierState>((set, get) => ({
         });
 
       if (error) throw error;
+      if (generation !== spotifySessionGeneration) return false;
 
-      await Promise.all([
+      await persistCredentials(() => Promise.all([
         SecureStore.setItemAsync(KEYS.IS_VIP, 'false'),
         SecureStore.setItemAsync(KEYS.VIP_STATUS, 'pending'),
-      ]);
+      ]));
 
+      if (generation !== spotifySessionGeneration) return false;
       set({ vipStatus: 'pending', isVIP: false });
       return true;
     } catch (e) {
@@ -174,23 +194,20 @@ export const useTierStore = create<TierState>((set, get) => ({
    * Deactivate VIP and clear all local and remote Spotify states
    */
   deactivateVIP: async () => {
+    credentialRevision++;
+    spotifySessionGeneration++;
+    set({ isVIP: false, vipStatus: 'none', vipUnlockedAt: null, spotifyConnected: false, spotifyTokens: null, isLoadingTier: false });
+    cancelPendingPlayback();
+    clearSpotifyRequestCache();
     try {
-      await Promise.all([
+      await persistCredentials(() => Promise.all([
         SecureStore.deleteItemAsync(KEYS.IS_VIP),
         SecureStore.deleteItemAsync(KEYS.VIP_STATUS),
         SecureStore.deleteItemAsync(KEYS.VIP_UNLOCKED_AT),
         SecureStore.deleteItemAsync(KEYS.SPOTIFY_ACCESS_TOKEN),
         SecureStore.deleteItemAsync(KEYS.SPOTIFY_REFRESH_TOKEN),
         SecureStore.deleteItemAsync(KEYS.SPOTIFY_TOKEN_EXPIRY),
-      ]);
-
-      set({
-        isVIP: false,
-        vipStatus: 'none',
-        vipUnlockedAt: null,
-        spotifyConnected: false,
-        spotifyTokens: null,
-      });
+      ]));
     } catch (e) {
       console.error('[Tier] VIP deactivation failed:', e);
     }
@@ -200,14 +217,15 @@ export const useTierStore = create<TierState>((set, get) => ({
    * Store Spotify OAuth tokens securely
    */
   setSpotifyTokens: async (tokens: SpotifyTokens) => {
+    const revision = ++credentialRevision;
+    refreshRetryAt = 0;
     try {
-      await Promise.all([
+      await persistCredentials(() => Promise.all([
         SecureStore.setItemAsync(KEYS.SPOTIFY_ACCESS_TOKEN, tokens.accessToken),
         SecureStore.setItemAsync(KEYS.SPOTIFY_REFRESH_TOKEN, tokens.refreshToken),
         SecureStore.setItemAsync(KEYS.SPOTIFY_TOKEN_EXPIRY, String(tokens.expiresAt)),
-      ]);
-
-      set({ spotifyConnected: true, spotifyTokens: tokens });
+      ]));
+      if (revision === credentialRevision) set({ spotifyConnected: true, spotifyTokens: tokens });
     } catch (e) {
       console.error('[Tier] Failed to save Spotify tokens:', e);
     }
@@ -217,14 +235,17 @@ export const useTierStore = create<TierState>((set, get) => ({
    * Clear Spotify tokens (disconnect)
    */
   clearSpotifyTokens: async () => {
+    credentialRevision++;
+    spotifySessionGeneration++;
+    set({ spotifyConnected: false, spotifyTokens: null });
+    cancelPendingPlayback();
+    clearSpotifyRequestCache();
     try {
-      await Promise.all([
+      await persistCredentials(() => Promise.all([
         SecureStore.deleteItemAsync(KEYS.SPOTIFY_ACCESS_TOKEN),
         SecureStore.deleteItemAsync(KEYS.SPOTIFY_REFRESH_TOKEN),
         SecureStore.deleteItemAsync(KEYS.SPOTIFY_TOKEN_EXPIRY),
-      ]);
-
-      set({ spotifyConnected: false, spotifyTokens: null });
+      ]));
     } catch (e) {
       console.error('[Tier] Failed to clear Spotify tokens:', e);
     }
@@ -246,20 +267,29 @@ export const useTierStore = create<TierState>((set, get) => ({
 
     // Deduplicate concurrent refresh calls — if one is already in-flight, reuse it
     if (_refreshPromise) return _refreshPromise;
+    if (Date.now() < refreshRetryAt) return spotifyTokens.expiresAt > Date.now() ? spotifyTokens.accessToken : null;
+    const revision = credentialRevision;
 
     _refreshPromise = (async () => {
       try {
         const { refreshSpotifyToken } = require('../services/spotify');
         const res = await refreshSpotifyToken(spotifyTokens.refreshToken);
+        if (revision !== credentialRevision) return null;
         if (res.tokens) {
           await get().setSpotifyTokens(res.tokens);
-          return res.tokens.accessToken;
+          return get().spotifyTokens?.accessToken === res.tokens.accessToken ? res.tokens.accessToken : null;
         } else if (res.isRevoked) {
           console.warn('[Tier] Spotify refreshToken is revoked. Clearing stored credentials.');
           await get().clearSpotifyTokens();
+        } else {
+          refreshRetryAt = Date.now() + Math.max(30_000, res.retryAfterMs ?? 0);
+          // During the early-refresh buffer the existing token may still be usable.
+          if (spotifyTokens.expiresAt > Date.now()) return spotifyTokens.accessToken;
         }
       } catch (e) {
+        refreshRetryAt = Date.now() + 30_000;
         console.error('[Tier] Token refresh failed:', e);
+        if (revision === credentialRevision && spotifyTokens.expiresAt > Date.now()) return spotifyTokens.accessToken;
       }
       return null;
     })();

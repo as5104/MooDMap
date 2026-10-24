@@ -12,8 +12,11 @@
  */
 
 import * as AuthSession from 'expo-auth-session';
-import * as WebBrowser from 'expo-web-browser';
 import { File, Paths } from 'expo-file-system';
+import * as WebBrowser from 'expo-web-browser';
+import { createSpotifyPlaybackController, normalizePlaybackUris } from './spotifyPlayback';
+import { createSpotifyReadCoordinator } from './spotifyRequests';
+import { fetchWithDeadline as spotifyNetworkFetch } from './spotifyNetwork';
 
 // Config
 
@@ -160,7 +163,7 @@ export async function exchangeCodeForTokens(
   codeVerifier: string
 ): Promise<SpotifyTokens | null> {
   try {
-    const response = await fetch(SPOTIFY_TOKEN_ENDPOINT, {
+    return await spotifyNetworkFetch(SPOTIFY_TOKEN_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -172,19 +175,20 @@ export async function exchangeCodeForTokens(
         client_id: SPOTIFY_CLIENT_ID,
         code_verifier: codeVerifier,
       }).toString(),
+    }, async response => {
+      if (!response.ok) {
+        console.warn('[Spotify] Token exchange failed:', response.status);
+        return null;
+      }
+
+      const data = await response.json();
+      if (!validTokenResponse(data) || typeof data.refresh_token !== 'string' || !data.refresh_token) return null;
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresAt: Date.now() + data.expires_in * 1000,
+      };
     });
-
-    if (!response.ok) {
-      console.warn('[Spotify] Token exchange failed:', response.status);
-      return null;
-    }
-
-    const data = await response.json();
-    return {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      expiresAt: Date.now() + data.expires_in * 1000,
-    };
   } catch (e) {
     console.warn('[Spotify] Token exchange error:', e);
     return null;
@@ -196,9 +200,9 @@ export async function exchangeCodeForTokens(
  */
 export async function refreshSpotifyToken(
   refreshToken: string
-): Promise<{ tokens: SpotifyTokens | null; isRevoked?: boolean }> {
+): Promise<{ tokens: SpotifyTokens | null; isRevoked?: boolean; retryAfterMs?: number }> {
   try {
-    const response = await fetch(SPOTIFY_TOKEN_ENDPOINT, {
+    return await spotifyNetworkFetch(SPOTIFY_TOKEN_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -208,27 +212,34 @@ export async function refreshSpotifyToken(
         refresh_token: refreshToken,
         client_id: SPOTIFY_CLIENT_ID,
       }).toString(),
+    }, async response => {
+      if (response.status === 429) {
+        const seconds = Number(response.headers.get('Retry-After')) || 30;
+        return { tokens: null, retryAfterMs: Math.max(1, seconds) * 1000 };
+      }
+      if (response.status === 400 || response.status === 401) {
+        // A captive portal/proxy or failed client authentication must not erase
+        // a previously connected account. Only Spotify's explicit revocation does.
+        const data = await response.json();
+        return { tokens: null, isRevoked: data?.error === 'invalid_grant' };
+      }
+
+      if (!response.ok) {
+        console.warn('[Spotify] Token refresh failed:', response.status);
+        return { tokens: null, isRevoked: false };
+      }
+
+      const data = await response.json();
+      if (!validTokenResponse(data)) return { tokens: null, isRevoked: false };
+      return {
+        tokens: {
+          accessToken: data.access_token,
+          refreshToken: typeof data.refresh_token === 'string' && data.refresh_token ? data.refresh_token : refreshToken,
+          expiresAt: Date.now() + data.expires_in * 1000,
+        },
+        isRevoked: false,
+      };
     });
-
-    if (response.status === 400 || response.status === 401) {
-      console.warn('[Spotify] Token refresh revoked or invalid:', response.status);
-      return { tokens: null, isRevoked: true };
-    }
-
-    if (!response.ok) {
-      console.warn('[Spotify] Token refresh failed:', response.status);
-      return { tokens: null, isRevoked: false };
-    }
-
-    const data = await response.json();
-    return {
-      tokens: {
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token || refreshToken,
-        expiresAt: Date.now() + data.expires_in * 1000,
-      },
-      isRevoked: false,
-    };
   } catch (e) {
     console.warn('[Spotify] Token refresh error:', e);
     return { tokens: null, isRevoked: false };
@@ -236,6 +247,11 @@ export async function refreshSpotifyToken(
 }
 
 // API Helpers
+
+function validTokenResponse(data: any): boolean {
+  return !!data && typeof data.access_token === 'string' && data.access_token.length > 0
+    && Number.isFinite(data.expires_in) && data.expires_in > 0;
+}
 
 let _searchRateLimitedUntil = 0;
 let _playerRateLimitedUntil = 0;
@@ -247,12 +263,10 @@ export function isSpotifySearchRateLimited(): boolean {
   return Date.now() < _searchRateLimitedUntil;
 }
 
-/**
- * Reset any active in-memory Spotify rate-limit cooldown.
- */
-export function resetSpotifyRateLimitCooldown(): void {
-  _searchRateLimitedUntil = 0;
-  _playerRateLimitedUntil = 0;
+const spotifyReads = createSpotifyReadCoordinator();
+
+export function clearSpotifyRequestCache(): void {
+  spotifyReads.clear();
 }
 
 export const SPOTIFY_ARTIST_CACHE_FILE = new File(Paths.document, 'spotify_artist_cache.json');
@@ -337,23 +351,6 @@ export async function saveArtistsToPersistentCache(artists: SpotifyArtist[]): Pr
   }
 }
 
-let _searchQueueChain: Promise<any> = Promise.resolve();
-
-function enqueueSearchRequest<T>(task: () => Promise<T | null>): Promise<T | null> {
-  const next = _searchQueueChain.then(async () => {
-    // If cooldown was activated while waiting in queue, abort before hitting the network
-    if (Date.now() < _searchRateLimitedUntil) {
-      return null;
-    }
-    const result = await task();
-    // 100ms gentle spacing between search requests to prevent Spotify burst limits
-    await new Promise(r => setTimeout(r, 100));
-    return result;
-  });
-  _searchQueueChain = next.then(() => { }, () => { });
-  return next;
-}
-
 /**
  * Internal executor for an authenticated request to the Spotify API.
  */
@@ -362,12 +359,14 @@ async function executeSpotifyFetch<T>(
   endpoint: string,
   method: string = 'GET',
   body?: any,
-  isSearch: boolean = false
+  isSearch: boolean = false,
+  strict: boolean = false
 ): Promise<T | null> {
   const cooldown = isSearch ? _searchRateLimitedUntil : _playerRateLimitedUntil;
 
   // Fail-fast if currently in cooldown for this endpoint category
   if (Date.now() < cooldown) {
+    if (strict) throw Object.assign(new Error('Spotify is temporarily rate limited. Please try again shortly.'), { status: 429 });
     return null;
   }
 
@@ -379,54 +378,70 @@ async function executeSpotifyFetch<T>(
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await fetch(`${SPOTIFY_API_BASE}${endpoint}`, {
+    return await spotifyNetworkFetch(`${SPOTIFY_API_BASE}${endpoint}`, {
       method,
       headers,
       ...(body ? { body: JSON.stringify(body) } : {}),
+    }, async response => {
+      if (response.ok && method !== 'GET' && !endpoint.startsWith('/me/player/')) spotifyReads.invalidate();
+      if (response.status === 204) return null;
+
+      // Honor Retry-After across all Web API endpoint categories.
+      if (response.status === 429) {
+        const rawRetry = parseInt(response.headers.get('Retry-After') || '10', 10);
+        const retryAfter = Math.max(isNaN(rawRetry) ? 10 : rawRetry, 1);
+        // Spotify's rolling quota is app-wide. A 429 on search also pauses
+        // player/library traffic; switching endpoints must not evade Retry-After.
+        _searchRateLimitedUntil = _playerRateLimitedUntil = Math.max(
+          _searchRateLimitedUntil, _playerRateLimitedUntil, Date.now() + retryAfter * 1000,
+        );
+        console.warn(`[Spotify] Rate limited (429) on ${endpoint}. Cooldown active for ${retryAfter}s (raw: ${rawRetry}s).`);
+        if (strict) throw Object.assign(new Error(`Spotify is rate limited. Please try again in ${retryAfter} seconds.`), { status: 429 });
+        return null;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        if (strict) {
+          let message = `Spotify request failed (${response.status}).`;
+          try { message = JSON.parse(errorText)?.error?.message || message; } catch { }
+          if (response.status === 401) message = 'Spotify session expired. Please reconnect Spotify.';
+          throw Object.assign(new Error(message), { status: response.status });
+        }
+        if (response.status === 403 && endpoint.includes('/artists')) {
+          console.log(`[Spotify] Catalog endpoint restricted (403) for ${endpoint}; falling back to search`);
+        } else {
+          console.warn(`[Spotify] API error ${response.status} for ${endpoint}:`, errorText);
+        }
+        return null;
+      }
+
+      // Player writes are acknowledgments, not JSON resources. Some successful
+      // responses use 200/202 with plain text instead of the documented empty
+      // 204. Do not turn an executed command into a failure by parsing its body.
+      // Keep JSON validation for reads and playlist writes that return data.
+      if (endpoint.startsWith('/me/player/') && method !== 'GET') return null;
+
+      const text = await response.text();
+      if (!text || text.trim() === '') return null;
+
+      try {
+        return JSON.parse(text) as T;
+      } catch (e) {
+        if (strict) throw new Error('Spotify returned an unreadable response. Please try again.');
+        return null;
+      }
     });
-
-    if (response.status === 204) return null;
-
-    // Handle rate limiting — separate search cooldown from player/library endpoints
-    if (response.status === 429) {
-      const rawRetry = parseInt(response.headers.get('Retry-After') || '10', 10);
-      const retryAfter = Math.min(Math.max(isNaN(rawRetry) ? 10 : rawRetry, 5), isSearch ? 30 : 10);
-      if (isSearch) {
-        _searchRateLimitedUntil = Date.now() + retryAfter * 1000;
-      } else {
-        _playerRateLimitedUntil = Date.now() + retryAfter * 1000;
-      }
-      console.warn(`[Spotify] Rate limited (429) on ${endpoint}. Cooldown active for ${retryAfter}s (raw: ${rawRetry}s).`);
-      return null;
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      if (response.status === 403 && endpoint.includes('/artists')) {
-        console.log(`[Spotify] Catalog endpoint restricted (403) for ${endpoint}; falling back to search`);
-      } else {
-        console.warn(`[Spotify] API error ${response.status} for ${endpoint}:`, errorText);
-      }
-      return null;
-    }
-
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-
-    try {
-      return JSON.parse(text) as T;
-    } catch (e) {
-      return null;
-    }
   } catch (e) {
     console.warn(`[Spotify] Fetch error for ${endpoint}:`, e);
+    if (strict) throw e;
     return null;
   }
 }
 
 /**
  * Make an authenticated request to the Spotify API.
- * Search queries are automatically queued and spaced by 100ms to eliminate burst rate limits.
+ * Identical reads are shared; catalog requests are cached and paced.
  */
 async function spotifyFetch<T>(
   accessToken: string,
@@ -435,12 +450,15 @@ async function spotifyFetch<T>(
   body?: any
 ): Promise<T | null> {
   const isSearch = endpoint.startsWith('/search');
-  if (isSearch) {
-    return enqueueSearchRequest(() =>
-      executeSpotifyFetch<T>(accessToken, endpoint, method, body, true)
+  if (endpoint.startsWith('/me/player') && method !== 'GET') {
+    return spotifyPlayback.command(accessToken, endpoint, method, body) as Promise<T | null>;
+  }
+  if (method === 'GET') {
+    return spotifyReads.read(accessToken, endpoint, () =>
+      executeSpotifyFetch<T>(accessToken, endpoint, method, body, isSearch),
     );
   }
-  return executeSpotifyFetch<T>(accessToken, endpoint, method, body, false);
+  return executeSpotifyFetch<T>(accessToken, endpoint, method, body, isSearch);
 }
 
 // User Data Endpoints
@@ -486,10 +504,50 @@ export async function getRecentlyPlayed(
 
 // Playback Endpoints
 
+const playbackQueueFile = new File(Paths.document, 'spotify_playback_queue.json');
+const spotifyPlayback = createSpotifyPlaybackController({
+  request: <T>(token: string, path: string, method = 'GET', body?: unknown) =>
+    executeSpotifyFetch<T>(token, path, method, body, false, true),
+  loadPlaylist: async (userId) => {
+    try {
+      const entries = playbackQueueFile.exists ? JSON.parse(await playbackQueueFile.text()) : {};
+      return typeof entries[userId] === 'string' ? entries[userId] : null;
+    } catch { return null; }
+  },
+  savePlaylist: async (userId, playlistId) => {
+    let entries: Record<string, string> = {};
+    try { if (playbackQueueFile.exists) entries = JSON.parse(await playbackQueueFile.text()); } catch { }
+    entries[userId] = playlistId;
+    try { playbackQueueFile.write(JSON.stringify(entries)); } catch (error) {
+      console.warn('[Spotify] Could not persist playback queue ID:', error);
+    }
+  },
+  delay: ms => new Promise(resolve => setTimeout(resolve, ms)),
+});
+
 export async function getCurrentlyPlaying(
-  accessToken: string
+  accessToken: string,
+  throwOnError = false,
 ): Promise<SpotifyCurrentTrack | null> {
-  return spotifyFetch<SpotifyCurrentTrack>(accessToken, '/me/player/currently-playing');
+  const data = await spotifyReads.read(accessToken, '/me/player/currently-playing', () =>
+    executeSpotifyFetch<SpotifyCurrentTrack>(accessToken, '/me/player/currently-playing', 'GET', undefined, false, throwOnError),
+  );
+  if (!data) return null;
+  // Never feed invalid numbers or partial track objects into native progress/cover views.
+  const item = data.item;
+  if (typeof data.is_playing !== 'boolean' || (data.progress_ms !== null && (!Number.isFinite(data.progress_ms) || data.progress_ms < 0))
+    || (item && (typeof item.id !== 'string' || typeof item.uri !== 'string' || typeof item.name !== 'string'
+      || !Number.isFinite(item.duration_ms) || item.duration_ms <= 0
+      || !Array.isArray(item.artists) || item.artists.some(artist => !artist || typeof artist.name !== 'string')
+      || !item.album || !Array.isArray(item.album.images)))) {
+    if (throwOnError) throw new Error('Spotify returned incomplete playback information. Please try again.');
+    return null;
+  }
+  return { ...data, progress_ms: data.progress_ms ?? 0 };
+}
+
+export function cancelPendingPlayback(): void {
+  spotifyPlayback.cancelPending();
 }
 
 export async function getPlaybackState(
@@ -505,30 +563,18 @@ export async function play(
   contextUri?: string,
   offset?: { position: number } | { uri: string }
 ): Promise<void> {
-  const body: any = {};
-  if (contextUri) {
-    body.context_uri = contextUri;
-    if (offset) {
-      body.offset = offset;
-    }
-  } else if (uris) {
-    body.uris = Array.isArray(uris) ? uris : [uris];
-  }
-  if (positionMs !== undefined) {
-    body.position_ms = positionMs;
-  }
-  await spotifyFetch(
-    accessToken,
-    '/me/player/play',
-    'PUT',
-    body
-  );
+  await spotifyPlayback.play(accessToken, uris, positionMs, contextUri, offset);
 }
 
 export async function getQueue(
   accessToken: string
 ): Promise<{ currently_playing: any; queue: any[] } | null> {
   return spotifyFetch<{ currently_playing: any; queue: any[] }>(accessToken, '/me/player/queue');
+}
+
+/** Edit an active managed playlist in place where the device supports it. */
+export async function updatePlaybackQueue(accessToken: string, uris: string[], positionMs?: number): Promise<void> {
+  await spotifyPlayback.updateQueue(accessToken, uris, positionMs);
 }
 
 export async function pause(accessToken: string): Promise<void> {
@@ -620,55 +666,17 @@ export async function getPlaylistTracks(
 
 export async function createPlaylist(
   accessToken: string,
-  userId: string,
+  _userId: string,
   name: string,
   description?: string
 ): Promise<SpotifyPlaylist | null> {
-  const body: any = {
-    name,
-    description: description ?? '',
-  };
-
+  // The current endpoint avoids a second POST after a legacy route failure.
   try {
-    const endpoint = userId
-      ? `/users/${encodeURIComponent(userId)}/playlists`
-      : `/me/playlists`;
-
-    let res = await fetch(`${SPOTIFY_API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (res.status === 200 || res.status === 201) {
-      const data = await res.json();
-      return data as SpotifyPlaylist;
-    }
-
-    // If userId route failed, try /me/playlists fallback
-    if (userId) {
-      const fallbackRes = await fetch(`${SPOTIFY_API_BASE}/me/playlists`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-      if (fallbackRes.status === 200 || fallbackRes.status === 201) {
-        const data = await fallbackRes.json();
-        return data as SpotifyPlaylist;
-      }
-    }
-
-    const errText = await res.text();
-    console.warn(`[Spotify] Create playlist failed (${res.status}):`, errText);
-    return null;
-  } catch (err) {
-    console.warn('[Spotify] Create playlist exception:', err);
+    return await executeSpotifyFetch<SpotifyPlaylist>(accessToken, '/me/playlists', 'POST', {
+      name, description: description ?? '',
+    }, false, true);
+  } catch (error) {
+    console.warn('[Spotify] Create playlist failed:', error);
     return null;
   }
 }
@@ -688,78 +696,17 @@ export async function addTracksToPlaylist(
   playlistId: string,
   uris: string[]
 ): Promise<AddTracksResult> {
-  if (!uris || uris.length === 0) {
-    return { success: false, error: 'No track URIs provided' };
-  }
-  const formattedUris = uris.map(formatSpotifyTrackUri).filter(Boolean);
-  if (formattedUris.length === 0) {
-    return { success: false, error: 'Invalid Spotify track URI' };
-  }
-
-  const cleanPlaylistId = playlistId.replace('spotify:playlist:', '').replace('spotify_', '').trim();
-  const endpoint = `${SPOTIFY_API_BASE}/playlists/${cleanPlaylistId}/items`;
-
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        uris: formattedUris,
-      }),
-    });
-
-    if (response.status === 200 || response.status === 201) {
-      const text = await response.text();
-      let data: any = {};
-      try {
-        if (text) data = JSON.parse(text);
-      } catch { }
-      return { success: true, snapshot_id: data.snapshot_id || 'ok', statusCode: response.status };
-    }
-
-    const errText = await response.text();
-    let parsedMsg = '';
-    try {
-      const errObj = JSON.parse(errText);
-      parsedMsg = errObj?.error?.message || errObj?.error_description || '';
-    } catch { }
-
-    if (response.status === 403) {
-      return {
-        success: false,
-        statusCode: 403,
-        error: 'You can only add songs to playlists you own or collaborate on.',
-      };
-    }
-
-    if (response.status === 401) {
-      return {
-        success: false,
-        statusCode: 401,
-        error: 'Spotify session expired. Please tap Reconnect.',
-      };
-    }
-
-    if (response.status === 404) {
-      return {
-        success: false,
-        statusCode: 404,
-        error: 'Playlist not found on Spotify.',
-      };
-    }
-
-    console.warn(`[Spotify] Add tracks to playlist failed (${response.status}):`, errText);
-    return {
-      success: false,
-      statusCode: response.status,
-      error: parsedMsg || `Spotify error (${response.status})`,
-    };
-  } catch (err: any) {
-    console.warn('[Spotify] Add tracks to playlist exception:', err);
-    return { success: false, error: err?.message || 'Network error' };
+    const formattedUris = normalizePlaybackUris(uris);
+    if (formattedUris.length > 100) return { success: false, error: 'Add at most 100 songs at a time.' };
+    const cleanPlaylistId = playlistId.replace('spotify:playlist:', '').replace('spotify_', '').trim();
+    if (!/^[a-zA-Z0-9]{22}$/.test(cleanPlaylistId)) return { success: false, error: 'Invalid Spotify playlist ID.' };
+    const data = await executeSpotifyFetch<{ snapshot_id: string }>(accessToken,
+      `/playlists/${cleanPlaylistId}/items`, 'POST', { uris: formattedUris }, false, true);
+    return { success: true, snapshot_id: data?.snapshot_id, statusCode: 201 };
+  } catch (error) {
+    const err = error as Error & { status?: number };
+    return { success: false, error: err.message || 'Unable to add songs.', statusCode: err.status };
   }
 }
 
@@ -850,16 +797,10 @@ export async function searchDeezerArtists(
   if (!cleanQ) return [];
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(
-      `https://api.deezer.com/search/artist?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 25)}`,
-      { signal: controller.signal }
+    const data = await spotifyNetworkFetch(
+      `https://api.deezer.com/search/artist?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 25)}`, {},
+      async response => response.ok ? response.json() : null, 4000,
     );
-    clearTimeout(timeout);
-
-    if (!res.ok) return [];
-    const data = await res.json();
     if (!data?.data || !Array.isArray(data.data)) return [];
 
     return data.data.map((item: any) => ({
@@ -892,16 +833,10 @@ export async function searchDeezerTracks(
   if (!cleanQ) return [];
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(
-      `https://api.deezer.com/search?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 30)}`,
-      { signal: controller.signal }
+    const data = await spotifyNetworkFetch(
+      `https://api.deezer.com/search?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 30)}`, {},
+      async response => response.ok ? response.json() : null, 4000,
     );
-    clearTimeout(timeout);
-
-    if (!res.ok) return [];
-    const data = await res.json();
     if (!data?.data || !Array.isArray(data.data)) return [];
 
     return data.data.map((item: any) => ({
@@ -950,16 +885,10 @@ export async function searchDeezerAlbums(
   if (!cleanQ) return [];
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(
-      `https://api.deezer.com/search/album?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 25)}`,
-      { signal: controller.signal }
+    const data = await spotifyNetworkFetch(
+      `https://api.deezer.com/search/album?q=${encodeURIComponent(cleanQ)}&limit=${Math.min(limit, 25)}`, {},
+      async response => response.ok ? response.json() : null, 4000,
     );
-    clearTimeout(timeout);
-
-    if (!res.ok) return [];
-    const data = await res.json();
     if (!data?.data || !Array.isArray(data.data)) return [];
 
     return data.data.map((item: any) => ({
@@ -992,16 +921,10 @@ export async function getArtistiTunesTopTracks(
   if (!cleanName) return [];
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(cleanName)}&entity=song&limit=${Math.min(limit, 25)}`,
-      { signal: controller.signal }
+    const data = await spotifyNetworkFetch(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(cleanName)}&entity=song&limit=${Math.min(limit, 25)}`, {},
+      async response => response.ok ? response.json() : null, 4000,
     );
-    clearTimeout(timeout);
-
-    if (!res.ok) return [];
-    const data = await res.json();
     if (!data?.results || !Array.isArray(data.results)) return [];
 
     const tracks: SpotifyTrack[] = [];
@@ -1413,10 +1336,10 @@ export function getBestImage(
   images: SpotifyImage[],
   targetSize: number = 300
 ): string | null {
-  if (!images?.length) return null;
+  if (!Array.isArray(images)) return null;
 
   // Sort by how close width is to target
-  const sorted = [...images].sort((a, b) => {
+  const sorted = images.filter(image => image && typeof image.url === 'string' && image.url).sort((a, b) => {
     const diffA = Math.abs((a.width ?? 640) - targetSize);
     const diffB = Math.abs((b.width ?? 640) - targetSize);
     return diffA - diffB;

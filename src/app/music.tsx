@@ -9,7 +9,7 @@ import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, type ErrorBoundaryProps } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,10 +28,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, {
-  cancelAnimation,
   Easing,
   runOnJS,
   SharedValue,
@@ -47,6 +47,8 @@ import Svg, { Circle, Defs, G, Mask, Path, Rect } from 'react-native-svg';
 import { AddToSpotifyPlaylistModal, type SpotifyTrackTarget } from '../components/music/AddToSpotifyPlaylistModal';
 import { FloatingMiniPlayer } from '../components/music/FloatingMiniPlayer';
 import { MusicCover } from '../components/music/MusicCover';
+import { NowPlayingSignal } from '../components/music/NowPlayingSignal';
+import { RefreshOnlyViewport } from '../components/music/RefreshOnlyViewport';
 import { AnimatedPressable, GlassCard, GradientBackground } from '../components/ui';
 import { useBlurTarget } from '../components/ui/GradientBackground';
 import { Colors } from '../constants/colors';
@@ -54,6 +56,7 @@ import { Radius, SCREEN_PADDING, Spacing } from '../constants/layout';
 import { Fonts, FontSizes } from '../constants/typography';
 import { Playlist, Track, TRACKS_LIBRARY, useMusic, usePlaybackTime } from '../context/MusicContext';
 import { useSpotify } from '../hooks/useSpotify';
+import { usePlaybackRotation } from '../hooks/usePlaybackRotation';
 import { isTrackComfort } from '../services/comfortBoxService';
 import { getMusicPreferences, saveMusicPreferences } from '../services/musicPreferenceService';
 import { getSmartRecommendations, MOOD_GENRE_MAP } from '../services/recommendationEngine';
@@ -960,17 +963,20 @@ const OverviewSkeleton = React.memo(() => {
       {/* Hero Card Skeleton */}
       <View style={styles.spotifyHeroShell}>
         <View style={styles.spotifyHeroCard}>
-          <View style={styles.spotifyHeroGlow} />
-          <View style={styles.spotifyHeroContent}>
-            <SkeletonBlock style={{ width: 100, height: 11, borderRadius: 6, marginBottom: 10 }} />
-            <SkeletonBlock style={{ width: 165, height: 22, borderRadius: 8, marginBottom: 6 }} />
-            <SkeletonBlock style={{ width: 125, height: 22, borderRadius: 8, marginBottom: 12 }} />
-            <SkeletonBlock style={{ width: 195, height: 12, borderRadius: 6, marginBottom: 16 }} />
-            <SkeletonBlock style={{ width: 108, height: 32, borderRadius: 16 }} />
-          </View>
           <View style={styles.spotifyHeroArtworkWrap}>
-            <SkeletonBlock style={{ width: 92, height: 92, borderRadius: 18 }} />
+            <SkeletonBlock style={styles.spotifyHeroArtwork} />
+            <LinearGradient colors={['#101712', 'rgba(16,23,18,0.92)', 'rgba(16,23,18,0.3)', 'rgba(16,23,18,0)']} locations={[0, 0.12, 0.6, 1]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
           </View>
+          <LinearGradient colors={['rgba(16,23,18,0)', 'rgba(16,23,18,0.5)', '#101712']} locations={[0, 0.36, 0.78]} style={StyleSheet.absoluteFill} />
+          <SkeletonBlock style={{ width: 116, height: 20, borderRadius: 10 }} />
+          <View style={styles.spotifyHeroBody}>
+            <View style={styles.spotifyHeroContent}>
+              <SkeletonBlock style={{ width: '84%', height: 30, borderRadius: 7, marginBottom: 8 }} />
+              <SkeletonBlock style={{ width: '60%', height: 30, borderRadius: 7, marginBottom: 12 }} />
+              <SkeletonBlock style={{ width: '65%', height: 13, borderRadius: 6 }} />
+            </View>
+          </View>
+          <SkeletonBlock style={{ width: 156, height: 46, borderRadius: 23, marginTop: 18 }} />
         </View>
       </View>
 
@@ -1031,14 +1037,14 @@ const OverviewSkeleton = React.memo(() => {
 });
 OverviewSkeleton.displayName = 'OverviewSkeleton';
 
-const ArtistGridSkeleton = React.memo(() => {
+const ArtistGridSkeleton = React.memo(({ avatarSize = 92 }: { avatarSize?: number }) => {
   return (
-    <View style={styles.artistGridSectionWrap}>
+    <View style={[styles.artistGridSectionWrap, { flex: 1 }]}>
       <View style={styles.artistGrid}>
         {Array.from({ length: 9 }).map((_, i) => (
           <View key={`skel-artist-${i}`} style={styles.artistGridItem}>
-            <View style={styles.artistGridAvatarContainer}>
-              <View style={[styles.artistGridAvatarWrap, { borderColor: 'rgba(255, 255, 255, 0.08)' }]}>
+            <View style={[styles.artistGridAvatarContainer, { width: avatarSize, height: avatarSize }]}>
+              <View style={[styles.artistGridAvatarWrap, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, borderColor: 'rgba(255, 255, 255, 0.08)' }]}>
                 <SkeletonBlock style={{ width: '100%', height: '100%', borderRadius: 46 }} />
               </View>
             </View>
@@ -1072,10 +1078,12 @@ const ArtistGridCard = React.memo(({
   artist,
   isPlaying,
   onSelect,
+  avatarSize,
 }: {
   artist: any;
   isPlaying: boolean;
   onSelect: (artist: any) => void;
+  avatarSize: number;
 }) => {
   const handlePress = useCallback(() => {
     onSelect(artist);
@@ -1096,9 +1104,10 @@ const ArtistGridCard = React.memo(({
       style={styles.artistGridItem}
       onPress={handlePress}
     >
-      <View style={styles.artistGridAvatarContainer}>
+      <View style={[styles.artistGridAvatarContainer, { width: avatarSize, height: avatarSize }]}>
         <View style={[
           styles.artistGridAvatarWrap,
+          { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 },
           isPlaying && styles.artistGridAvatarWrapActive,
         ]}>
           {bestImage ? (
@@ -1138,12 +1147,14 @@ ArtistGridCard.displayName = 'ArtistGridCard';
 const ArtistPageItem = React.memo(({
   pageArtists,
   containerWidth,
+  avatarSize,
   currentPlayingTrackArtist,
   isPlaying,
   onSelect,
 }: {
   pageArtists: any[];
   containerWidth: number;
+  avatarSize: number;
   currentPlayingTrackArtist?: string | null;
   isPlaying: boolean;
   onSelect: (artist: any) => void;
@@ -1162,6 +1173,7 @@ const ArtistPageItem = React.memo(({
             <ArtistGridCard
               key={artist.id || artist.name}
               artist={artist}
+              avatarSize={avatarSize}
               isPlaying={isArtistPlaying}
               onSelect={onSelect}
             />
@@ -1205,7 +1217,6 @@ const SpotifyListView = React.memo(({
     loadPlaylists: loadSpotifyPlaylists,
     search: searchSpotify,
     isConnected,
-    addToQueue: spotifyAddToQueueHook,
     recentlyPlayed,
     topTracks,
     loadRecentlyPlayed,
@@ -1215,9 +1226,9 @@ const SpotifyListView = React.memo(({
   const {
     currentTrack,
     isPlaying,
+    addToQueue: addSpotifyTrackToQueue,
     favorites: spotifyFavorites,
     toggleFavorite: spotifyToggleFavorite,
-    setQueue: setMusicQueue,
     pause,
     resume,
     next,
@@ -1319,6 +1330,10 @@ const SpotifyListView = React.memo(({
   const ARTISTS_PER_PAGE = 9;
   const artistPagerRef = useRef<FlatList>(null);
   const [artistContainerWidth, setArtistContainerWidth] = useState(SCREEN_WIDTH - 2 * SCREEN_PADDING);
+  const [artistStageHeight, setArtistStageHeight] = useState(450);
+  const { fontScale } = useWindowDimensions();
+  // Reserve three label rows and pagination; the artwork adapts to the remaining viewport.
+  const artistAvatarSize = Math.max(20, Math.min(92, Math.floor(artistContainerWidth * 0.29), Math.floor((artistStageHeight - 80 - 72 - 156 * fontScale) / 3)));
   const artistSpotlightsRef = useRef<any[]>([]);
   const resolvedPagesRef = useRef<Set<number>>(new Set());
   const resolvingPagesRef = useRef<Set<number>>(new Set());
@@ -1609,6 +1624,10 @@ const SpotifyListView = React.memo(({
   const [artistProfileTrackHeading, setArtistProfileTrackHeading] = useState<'Top Songs' | 'Latest Songs'>('Top Songs');
   const [loadingArtistProfile, setLoadingArtistProfile] = useState(false);
   const [refreshingArtistProfile, setRefreshingArtistProfile] = useState(false);
+  // Each visit/refresh owns its results. Back, a newer visit, and unmount
+  // invalidate pending work so it cannot reopen or overwrite a profile.
+  const artistProfileRequestRef = useRef(0);
+  useEffect(() => () => { artistProfileRequestRef.current += 1; }, []);
   // Album detail state
   const [selectedAlbumDetail, setSelectedAlbumDetail] = useState<any | null>(null);
   const [albumDetailTracks, setAlbumDetailTracks] = useState<any[]>([]);
@@ -1618,7 +1637,7 @@ const SpotifyListView = React.memo(({
   const liquidGlassAvailable = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 
   // Animation values for rotating cover and expanding droplet player
-  const coverRotation = useSharedValue(0);
+  const coverRotation = usePlaybackRotation(isPlaying && currentTrack?.category === 'spotify');
   const expansionProgress = useSharedValue(0);
 
   // Tab indicator & content animations for smooth switching
@@ -1644,23 +1663,6 @@ const SpotifyListView = React.memo(({
   const animatedTabContentStyle = useAnimatedStyle(() => ({
     opacity: tabContentOpacity.value,
   }));
-
-  // Animate rotating vinyl cover when track is playing
-  useEffect(() => {
-    if (isPlaying) {
-      coverRotation.value = coverRotation.value % 360;
-      coverRotation.value = withRepeat(
-        withTiming(coverRotation.value + 360, {
-          duration: 35000,
-          easing: Easing.linear,
-        }),
-        -1,
-        false
-      );
-    } else {
-      cancelAnimation(coverRotation);
-    }
-  }, [isPlaying, coverRotation]);
 
   useEffect(() => {
     if (isMiniPlayerExpanded) {
@@ -2208,13 +2210,16 @@ const SpotifyListView = React.memo(({
       setSearchResults([]);
       return;
     }
+    let cancelled = false;
     setLoading(true);
     searchSpotify(debouncedQuery)
       .then((res) => {
+        if (cancelled) return;
         setSearchResults(res || []);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [debouncedQuery, searchSpotify, selectedPlaylist]);
 
   const handlePlaylistSelect = useCallback(async (playlist: any) => {
@@ -2287,8 +2292,12 @@ const SpotifyListView = React.memo(({
 
   // ── Artist Profile handlers ──────────────────────────────────────
   const handleArtistSelect = useCallback(async (artist: any, forceFresh: boolean = false) => {
+    const request = ++artistProfileRequestRef.current;
+    const isCurrentRequest = () => artistProfileRequestRef.current === request;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSelectedArtistProfile(artist);
+    setLoadingArtistProfile(false);
+    setRefreshingArtistProfile(false);
 
     // Check in-memory and persistent cache first
     const cached = artistProfileCacheRef.current[artist.id] || spotifyArtistCache[`profile_${artist.id}`];
@@ -2296,8 +2305,8 @@ const SpotifyListView = React.memo(({
     const isStale = !cached?.updatedAt || (Date.now() - cached.updatedAt > ARTIST_PROFILE_TTL);
 
     if (cached) {
-      if (cached.topTracks?.length) setArtistProfileTopTracks(cached.topTracks);
-      if (cached.albums?.length) setArtistProfileAlbums(cached.albums);
+      setArtistProfileTopTracks(cached.topTracks || []);
+      setArtistProfileAlbums(cached.albums || []);
       setArtistProfileTrackHeading(cached.trackHeading || 'Top Songs');
     }
 
@@ -2318,10 +2327,12 @@ const SpotifyListView = React.memo(({
 
     try {
       const token = await useTierStore.getState().getValidAccessToken();
+      if (!isCurrentRequest()) return;
       if (!token) {
         if (artist.name) {
           const { getArtistTopTracksResult } = require('../services/spotify');
           const topResult = await getArtistTopTracksResult('', '', 'US', artist.name).catch(() => ({ tracks: [], isLatestFallback: false }));
+          if (!isCurrentRequest()) return;
           if (topResult.tracks.length > 0) {
             setArtistProfileTopTracks(topResult.tracks);
             setArtistProfileTrackHeading(topResult.isLatestFallback ? 'Latest Songs' : 'Top Songs');
@@ -2355,6 +2366,7 @@ const SpotifyListView = React.memo(({
         getArtistAlbums(token, realArtistId, 10, artist.name).catch(() => []),
         /^[A-Za-z0-9]{22}$/.test(realArtistId) ? getArtist(token, realArtistId).catch(() => null) : Promise.resolve(null),
       ]);
+      if (!isCurrentRequest()) return;
 
       let tracks = topTracksRes.tracks;
       let isLatestFallback = topTracksRes.isLatestFallback;
@@ -2368,6 +2380,7 @@ const SpotifyListView = React.memo(({
       if (tracks.length === 0 && albums.length === 0 && artist.name) {
         console.log(`[SpotifyListView] Resolving real artist for "${artist.name}"...`);
         const searchMatches = await searchArtists(token, artist.name, 3).catch(() => []);
+        if (!isCurrentRequest()) return;
         const match = searchMatches.find(
           (a: any) => normalizeArtistKey(a?.name) === normalizeArtistKey(artist.name)
         ) || searchMatches[0];
@@ -2381,6 +2394,7 @@ const SpotifyListView = React.memo(({
             getArtistTopTracksResult(token, realArtistId, 'US', artist.name).catch(() => ({ tracks: [], isLatestFallback: false })),
             getArtistAlbums(token, realArtistId, 10, artist.name).catch(() => []),
           ]);
+          if (!isCurrentRequest()) return;
           tracks = topTracksRes.tracks;
           isLatestFallback = topTracksRes.isLatestFallback;
         }
@@ -2456,16 +2470,21 @@ const SpotifyListView = React.memo(({
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch (e) {
-      console.warn('[SpotifyListView] Failed to load artist profile:', e);
+      if (isCurrentRequest()) console.warn('[SpotifyListView] Failed to load artist profile:', e);
     } finally {
-      setLoadingArtistProfile(false);
-      setRefreshingArtistProfile(false);
+      if (isCurrentRequest()) {
+        setLoadingArtistProfile(false);
+        setRefreshingArtistProfile(false);
+      }
     }
   }, []);
 
   const handleArtistProfileBack = useCallback(() => {
+    artistProfileRequestRef.current += 1;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedArtistProfile(null);
+    setLoadingArtistProfile(false);
+    setRefreshingArtistProfile(false);
   }, []);
 
   const handleInternalBack = useCallback(() => {
@@ -2474,7 +2493,7 @@ const SpotifyListView = React.memo(({
       return true;
     }
     if (selectedArtistProfile) {
-      setSelectedArtistProfile(null);
+      handleArtistProfileBack();
       return true;
     }
     if (selectedPlaylist) {
@@ -2489,7 +2508,7 @@ const SpotifyListView = React.memo(({
       return true;
     }
     return false;
-  }, [selectedAlbumDetail, selectedArtistProfile, selectedPlaylist, isSearchOpen]);
+  }, [selectedAlbumDetail, selectedArtistProfile, selectedPlaylist, isSearchOpen, handleArtistProfileBack]);
 
   // Register internal back handler with parent MusicScreen so hardware back / gestures
   // close album detail -> artist profile -> playlists -> categories in proper hierarchy
@@ -2531,11 +2550,12 @@ const SpotifyListView = React.memo(({
     <ArtistPageItem
       pageArtists={pageArtists}
       containerWidth={artistContainerWidth}
+      avatarSize={artistAvatarSize}
       currentPlayingTrackArtist={currentTrack?.artist}
       isPlaying={isPlaying}
       onSelect={handleArtistSelect}
     />
-  ), [artistContainerWidth, currentTrack?.artist, isPlaying, handleArtistSelect]);
+  ), [artistContainerWidth, artistAvatarSize, currentTrack?.artist, isPlaying, handleArtistSelect]);
 
   const convertSpotifyTrackToTrack = useCallback((st: any): Track => {
     // Mood recommendations are already normalized MusicContext tracks, while
@@ -2753,10 +2773,19 @@ const SpotifyListView = React.memo(({
     );
   }, [currentTrack?.id, filteredPlaylistTracks, handleTrackPressItem, selectedPlaylist, handleSpotifyMorePress]);
 
+  // Different component types keep Artists isolated from the other tabs' native
+  // scroll offsets/content measurements, including when this branch remounts.
+  const SpotifyHubContainer = activeSpotifyTab === 'artists' ? RefreshOnlyViewport : ScrollView;
+
   return (
     <View style={styles.spotifyHubRoot}>
-      {!selectedArtistProfile && !selectedAlbumDetail && (
-        <View style={styles.spotifyHubHeader}>
+      {/* Reserve header space behind detail overlays so the grid never resizes on Back. */}
+        <View
+          style={[styles.spotifyHubHeader, (selectedArtistProfile || selectedAlbumDetail) && { opacity: 0 }]}
+          pointerEvents={selectedArtistProfile || selectedAlbumDetail ? 'none' : 'auto'}
+          accessibilityElementsHidden={!!selectedArtistProfile || !!selectedAlbumDetail}
+          importantForAccessibility={selectedArtistProfile || selectedAlbumDetail ? 'no-hide-descendants' : 'auto'}
+        >
           <Pressable style={styles.spotifyHubIconButton} onPress={selectedPlaylist ? () => { setSelectedPlaylist(null); setIsSearchOpen(false); setSearchQuery(''); } : onGoBack}>
             <Feather name="chevron-left" size={24} color={Colors.text.primary} />
           </Pressable>
@@ -2773,7 +2802,6 @@ const SpotifyListView = React.memo(({
             </Pressable>
           </View>
         </View>
-      )}
 
       {selectedPlaylist ? (
         /* Playlist detail list view */
@@ -2989,15 +3017,18 @@ const SpotifyListView = React.memo(({
         </View>
       ) : (
         /* Three-tab Spotify home */
-        <ScrollView
+        <SpotifyHubContainer
           ref={spotifyScrollRef}
           contentContainerStyle={[
             styles.listScroll,
             styles.spotifyHubScroll,
+            activeSpotifyTab === 'artists' && { paddingBottom: Math.max(insets.bottom, 14) + 88 },
           ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
           bounces={true}
-          alwaysBounceVertical={false}
+          alwaysBounceVertical={activeSpotifyTab === 'artists'}
           refreshControl={
             <RefreshControl
               refreshing={refreshingPlaylists}
@@ -3007,7 +3038,7 @@ const SpotifyListView = React.memo(({
             />
           }
         >
-          <Animated.View style={[{ flex: 1 }, animatedTabContentStyle]}>
+          <Animated.View style={[{ flex: 1, minHeight: 0 }, animatedTabContentStyle]}>
             {activeSpotifyTab === 'overview' ? (
               isOverviewLoading ? (
                 <OverviewSkeleton />
@@ -3015,20 +3046,41 @@ const SpotifyListView = React.memo(({
                 <>
                   <View style={styles.spotifyHeroShell}>
                     <View style={styles.spotifyHeroCard}>
-                      <View style={styles.spotifyHeroGlow} />
-                      <View style={styles.spotifyHeroContent}>
+                      <View style={styles.spotifyHeroArtworkWrap} pointerEvents="none" accessible={false}>
+                        <MusicCover cover={currentTrack?.category === 'spotify' ? currentTrack.cover : (recentlyPlayed[0]?.track ? spotifyGetBestImage(recentlyPlayed[0].track.album?.images ?? [], 300) ?? '' : '')} style={styles.spotifyHeroArtwork} borderRadius={0} iconSize={48} />
+                        {/* Anchor the fade to the image edge so it starts fully opaque at every screen width. */}
+                        <LinearGradient
+                          colors={['#101712', 'rgba(16,23,18,0.92)', 'rgba(16,23,18,0.3)', 'rgba(16,23,18,0)']}
+                          locations={[0, 0.12, 0.6, 1]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                          style={StyleSheet.absoluteFill}
+                          pointerEvents="none"
+                        />
+                      </View>
+                      <LinearGradient
+                        colors={['rgba(16,23,18,0)', 'rgba(16,23,18,0.5)', '#101712']}
+                        locations={[0, 0.36, 0.78]}
+                        style={StyleSheet.absoluteFill}
+                        pointerEvents="none"
+                      />
+                      <View style={styles.spotifyHeroStatus}>
+                        <NowPlayingSignal playing={isPlaying && currentTrack?.category === 'spotify'} />
                         <Text style={styles.spotifyHeroKicker}>{isPlaying && currentTrack?.category === 'spotify' ? 'NOW PLAYING' : 'YOUR SPOTIFY SPACE'}</Text>
-                        <Text style={styles.spotifyHeroTitle}>{isPlaying && currentTrack?.category === 'spotify' ? currentTrack.title : 'Your music,\nAll in one place.'}</Text>
-                        <Text style={styles.spotifyHeroCopy} numberOfLines={2}>{isPlaying && currentTrack?.category === 'spotify' ? currentTrack.artist : 'Revisit recent listens, explore your favourite artists and playlists.'}</Text>
-                        <AnimatedPressable style={styles.spotifyHeroQueueButton} pressScale={0.98} onPress={onShowQueue}>
-                          <Feather name="list" size={16} color={Colors.text.onAccent} />
-                          <Text style={styles.spotifyHeroQueueText}>View queue</Text>
-                        </AnimatedPressable>
                       </View>
-                      <View style={styles.spotifyHeroArtworkWrap}>
-                        <MusicCover cover={currentTrack?.category === 'spotify' ? currentTrack.cover : (recentlyPlayed[0]?.track ? spotifyGetBestImage(recentlyPlayed[0].track.album?.images ?? [], 300) ?? '' : '')} style={styles.spotifyHeroArtwork} iconSize={28} />
-                        <View style={styles.spotifyHeroArtworkHighlight} pointerEvents="none" />
+                      <View style={styles.spotifyHeroBody}>
+                        <View style={styles.spotifyHeroContent}>
+                          <Text style={styles.spotifyHeroTitle}>{isPlaying && currentTrack?.category === 'spotify' ? currentTrack.title : 'Your music,\nAll in one place.'}</Text>
+                          <Text style={styles.spotifyHeroCopy} numberOfLines={2}>{isPlaying && currentTrack?.category === 'spotify' ? currentTrack.artist : 'Revisit recent listens, explore your favourite artists and playlists.'}</Text>
+                        </View>
                       </View>
+                      <AnimatedPressable style={styles.spotifyHeroQueueButton} pressScale={0.98} onPress={onShowQueue} accessibilityRole="button" accessibilityLabel="View queue">
+                        <Feather name="list" size={16} color={Colors.text.onAccent} />
+                        <Text style={styles.spotifyHeroQueueText}>View queue</Text>
+                        <View style={styles.spotifyHeroQueueArrow}>
+                          <Feather name="arrow-up-right" size={15} color={Colors.accent.primary} />
+                        </View>
+                      </AnimatedPressable>
                     </View>
                   </View>
                   {/* Made for your mood section (after user logs mood) */}
@@ -3193,7 +3245,7 @@ const SpotifyListView = React.memo(({
                   </GlassCard>
                 </>
               )) : activeSpotifyTab === 'artists' ? (
-                <>
+                <View style={styles.spotifyArtistsPage}>
                   <View style={styles.spotifyArtistIntroRow}>
                     <View style={{ flex: 1, paddingRight: 10 }}>
                       <Text style={styles.spotifyHeroKicker}>FROM YOUR TASTE SURVEY</Text>
@@ -3209,8 +3261,12 @@ const SpotifyListView = React.memo(({
                       <Text style={styles.artistTasteHeaderBtnText}>Tune Taste</Text>
                     </Pressable>
                   </View>
+                  <View style={styles.spotifyArtistStage} onLayout={(event) => {
+                    const height = event.nativeEvent.layout.height;
+                    if (height > 0) setArtistStageHeight(previous => Math.abs(previous - height) > 2 ? height : previous);
+                  }}>
                   {loadingArtists ? (
-                    <ArtistGridSkeleton />
+                    <ArtistGridSkeleton avatarSize={artistAvatarSize} />
                   ) : artistLoadError ? (
                     <GlassCard intensity="medium" style={styles.spotifyArtistEmpty}>
                       <Feather name="wifi-off" size={28} color={Colors.accent.primary} />
@@ -3231,7 +3287,7 @@ const SpotifyListView = React.memo(({
                     </GlassCard>
                   ) : (
                     <View
-                      style={styles.artistGridSectionWrap}
+                      style={[styles.artistGridSectionWrap, { flex: 1, minHeight: 0 }]}
                       onLayout={(e) => {
                         const w = e.nativeEvent.layout.width;
                         if (w > 0 && Math.abs(w - artistContainerWidth) > 2) {
@@ -3242,7 +3298,17 @@ const SpotifyListView = React.memo(({
                       {/* Swipeable Horizontal FlatList Pager */}
                       <FlatList
                         ref={artistPagerRef}
+                        style={{ flex: 1, minHeight: 0 }}
                         data={artistPages}
+                        initialScrollIndex={Math.min(artistPage, Math.max(0, artistPages.length - 1))}
+                        onLayout={() => {
+                          const page = Math.min(artistPageRef.current, Math.max(0, artistPages.length - 1));
+                          if (page !== artistPageRef.current) {
+                            artistPageRef.current = page;
+                            setArtistPage(page);
+                          }
+                          artistPagerRef.current?.scrollToOffset({ offset: page * artistContainerWidth, animated: false });
+                        }}
                         keyExtractor={artistPageKeyExtractor}
                         horizontal
                         pagingEnabled={Platform.OS === 'ios'}
@@ -3310,9 +3376,10 @@ const SpotifyListView = React.memo(({
                       )}
                     </View>
                   )}
-                </>
+                  </View>
+                </View>
               ) : (
-              <>
+                <>
                 <Text style={[styles.cardTitleSm, { marginBottom: Spacing.md, marginLeft: Spacing.xs }]}>
                   Your Playlists
                 </Text>
@@ -3372,7 +3439,7 @@ const SpotifyListView = React.memo(({
               </>
             )}
           </Animated.View>
-        </ScrollView>
+        </SpotifyHubContainer>
       )}
 
       {/* Expanded Mini Player (stays open until user taps music cover orb again) */}
@@ -3600,27 +3667,9 @@ const SpotifyListView = React.memo(({
                   const targetTrack = spotifyMenuTrack;
                   handleCloseSpotifyMenu(async () => {
                     try {
-                      await spotifyAddToQueueHook(targetTrack.uri);
-                      showSpotifyToast('Added to Queue');
-
-                      // Timed re-fetch of Spotify's live queue so our in-app queue list updates
-                      setTimeout(async () => {
-                        try {
-                          const { useTierStore } = require('../stores/tierStore');
-                          const token = await useTierStore.getState().getValidAccessToken();
-                          if (token) {
-                            const { getQueue } = require('../services/spotify');
-                            const { parseSpotifyQueueHelper } = require('../context/MusicContext');
-                            const queueData = await getQueue(token);
-                            if (queueData) {
-                              const combinedQueue = parseSpotifyQueueHelper(queueData);
-                              setMusicQueue(combinedQueue);
-                            }
-                          }
-                        } catch (syncErr) {
-                          console.warn('[SpotifyListView] Failed to sync updated Spotify queue:', syncErr);
-                        }
-                      }, 1200);
+                      const added = await addSpotifyTrackToQueue(convertSpotifyTrackToTrack(targetTrack));
+                      if (added) showSpotifyToast('Added to Queue');
+                      else showSpotifyToast('Could not update the queue', 'error');
                     } catch {
                       showSpotifyToast('Could not add to queue — open Spotify and play something first', 'error');
                     }
@@ -4433,7 +4482,6 @@ const RecommendedListView = React.memo(({
     getContinuationBatch,
     reportTrackSkip,
     reportTrackCompletion,
-    addToQueue: spotifyAddToQueueHook,
   } = useSpotify();
 
   const {
@@ -4442,7 +4490,6 @@ const RecommendedListView = React.memo(({
     favorites,
     toggleFavorite,
     addToQueue: localAddToQueue,
-    setQueue: setMusicQueue,
   } = useMusic();
   const playbackTime = usePlaybackTime();
 
@@ -5110,32 +5157,9 @@ const RecommendedListView = React.memo(({
                   const targetTrack = menuTrack.track;
                   handleCloseMenu(async () => {
                     try {
-                      if (targetTrack.url?.startsWith('spotify:')) {
-                        await spotifyAddToQueueHook(targetTrack.url);
-                        showToast('Added to Queue');
-
-                        // Timed re-fetch of Spotify's live queue so our in-app queue list stays consistent
-                        setTimeout(async () => {
-                          try {
-                            const { useTierStore } = require('../stores/tierStore');
-                            const token = await useTierStore.getState().getValidAccessToken();
-                            if (token) {
-                              const { getQueue } = require('../services/spotify');
-                              const { parseSpotifyQueueHelper } = require('../context/MusicContext');
-                              const queueData = await getQueue(token);
-                              if (queueData) {
-                                const combinedQueue = parseSpotifyQueueHelper(queueData);
-                                setMusicQueue(combinedQueue);
-                              }
-                            }
-                          } catch (syncErr) {
-                            console.warn('[RecommendedListView] Failed to sync updated Spotify queue:', syncErr);
-                          }
-                        }, 1200);
-                      } else {
-                        localAddToQueue(targetTrack);
-                        showToast('Added to Queue');
-                      }
+                      const added = await localAddToQueue(targetTrack);
+                      if (added) showToast('Added to Queue');
+                      else showToast('Could not update the queue', 'error');
                     } catch {
                       showToast('Could not add to queue — open Spotify and play something first', 'error');
                     }
@@ -6132,20 +6156,7 @@ const PlayerView = React.memo(({
   }, [playerToastOpacity]);
 
   // Rotation animation for vinyl mode
-  const rotation = useSharedValue(0);
-
-  useEffect(() => {
-    if (isTrackPlaying && isPlayerActive && playerViewMode === 'vinyl') {
-      rotation.value = rotation.value % 360;
-      rotation.value = withRepeat(
-        withTiming(rotation.value + 360, { duration: 35000, easing: Easing.linear }),
-        -1,
-        false
-      );
-    } else {
-      cancelAnimation(rotation);
-    }
-  }, [isTrackPlaying, isPlayerActive, playerViewMode, rotation]);
+  const rotation = usePlaybackRotation(isTrackPlaying && isPlayerActive && playerViewMode === 'vinyl');
 
   const setPlayerViewMode = useCallback((mode: 'vinyl' | 'poster') => {
     setPlayerViewModeState(mode);
@@ -7094,9 +7105,10 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
     stateRef.current.localQueue = updatedLocal;
 
     setQueue(newQueue, 0);
-    syncReorderedQueue();
-    play(clickedTrack, undefined, clickedTrack.url, undefined, true, false);
-  }, [currentTrack?.id, isPlaying, pause, resume, queue, setQueue, syncReorderedQueue, play]);
+    // play() sends this entire sequence. A second queue sync here races it
+    // using the previous song's position and can replace the requested track.
+    play(clickedTrack, undefined, clickedTrack.url, undefined, false, false);
+  }, [currentTrack?.id, isPlaying, pause, resume, queue, setQueue, play]);
 
   const renderItem = useCallback(({ item, index: idx }: { item: { track: Track; key: string }; index: number }) => {
     const isCurrent = currentTrack?.id === item.track.id;
@@ -7340,6 +7352,24 @@ const SpotifySettingsPopup = React.memo(({
 
 SpotifySettingsPopup.displayName = 'SpotifySettingsPopup';
 
+
+/** Recover screen/render failures without discarding the connected Spotify account. */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  useEffect(() => { console.warn('[MusicScreen] Recoverable screen error:', error); }, [error]);
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 28, backgroundColor: Colors.background.primary }}>
+      <Feather name="music" size={32} color={Colors.accent.primary} />
+      <Text style={{ fontFamily: Fonts.heading, fontSize: 22, color: Colors.text.primary, marginTop: 20, textAlign: 'center' }}>Music needs a moment</Text>
+      <Text style={{ fontFamily: Fonts.body, fontSize: 14, lineHeight: 22, color: Colors.text.secondary, textAlign: 'center', marginTop: 10 }}>We couldn’t display this screen. If your connection dropped, try again when it’s back.</Text>
+      <Pressable onPress={() => { void retry().catch(err => console.warn('[MusicScreen] Retry failed:', err)); }} accessibilityRole="button" style={{ paddingHorizontal: 24, paddingVertical: 14, borderRadius: 24, backgroundColor: Colors.accent.primary, marginTop: 24 }}>
+        <Text style={{ fontFamily: Fonts.bodySemiBold, color: Colors.text.onAccent }}>Try again</Text>
+      </Pressable>
+      <Pressable onPress={() => router.replace('/(tabs)')} accessibilityRole="button" style={{ paddingHorizontal: 24, paddingVertical: 14, marginTop: 8 }}>
+        <Text style={{ fontFamily: Fonts.bodyMedium, color: Colors.text.primary }}>Go home</Text>
+      </Pressable>
+    </View>
+  );
+}
 
 export default function MusicScreen() {
   const insets = useSafeAreaInsets();
@@ -7922,9 +7952,12 @@ export default function MusicScreen() {
                     handleCloseMenu();
                     showToast('Cannot mix categories in queue', 'warning');
                   } else if (menuTrack) {
-                    addToQueue(menuTrack);
+                    const targetTrack = menuTrack;
                     handleCloseMenu();
-                    showToast('Added to Queue');
+                    void addToQueue(targetTrack).then(added => {
+                      if (added) showToast('Added to Queue');
+                      else showToast('Could not update the queue', 'error');
+                    });
                   }
                 }}
               >
@@ -9774,18 +9807,19 @@ const styles = StyleSheet.create({
   spotifyPlaylistInlineSearch: { height: 47, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, paddingHorizontal: 14, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' },
   // Clears the floating navigation bar and compact controls with comfortable breathing room.
   spotifyHubScroll: { paddingBottom: 135 },
-  spotifyHeroShell: { marginBottom: 29, padding: 1.5, borderRadius: 31, backgroundColor: 'rgba(190, 255, 108, 0.18)', shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 6 },
-  spotifyHeroCard: { overflow: 'hidden', minHeight: 214, borderRadius: 29.5, backgroundColor: '#161C13', flexDirection: 'row' },
-  spotifyHeroContent: { zIndex: 2, width: '67%', padding: 22, justifyContent: 'center' },
-  spotifyHeroGlow: { position: 'absolute', width: 230, height: 230, borderRadius: 115, right: -100, top: -75, backgroundColor: 'rgba(190, 255, 108, 0.22)' },
-  spotifyHeroKicker: { fontFamily: Fonts.bodyBold, fontSize: 10, letterSpacing: 1.55, color: Colors.accent.primary },
-  spotifyHeroTitle: { marginTop: 9, fontFamily: Fonts.heading, fontSize: 25, letterSpacing: -0.9, lineHeight: 30, color: Colors.text.primary },
-  spotifyHeroCopy: { marginTop: 9, fontFamily: Fonts.bodyMedium, fontSize: 11.5, lineHeight: 17, color: 'rgba(255,255,255,0.66)' },
-  spotifyHeroQueueButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 18, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 999, backgroundColor: Colors.accent.primary },
-  spotifyHeroQueueText: { fontFamily: Fonts.bodyBold, fontSize: 12, color: Colors.text.onAccent },
-  spotifyHeroArtworkWrap: { position: 'absolute', right: -25, bottom: -25, width: 155, height: 155, padding: 5, borderRadius: 31, backgroundColor: 'rgba(255,255,255,0.13)', transform: [{ rotate: '8deg' }] },
-  spotifyHeroArtwork: { width: '100%', height: '100%', borderRadius: 26, backgroundColor: '#293021' },
-  spotifyHeroArtworkHighlight: { position: 'absolute', top: 7, left: 7, right: 7, height: 24, borderTopLeftRadius: 25, borderTopRightRadius: 25, backgroundColor: 'rgba(255,255,255,0.12)' },
+  spotifyHeroShell: { marginBottom: 30, padding: 1, borderRadius: 30, backgroundColor: 'rgba(222, 238, 210, 0.16)', shadowColor: '#071009', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.28, shadowRadius: 20, elevation: 5 },
+  spotifyHeroCard: { overflow: 'hidden', minHeight: 240, paddingHorizontal: 24, paddingVertical: 20, borderRadius: 29, backgroundColor: '#101712' },
+  spotifyHeroStatus: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(190,255,108,0.15)', backgroundColor: 'rgba(16,23,18,0.72)' },
+  spotifyHeroKicker: { flexShrink: 1, fontFamily: Fonts.bodySemiBold, fontSize: 9, lineHeight: 14, letterSpacing: 1.5, color: Colors.accent.primary },
+  spotifyHeroBody: { marginTop: 32 },
+  spotifyHeroContent: { width: '88%', minWidth: 0 },
+  spotifyHeroTitle: { fontFamily: Fonts.heading, fontSize: 30, letterSpacing: -1.2, lineHeight: 36, color: '#F6F8F2', textShadowColor: 'rgba(4,12,7,0.4)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 12 },
+  spotifyHeroCopy: { marginTop: 8, fontFamily: Fonts.bodyMedium, fontSize: 12, lineHeight: 19, color: '#C0CABD' },
+  spotifyHeroQueueButton: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18, minHeight: 46, paddingVertical: 8, paddingLeft: 15, paddingRight: 8, borderRadius: 23, backgroundColor: Colors.accent.primary },
+  spotifyHeroQueueText: { flexShrink: 1, fontFamily: Fonts.bodySemiBold, fontSize: 12, lineHeight: 20, color: Colors.text.onAccent },
+  spotifyHeroQueueArrow: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#172515' },
+  spotifyHeroArtworkWrap: { position: 'absolute', top: 0, right: 0, width: '78%', height: '100%', overflow: 'hidden' },
+  spotifyHeroArtwork: { width: '100%', height: '100%', backgroundColor: '#29352B' },
   spotifySectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 2 },
   spotifySectionTitle: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text.primary },
   spotifySectionHint: { fontFamily: Fonts.bodyMedium, fontSize: 11, color: Colors.text.secondary },
@@ -9803,6 +9837,8 @@ const styles = StyleSheet.create({
   spotifyPulseName: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text.primary },
   spotifyPulseArtist: { marginTop: 2, fontFamily: Fonts.bodyMedium, fontSize: 11, color: Colors.text.secondary },
   spotifyArtistIntro: { marginBottom: 19, paddingHorizontal: 3 },
+  spotifyArtistsPage: { flex: 1, minHeight: 0 },
+  spotifyArtistStage: { flex: 1, minHeight: 0 },
   spotifyArtistIntroRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -10556,6 +10592,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   artistPagination: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

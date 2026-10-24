@@ -2,15 +2,10 @@ import { Feather } from '@expo/vector-icons';
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  cancelAnimation,
-  Easing,
   useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
 } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 import { Colors } from '../../constants/colors';
@@ -18,6 +13,7 @@ import { Spacing } from '../../constants/layout';
 import { Fonts, FontSizes } from '../../constants/typography';
 import { useMusic, usePlaybackTime } from '../../context/MusicContext';
 import { useSpotify } from '../../hooks/useSpotify';
+import { usePlaybackRotation } from '../../hooks/usePlaybackRotation';
 import { GlassCard } from '../ui';
 import { MusicCover } from './MusicCover';
 
@@ -82,7 +78,7 @@ export const FloatingMiniPlayer = React.memo(({
   variant = 'default',
 }: FloatingMiniPlayerProps) => {
   const { currentTrack, isPlaying, pause, resume, next, prev } = useMusic();
-  const { nowPlaying } = useSpotify();
+  useSpotify();
 
   const isSpotify = currentTrack?.category === 'spotify';
   const isSpotifyVariant = variant === 'spotify' || isSpotify;
@@ -90,24 +86,7 @@ export const FloatingMiniPlayer = React.memo(({
   const avatarSize = compact ? 32 : AVATAR_SIZE;
   const liquidGlassAvailable = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 
-  const rotation = useSharedValue(0);
-
-  // Animate rotating cover art when playing
-  useEffect(() => {
-    if (isTrackPlaying) {
-      rotation.value = rotation.value % 360;
-      rotation.value = withRepeat(
-        withTiming(rotation.value + 360, {
-          duration: 35000,
-          easing: Easing.linear,
-        }),
-        -1,
-        false
-      );
-    } else {
-      cancelAnimation(rotation);
-    }
-  }, [isTrackPlaying, rotation]);
+  const rotation = usePlaybackRotation(isTrackPlaying);
 
   const animatedCoverStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
