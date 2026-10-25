@@ -24,12 +24,84 @@ const A = 'spotify:track:' + 'A'.repeat(22);
 const B = 'spotify:track:' + 'B'.repeat(22);
 const C = 'spotify:track:' + 'C'.repeat(22);
 const clone = value => JSON.parse(JSON.stringify(value));
-const state = (uri, playing = true) => ({ is_playing: playing, progress_ms: 12000,
+
+function queueFeedbackFixture() {
+  const messages = [];
+  const cleanups = [];
+  const { useQueueAdditionFeedback: createFeedback } = loadTS('src/hooks/useQueueAdditionFeedback.ts', {
+    require: name => {
+      assert.equal(name, 'react');
+      return {
+        useRef: current => ({ current }), useCallback: fn => fn,
+        useEffect: effect => { cleanups.push(effect()); },
+      };
+    },
+  });
+  return {
+    run: createFeedback((message, type) => messages.push({ message, type })),
+    messages, unmount: () => cleanups.forEach(cleanup => cleanup()),
+  };
+}
+
+test('queue feedback appears before the network result and confirms success only afterward', async () => {
+  const f = queueFeedbackFixture();
+  let finish;
+  const adding = f.run(() => new Promise(resolve => { finish = resolve; }));
+  assert.deepEqual(f.messages, [{ message: 'Adding to queue…', type: 'pending' }]);
+  finish(true);
+  await adding;
+  assert.deepEqual(f.messages.at(-1), { message: 'Added to Queue', type: 'success' });
+});
+
+for (const failsByThrowing of [false, true]) {
+  test(`queue feedback replaces pending with failure for ${failsByThrowing ? 'rejected' : 'unsuccessful'} additions`, async () => {
+    const f = queueFeedbackFixture();
+    await f.run(async () => {
+      if (failsByThrowing) throw new Error('Offline');
+      return false;
+    });
+    assert.deepEqual(f.messages.map(message => message.type), ['pending', 'error']);
+  });
+}
+
+test('an older queue addition cannot replace the newer pending or failure message', async () => {
+  const f = queueFeedbackFixture();
+  let first;
+  let second;
+  const a = f.run(() => new Promise(resolve => { first = resolve; }));
+  const b = f.run(() => new Promise(resolve => { second = resolve; }));
+  first(true);
+  await a;
+  assert.deepEqual(f.messages.map(message => message.type), ['pending', 'pending']);
+  second(false);
+  await b;
+  assert.deepEqual(f.messages.map(message => message.type), ['pending', 'pending', 'error']);
+});
+
+test('queue feedback does not update an unmounted screen when the network completes', async () => {
+  const f = queueFeedbackFixture();
+  let finish;
+  const adding = f.run(() => new Promise(resolve => { finish = resolve; }));
+  f.unmount();
+  finish(true);
+  await adding;
+  assert.equal(f.messages.length, 1);
+});
+
+test('local additions keep immediate success feedback without a network-pending message', async () => {
+  const f = queueFeedbackFixture();
+  await f.run(async () => true, false);
+  assert.deepEqual(f.messages, [{ message: 'Added to Queue', type: 'success' }]);
+});
+
+const state = (uri, playing = true) => ({ is_playing: playing, shuffle_state: false, progress_ms: 12000,
   device: { id: 'android-device' }, item: uri ? { uri } : null });
 
 function fixture(options = {}) {
   const calls = [];
   const saved = new Map();
+  const queueStates = new Map();
+  const fallbacks = [];
   let current = state(C);
   let playlistUris = [];
   let description;
@@ -38,6 +110,12 @@ function fixture(options = {}) {
     delay: options.delay ?? (async () => {}),
     loadPlaylist: async user => saved.get(user) ?? null,
     savePlaylist: async (user, id) => saved.set(user, id),
+    loadQueueState: async (user, id) => {
+      const cached = queueStates.get(id);
+      return cached?.ownerId === user ? clone(cached) : null;
+    },
+    saveQueueState: async (id, queue) => { queueStates.set(id, clone(queue)); },
+    onQueueFallback: reason => { fallbacks.push(reason); },
     request: async (token, endpoint, method = 'GET', body) => {
       calls.push({ token, endpoint, method, body });
       if (options.request) {
@@ -67,16 +145,17 @@ function fixture(options = {}) {
       if (endpoint.startsWith('/me/player/play')) {
         if (body?.uris) current = options.broken === false ? state(body.uris[0]) : state(null, false);
         else if (body?.context_uri) current = options.recoveryFails ? state(null, false)
-          : { ...state(playlistUris[0] ?? A), context: { uri: body.context_uri } };
+          : { ...state(playlistUris[body.offset?.position ?? 0] ?? A), context: { uri: body.context_uri } };
         else current.is_playing = true;
         if (body?.position_ms !== undefined) current.progress_ms = body.position_ms;
         return null; // 204 is deliberately indistinguishable from success data.
       }
       if (endpoint === '/me/player/pause') current.is_playing = false;
+      if (endpoint.startsWith('/me/player/shuffle?state=false')) current.shuffle_state = false;
       return null;
     },
   };
-  return { calls, saved, deps, controller: createSpotifyPlaybackController(deps),
+  return { calls, saved, fallbacks, deps, controller: createSpotifyPlaybackController(deps),
     getCurrent: () => current, setCurrent: value => { current = value; }, getPlaylistUris: () => playlistUris };
 }
 
@@ -250,6 +329,7 @@ function musicQueueFixture({ playing = true, active = queueTrack(A), queue = [qu
   const stateValues = new Map([[0, active], [1, playing], [3, 42], [5, queue]]);
   let stateIndex = 0;
   let now = 100000;
+  let spotifySession = 0;
   const alerts = [];
   const react = {
     createContext: () => ({ Provider: 'Provider' }),
@@ -268,6 +348,7 @@ function musicQueueFixture({ playing = true, active = queueTrack(A), queue = [qu
     updatePlaybackQueue: (...args) => f.controller.updateQueue(...args),
     setShuffle: (token, enabled) => f.controller.command(token, '/me/player/shuffle?state=' + enabled),
     addToQueue: (token, uri) => f.controller.command(token, '/me/player/queue?uri=' + encodeURIComponent(uri), 'POST'),
+    getQueue: token => f.deps.request(token, '/me/player/queue'),
   };
   const { MusicProvider } = loadTS('src/context/MusicContext.tsx', {
     Date: class extends Date { static now() { return now; } },
@@ -283,13 +364,181 @@ function musicQueueFixture({ playing = true, active = queueTrack(A), queue = [qu
       if (name === '../services/spotifyPlayback') return { normalizePlaybackUris };
       if (name === '../services/spotify') return spotify;
       if (name === '../stores/alertStore') return { useAlertStore: { getState: () => ({ showAlert: (...args) => alerts.push(args) }) } };
-      if (name === '../stores/tierStore') return { useTierStore: { getState: () => ({ getValidAccessToken: async () => 'user' }) } };
+      if (name === '../stores/tierStore') return { getSpotifySessionGeneration: () => spotifySession,
+        useTierStore: { getState: () => ({ getValidAccessToken: async () => 'user' }) } };
       throw new Error('Unexpected provider import: ' + name);
     },
   });
   const context = MusicProvider({ children: null }).props.value;
-  return { ...f, context, alerts, queue: () => stateValues.get(5), playing: () => stateValues.get(1), advance: ms => { now += ms; }, now: () => now };
+  return { ...f, context, alerts, queue: () => stateValues.get(5), active: () => stateValues.get(0),
+    playing: () => stateValues.get(1), advance: ms => { now += ms; }, now: () => now,
+    changeSession: () => { spotifySession++; } };
 }
+
+const remoteQueue = (current, upcoming) => {
+  const track = uri => ({ id: uri.split(':')[2], uri, name: uri,
+    artists: [{ name: 'Artist' }], album: { images: [] }, duration_ms: 180000 });
+  return { currently_playing: track(current), queue: upcoming.map(track) };
+};
+const flushQueueRead = () => new Promise(resolve => setImmediate(resolve));
+const queueUris = f => Array.from(f.queue(), track => track.url);
+
+test('automatic advance reads Spotify queue once without sending playback commands', async () => {
+  const f = musicQueueFixture({ queue: [A, B].map(queueTrack), playback: {
+    request: ({ endpoint }) => endpoint === '/me/player/queue' ? remoteQueue(B, [C]) : undefined,
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  assert.equal(f.active().id, queueTrack(B).id);
+  assert.deepEqual(queueUris(f), [B]);
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, C]);
+  f.context.updateSpotifyPlayback(2, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.deepEqual(f.calls.map(call => [call.endpoint, call.method]), [['/me/player/queue', 'GET']]);
+  assert.equal(f.playing(), true);
+});
+
+test('automatic advance can reconcile an empty upcoming Spotify queue', async () => {
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => endpoint === '/me/player/queue' ? remoteQueue(B, []) : undefined,
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B]);
+});
+
+test('a queue response still describing the previous song cannot undo automatic advance', async () => {
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => endpoint === '/me/player/queue' ? remoteQueue(A, [B, C]) : undefined,
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, C]);
+  assert.equal(f.active().id, queueTrack(B).id);
+});
+
+test('a second advance during a slow queue read fetches the latest song after discarding the old response', async () => {
+  let finish;
+  let reads = 0;
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => {
+      if (endpoint !== '/me/player/queue') return;
+      if (++reads === 1) return new Promise(resolve => { finish = resolve; });
+      return remoteQueue(C, [A]);
+    },
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(C));
+  assert.equal(reads, 1, 'Queue reads remain serialized');
+  finish(remoteQueue(B, [C]));
+  await flushQueueRead();
+  assert.equal(reads, 2);
+  assert.deepEqual(queueUris(f), [C, A]);
+  assert.equal(f.active().id, queueTrack(C).id);
+});
+
+test('automatic queue refresh cannot overwrite a newer local queue edit', async () => {
+  let finish;
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => endpoint === '/me/player/queue'
+      ? new Promise(resolve => { finish = resolve; }) : undefined,
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  f.context.setQueue([B, A, C].map(queueTrack));
+  finish(remoteQueue(B, [C]));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, A, C]);
+});
+
+test('adding a song while an automatic queue read is pending keeps the completed addition', async () => {
+  let finish;
+  let firstRead = true;
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => {
+      if (endpoint === '/me/player/queue' && firstRead) {
+        firstRead = false;
+        return new Promise(resolve => { finish = resolve; });
+      }
+    },
+  } });
+  f.setCurrent(state(B));
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.equal(await f.context.addToQueue(queueTrack(A)), true);
+  finish(remoteQueue(B, [C]));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, A, C]);
+  assert.deepEqual(f.getPlaylistUris(), [B, A, C]);
+});
+
+test('automatic queue refresh ignores a response from a disconnected or replaced session', async () => {
+  let finish;
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => endpoint === '/me/player/queue'
+      ? new Promise(resolve => { finish = resolve; }) : undefined,
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  f.changeSession();
+  finish(remoteQueue(B, [A]));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, C]);
+});
+
+test('failed automatic queue reads preserve the accepted track and playback without retries', async () => {
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => { if (endpoint === '/me/player/queue') throw new Error('Offline'); },
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, C]);
+  assert.equal(f.active().id, queueTrack(B).id);
+  assert.equal(f.playing(), true);
+  assert.equal(f.alerts.length, 0);
+  assert.equal(f.calls.length, 1);
+});
+
+test('malformed automatic queue data leaves the current queue intact', async () => {
+  const response = remoteQueue(B, [C]);
+  response.queue.push(null);
+  const f = musicQueueFixture({ queue: [A, B, C].map(queueTrack), playback: {
+    request: ({ endpoint }) => endpoint === '/me/player/queue' ? response : undefined,
+  } });
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, C]);
+  assert.equal(f.playing(), true);
+  assert.equal(f.alerts.length, 0);
+});
+
+test('automatic refresh preserves the unreported tail and intentional repeats of a custom queue', async () => {
+  let advanced = false;
+  const f = musicQueueFixture({ playback: {
+    request: ({ endpoint }) => advanced && endpoint === '/me/player/queue' ? remoteQueue(B, [C]) : undefined,
+  } });
+  assert.equal(await f.context.addToQueue(queueTrack(B)), true);
+  f.context.setQueue([A, B, C, B, C].map(queueTrack));
+  advanced = true;
+  const before = f.calls.length;
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, C, B, C]);
+  assert.deepEqual(f.calls.slice(before).map(call => [call.endpoint, call.method]), [['/me/player/queue', 'GET']]);
+});
+
+test('a conflicting Spotify preview cannot replace the custom queue order on automatic advance', async () => {
+  let advanced = false;
+  const f = musicQueueFixture({ playback: {
+    request: ({ endpoint }) => advanced && endpoint === '/me/player/queue' ? remoteQueue(B, [A, C]) : undefined,
+  } });
+  assert.equal(await f.context.addToQueue(queueTrack(B)), true);
+  advanced = true;
+  f.context.updateSpotifyPlayback(1, 180, true, queueTrack(B));
+  await flushQueueRead();
+  assert.deepEqual(queueUris(f), [B, C]);
+});
 
 test('pause icon updates immediately and rejects pre-command and lagging Spotify observations', async () => {
   const f = musicQueueFixture();
@@ -498,6 +747,7 @@ test('failed queue synchronization reports failure to the add button', async () 
   const f = musicQueueFixture({ playback: { request: ({ endpoint }) => {
     if (endpoint.includes('/shuffle')) throw new Error('Spotify is rate limited');
   } } });
+  f.getCurrent().shuffle_state = true;
   assert.equal(await f.context.addToQueue(queueTrack(B)), false);
   assert.equal(f.alerts.length, 1);
   assert.equal(f.calls.filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
@@ -557,6 +807,58 @@ test('an unchanged queue causes no playlist write or player restart', async () =
   assert.equal(f.calls.slice(start).filter(c => c.method !== 'GET').length, 0);
 });
 
+test('queue additions skip shuffle writes when the required live state confirms shuffle is off', async () => {
+  const f = musicQueueFixture();
+  await f.context.addToQueue(queueTrack(B));
+  const start = f.calls.length;
+  await f.context.addToQueue(queueTrack(C));
+  const edits = f.calls.slice(start);
+  assert.equal(edits.filter(c => c.endpoint.includes('/shuffle')).length, 0);
+  assert.equal(edits.filter(c => c.endpoint === '/me/player').length, 1);
+  assert.deepEqual(f.getPlaylistUris(), [A, B, C, C]);
+});
+
+for (const shuffle of [true, undefined]) {
+  test(`queue edits disable shuffle when the live shuffle state is ${shuffle}`, async () => {
+    const f = fixture();
+    await f.controller.play('user', [A, C]);
+    f.getCurrent().shuffle_state = shuffle;
+    const start = f.calls.length;
+    await f.controller.updateQueue('user', [A, B, C]);
+    const edits = f.calls.slice(start);
+    const shuffleIndex = edits.findIndex(c => c.endpoint.includes('/shuffle'));
+    const writeIndex = edits.findIndex(c => c.endpoint.endsWith('/items'));
+    assert.ok(shuffleIndex >= 0 && shuffleIndex < writeIndex);
+    assert.equal(edits[shuffleIndex].endpoint, '/me/player/shuffle?state=false&device_id=android-device');
+    assert.equal(edits.filter(c => c.endpoint.includes('/shuffle')).length, 1);
+    assert.equal(f.getCurrent().shuffle_state, false);
+    assert.deepEqual(f.getPlaylistUris(), [A, B, C]);
+  });
+}
+
+test('a newer pause while disabling shuffle prevents playlist writes and restarts', async () => {
+  let release;
+  let entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const f = fixture({ request: ({ endpoint }) => {
+    if (endpoint.includes('/shuffle')) {
+      entered();
+      return new Promise(resolve => { release = () => resolve(null); });
+    }
+  } });
+  await f.controller.play('user', [A, C]);
+  f.getCurrent().shuffle_state = true;
+  const start = f.calls.length;
+  const edit = f.controller.updateQueue('user', [A, B, C]);
+  await waiting;
+  const pause = f.controller.command('user', '/me/player/pause');
+  release();
+  await Promise.all([edit, pause]);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.endsWith('/items')).length, 0);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
+  assert.equal(f.getCurrent().is_playing, false);
+});
+
 test('a device with stale queue contents uses one context fallback at its live position', async () => {
   const f = fixture({ request: ({ endpoint }) => {
     if (endpoint === '/me/player/queue') return { currently_playing: { uri: A }, queue: [{ uri: C }] };
@@ -571,6 +873,162 @@ test('a device with stale queue contents uses one context fallback at its live p
   assert.equal(restarts[0].body.context_uri, 'spotify:playlist:queue-user');
   assert.equal(restarts[0].body.uris, undefined);
   assert.deepEqual(f.getPlaylistUris(), [A, B, C]);
+  assert.deepEqual(f.fallbacks, ['device-queue-stale']);
+  assert.deepEqual(f.calls.slice(start).filter(c => c.endpoint.endsWith('/items')).map(c => clone(c.body)), [
+    { uris: [B], position: 1 },
+  ]); // No second playlist replacement after the insertion succeeded.
+});
+
+test('a slow Connect queue can catch up without restarting the song or retrying the insertion', async () => {
+  let queueReads = 0;
+  const waits = [];
+  const f = fixture({
+    delay: async ms => { waits.push(ms); },
+    request: ({ endpoint }) => {
+      if (endpoint === '/me/player/queue' && ++queueReads < 3) {
+        return { currently_playing: { uri: A }, queue: [{ uri: C }] };
+      }
+    },
+  });
+  await f.controller.play('user', [A, C]);
+  const start = f.calls.length;
+  waits.length = 0;
+  const before = clone(f.getCurrent());
+  await f.controller.updateQueue('user', [A, B, C]);
+  assert.equal(queueReads, 3);
+  assert.deepEqual(waits, [300, 700, 2000]);
+  assert.deepEqual(f.getCurrent(), before);
+  assert.deepEqual(f.getPlaylistUris(), [A, B, C]);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.endsWith('/items')).length, 1);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
+  assert.deepEqual(f.fallbacks, []);
+});
+
+test('a necessary context refresh preserves the played prefix and uses the active playlist row', async () => {
+  const f = fixture({ request: ({ endpoint }) => {
+    if (endpoint === '/me/player/queue') return { currently_playing: { uri: B }, queue: [{ uri: C }] };
+  } });
+  await f.controller.play('user', [A, B, C]);
+  f.setCurrent({ ...state(B), progress_ms: 58000, context: { uri: 'spotify:playlist:queue-user' } });
+  const start = f.calls.length;
+  await f.controller.updateQueue('user', [B, A, C], 1000);
+  assert.deepEqual(f.getPlaylistUris(), [A, B, A, C]);
+  const commands = f.calls.slice(start);
+  const restart = commands.filter(c => c.endpoint.startsWith('/me/player/play'));
+  assert.equal(restart.length, 1);
+  assert.deepEqual(clone(restart[0].body), {
+    context_uri: 'spotify:playlist:queue-user', offset: { position: 1 }, position_ms: 58000,
+  });
+  assert.equal(commands.filter(c => c.endpoint.endsWith('/items')).length, 1);
+  assert.equal(f.getCurrent().item.uri, B);
+});
+
+test('reopening the app restores a validated managed queue without replaying the current song', async () => {
+  const f = fixture();
+  await f.controller.play('user', [A, C]);
+  const reopened = createSpotifyPlaybackController(f.deps);
+  const start = f.calls.length;
+  const before = clone(f.getCurrent());
+  await reopened.updateQueue('user', [A, B, C]);
+  assert.deepEqual(f.getPlaylistUris(), [A, B, C]);
+  assert.deepEqual(f.getCurrent(), before);
+  const edits = f.calls.slice(start);
+  assert.equal(edits.filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
+  assert.deepEqual(edits.filter(c => c.endpoint.endsWith('/items')).map(c => clone(c.body)), [
+    { uris: [B], position: 1 },
+  ]);
+  assert.equal(edits.filter(c => c.method === 'GET').length, 4); // State, owner, snapshot, queue; no catalog scan.
+});
+
+test('an external playlist edit during settling prevents a restart at an obsolete row', async () => {
+  const f = fixture({ request: ({ endpoint }) => {
+    if (endpoint === '/me/player/queue') return { currently_playing: { uri: A }, queue: [{ uri: C }] };
+    if (endpoint.endsWith('?fields=snapshot_id')) return { snapshot_id: 'external-edit' };
+  } });
+  await f.controller.play('user', [A, C]);
+  const start = f.calls.length;
+  await assert.rejects(f.controller.updateQueue('user', [A, B, C]), /playlist changed/);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
+  assert.equal(f.getCurrent().is_playing, true);
+});
+
+test('a restored queue with an outdated snapshot is never used for a positional insertion', async () => {
+  const f = fixture();
+  await f.controller.play('user', [A, C]);
+  const reopened = createSpotifyPlaybackController({
+    ...f.deps,
+    loadQueueState: async (...args) => ({ ...await f.deps.loadQueueState(...args), snapshotId: 'old-snapshot' }),
+  });
+  const start = f.calls.length;
+  await reopened.updateQueue('user', [A, B, C]);
+  const writes = f.calls.slice(start).filter(c => c.endpoint.endsWith('/items'));
+  assert.equal(writes.length, 1);
+  assert.deepEqual(clone(writes[0].body), { uris: [A, B, C] });
+});
+
+test('a restored queue belonging to another account cannot be edited using its cached positions', async () => {
+  const f = fixture();
+  await f.controller.play('user', [A, C]);
+  const reopened = createSpotifyPlaybackController({
+    ...f.deps,
+    loadQueueState: async (...args) => ({ ...await f.deps.loadQueueState(...args), ownerId: 'another-user' }),
+  });
+  const start = f.calls.length;
+  await reopened.updateQueue('user', [A, B, C]);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.endsWith('/items') && c.method === 'POST').length, 0);
+});
+
+test('failure to save the optional queue cache does not retry a successful insertion', async () => {
+  const f = fixture();
+  await f.controller.play('user', [A, C]);
+  f.deps.saveQueueState = async () => { throw new Error('Storage unavailable'); };
+  const start = f.calls.length;
+  await f.controller.updateQueue('user', [A, B, C]);
+  assert.deepEqual(f.getPlaylistUris(), [A, B, C]);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.endsWith('/items')).length, 1);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
+});
+
+test('Pause interrupts the queue-settling delay immediately instead of waiting for its timer', async () => {
+  let block = false;
+  let entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const f = fixture({ delay: () => {
+    if (!block) return Promise.resolve();
+    entered();
+    return new Promise(() => {}); // Deliberately never release the timer.
+  } });
+  await f.controller.play('user', [A, C]);
+  block = true;
+  const start = f.calls.length;
+  const editing = f.controller.updateQueue('user', [A, B, C]);
+  await waiting;
+  await f.controller.command('user', '/me/player/pause');
+  await editing;
+  assert.equal(f.getCurrent().is_playing, false);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
+});
+
+test('rapid additions replace pending verification and keep each requested occurrence exactly once', async () => {
+  let block = false;
+  let entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const f = fixture({ delay: () => {
+    if (!block) return Promise.resolve();
+    block = false;
+    entered();
+    return new Promise(() => {});
+  } });
+  await f.controller.play('user', [A, C]);
+  block = true;
+  const start = f.calls.length;
+  const first = f.controller.updateQueue('user', [A, B, C]);
+  await waiting;
+  const second = f.controller.updateQueue('user', [A, B, B, C]);
+  await Promise.all([first, second]);
+  assert.deepEqual(f.getPlaylistUris(), [A, B, B, C]);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.startsWith('/me/player/play')).length, 0);
+  assert.equal(f.calls.slice(start).filter(c => c.endpoint.startsWith('/me/player/queue') && c.method === 'POST').length, 0);
 });
 
 test('externally edited playlist snapshots cannot be used for positional edits', async () => {

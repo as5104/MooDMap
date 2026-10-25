@@ -14,7 +14,7 @@
 import * as AuthSession from 'expo-auth-session';
 import { File, Paths } from 'expo-file-system';
 import * as WebBrowser from 'expo-web-browser';
-import { createSpotifyPlaybackController, normalizePlaybackUris } from './spotifyPlayback';
+import { createSpotifyPlaybackController, normalizePlaybackUris, type ManagedQueue } from './spotifyPlayback';
 import { createSpotifyReadCoordinator } from './spotifyRequests';
 import { fetchWithDeadline as spotifyNetworkFetch } from './spotifyNetwork';
 
@@ -505,6 +505,7 @@ export async function getRecentlyPlayed(
 // Playback Endpoints
 
 const playbackQueueFile = new File(Paths.document, 'spotify_playback_queue.json');
+const playbackQueueStateFile = new File(Paths.document, 'spotify_playback_queue_state.json');
 const spotifyPlayback = createSpotifyPlaybackController({
   request: <T>(token: string, path: string, method = 'GET', body?: unknown) =>
     executeSpotifyFetch<T>(token, path, method, body, false, true),
@@ -522,6 +523,19 @@ const spotifyPlayback = createSpotifyPlaybackController({
       console.warn('[Spotify] Could not persist playback queue ID:', error);
     }
   },
+  loadQueueState: async (userId, playlistId) => {
+    try {
+      if (!playbackQueueStateFile.exists) return null;
+      const cached = JSON.parse(await playbackQueueStateFile.text()) as ManagedQueue & { playlistId: string };
+      return cached?.ownerId === userId && cached.playlistId === playlistId ? cached : null;
+    } catch { return null; }
+  },
+  saveQueueState: async (playlistId, queue) => {
+    // Keep only the latest managed sequence; no token or song metadata is stored.
+    // The controller validates the live owner and snapshot before reusing it.
+    playbackQueueStateFile.write(JSON.stringify({ ...queue, playlistId }));
+  },
+  onQueueFallback: reason => console.info('[SpotifyQueue] Context restart required:', reason),
   delay: ms => new Promise(resolve => setTimeout(resolve, ms)),
 });
 

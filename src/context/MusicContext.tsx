@@ -362,7 +362,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Request locks for Spotify queue pagination
   const isFetchingQueueRef = useRef(false);
-  const lastFetchedTrackIdRef = useRef<string | null>(null);
+  const pendingAutoQueueTrackRef = useRef<string | null>(null);
 
   // Keep refs in sync with state
   const favoritesRef = useRef(favorites);
@@ -530,6 +530,22 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const timeSinceLastAction = Date.now() - lastActionTimeRef.current;
     const isWithinActionWindow = timeSinceLastAction < 5000; // 5-second action window
 
+    const acceptAdvancedTrack = (track: Track) => {
+      currentTrackRef.current = track;
+      setCurrentTrack(track);
+      currentTimeRef.current = progressSec;
+      setCurrentTime(progressSec);
+      setDuration(trackInfo?.durationSec || durationSec);
+      isPlayingRef.current = playing;
+      setPlaying(previous => previous === playing ? previous : playing);
+      addedCountRef.current = 0;
+      lastInsertIndexRef.current = currentIndexRef.current;
+      nextTrackQueuedRef.current = null;
+      // The shared player poll detects transitions; queue reads happen once per
+      // accepted transition, never on every progress update, and never write playback.
+      void proactivelyFetchSpotifyQueue(track.id);
+    };
+
     if (trackInfo) {
       const isTrackMatch = currentTrackRef.current?.id === trackInfo.id;
 
@@ -580,10 +596,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setQueueState(cleanQueue);
             currentIndexRef.current = 0;
             setCurrentIndex(0);
-            setCurrentTrack(cleanQueue[0]);
-            setCurrentTime(progressSec);
-            currentTimeRef.current = progressSec;
-            setDuration(trackInfo.durationSec || durationSec);
+            acceptAdvancedTrack(cleanQueue[0]);
 
             return;
           } else if (queueIdx === 0) {
@@ -593,7 +606,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (isNewTrack || currentIndexRef.current !== 0) {
               currentIndexRef.current = 0;
               setCurrentIndex(0);
-              setCurrentTrack(q[0]);
+              acceptAdvancedTrack(q[0]);
             }
           } else {
             // The track is NOT in our queue (external song played, or Spotify auto-play)
@@ -620,8 +633,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const nextIdx = q.length;
               currentIndexRef.current = nextIdx;
               setCurrentIndex(nextIdx);
-              setCurrentTrack(recommendedTrack);
-              // Do NOT call proactivelyFetchSpotifyQueue — keep our curated queue stable
+              acceptAdvancedTrack(recommendedTrack);
               return;
             }
 
@@ -654,11 +666,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 const nextIdx = q.length;
                 currentIndexRef.current = nextIdx;
                 setCurrentIndex(nextIdx);
-                setCurrentTrack(autoTrack);
-
-                // Proactively import Spotify's full upcoming queue so user can see and manage next songs
-                lastFetchedTrackIdRef.current = trackInfo.id;
-                proactivelyFetchSpotifyQueue();
+                acceptAdvancedTrack(autoTrack);
                 return;
               }
 
@@ -709,11 +717,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               currentIndexRef.current = 0;
               setCurrentIndex(0);
             }
-            setCurrentTrack(newTrack);
-            if (!isQueueRecommendedRef.current && lastFetchedTrackIdRef.current !== trackInfo.id) {
-              lastFetchedTrackIdRef.current = trackInfo.id;
-              proactivelyFetchSpotifyQueue();
-            }
+            acceptAdvancedTrack(newTrack);
           }
         }
         setDuration(trackInfo.durationSec || durationSec);
@@ -817,11 +821,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ? 'Spotify is temporarily unreachable. Check your connection and try again.'
           : 'Spotify session expired. Please reconnect Spotify.');
       if (token) {
-        const { setShuffle: spotifySetShuffleAPI, updatePlaybackQueue } = require('../services/spotify');
-        // Disable native Spotify shuffle gaplessly so sequence is strictly preserved
-        await spotifySetShuffleAPI(token, false);
-        setShuffle(false);
-        if (intent !== playbackIntentRef.current) return true;
+        const { updatePlaybackQueue } = require('../services/spotify');
 
         // Sync updated custom queue sequence starting from current playing track to Spotify's native player
         const q = queueRef.current;
@@ -835,6 +835,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const currentPosMs = Math.max(0, Math.floor((currentTimeRef.current || 0) * 1000));
             await updatePlaybackQueue(token, remainingUris, currentPosMs);
             if (intent !== playbackIntentRef.current) return true;
+            shuffleRef.current = false;
+            setShuffle(false);
             pendingQueueSyncRef.current = false;
             console.log('[MusicContext] Synced reordered custom queue URIs to Spotify native player:', remainingUris.length);
           }
@@ -906,21 +908,55 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   }, [syncReorderedQueue]);
 
-  const proactivelyFetchSpotifyQueue = useCallback(async () => {
-    if (currentTrackRef.current?.category !== 'spotify' || isQueueCustomRef.current || isFetchingQueueRef.current) return;
+  const proactivelyFetchSpotifyQueue = useCallback(async (advancedTrackId?: string): Promise<void> => {
+    if (currentTrackRef.current?.category !== 'spotify' || spotifyPlayPendingRef.current || pendingQueueSyncRef.current) return;
+    if (advancedTrackId && currentTrackRef.current.id !== advancedTrackId) return;
+    if (!advancedTrackId && isQueueCustomRef.current) return;
+    if (isFetchingQueueRef.current) {
+      // A slow read for the previous song must not swallow the latest transition.
+      if (advancedTrackId) pendingAutoQueueTrackRef.current = advancedTrackId;
+      return;
+    }
 
     const intent = playbackIntentRef.current;
+    const originalQueue = queueRef.current;
+    const actionTime = lastActionTimeRef.current;
+    const preserveSequence = isQueueCustomRef.current || isQueueRecommendedRef.current;
+    const stillCurrent = () => intent === playbackIntentRef.current
+      && !spotifyPlayPendingRef.current && !pendingQueueSyncRef.current
+      && (!advancedTrackId || (currentTrackRef.current?.id === advancedTrackId
+        && queueRef.current === originalQueue && lastActionTimeRef.current === actionTime));
     isFetchingQueueRef.current = true;
     console.log('[MusicContext] Proactively fetching next batch of Spotify queue...');
     try {
-      const { useTierStore } = require('../stores/tierStore');
+      const { useTierStore, getSpotifySessionGeneration } = require('../stores/tierStore');
+      const session = getSpotifySessionGeneration();
       const token = await useTierStore.getState().getValidAccessToken();
-      if (token) {
+      if (token && stillCurrent() && session === getSpotifySessionGeneration()) {
         const { getQueue } = require('../services/spotify');
         const queueData = await getQueue(token);
-        if (intent !== playbackIntentRef.current || isQueueCustomRef.current) return;
-        if (queueData && queueData.queue && queueData.queue.length > 0) {
-          const combinedQueue = parseSpotifyQueueHelper(queueData);
+        if (!stillCurrent() || session !== getSpotifySessionGeneration()
+          || (!advancedTrackId && isQueueCustomRef.current)) return;
+        if (queueData?.currently_playing && Array.isArray(queueData.queue)) {
+          // Reject a delayed response still describing the previous song.
+          if (advancedTrackId && 'spotify_' + queueData.currently_playing.id !== advancedTrackId
+            && queueData.currently_playing.uri !== currentTrackRef.current?.url
+            && queueData.currently_playing.linked_from?.uri !== currentTrackRef.current?.url) return;
+          let combinedQueue = parseSpotifyQueueHelper(queueData);
+          if (combinedQueue.some(track => !track.id || !track.url || !Number.isFinite(track.durationSec))) return;
+
+          if (advancedTrackId && preserveSequence) {
+            const remaining = originalQueue.slice(currentIndexRef.current);
+            // Spotify returns a preview, not a paginated copy of our managed
+            // playlist. Match occurrences in order; never deduplicate or drop
+            // the unreported tail. A conflicting preview cannot replace it.
+            const matches = (remote: Track, local: Track | undefined) => !!local
+              && (remote.id === local.id || remote.url === local.url);
+            const overlap = Math.min(remaining.length, combinedQueue.length);
+            if (!combinedQueue.slice(0, overlap).every((track, index) => matches(track, remaining[index]))) return;
+            combinedQueue = combinedQueue.length < remaining.length
+              ? [...combinedQueue, ...remaining.slice(combinedQueue.length)] : combinedQueue;
+          }
 
           // Always sync queueRef and queueState to Spotify's actual queue
           console.log('[MusicContext] Synced queue list from Spotify. Tracks count:', combinedQueue.length);
@@ -945,6 +981,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.warn('[MusicContext] Proactive queue fetch failed:', e);
     } finally {
       isFetchingQueueRef.current = false;
+      const pending = pendingAutoQueueTrackRef.current;
+      pendingAutoQueueTrackRef.current = null;
+      if (pending && pending !== advancedTrackId) void proactivelyFetchSpotifyQueue(pending);
     }
   }, []);
 

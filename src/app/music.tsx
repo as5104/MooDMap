@@ -10,11 +10,12 @@ import * as Haptics from 'expo-haptics';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, type ErrorBoundaryProps } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
   Dimensions,
+  Easing as RNEasing,
   FlatList,
   Image,
   LayoutAnimation,
@@ -57,6 +58,7 @@ import { Fonts, FontSizes } from '../constants/typography';
 import { Playlist, Track, TRACKS_LIBRARY, useMusic, usePlaybackTime } from '../context/MusicContext';
 import { useSpotify } from '../hooks/useSpotify';
 import { usePlaybackRotation } from '../hooks/usePlaybackRotation';
+import { useQueueAdditionFeedback, type MusicToastType } from '../hooks/useQueueAdditionFeedback';
 import { isTrackComfort } from '../services/comfortBoxService';
 import { getMusicPreferences, saveMusicPreferences } from '../services/musicPreferenceService';
 import { getSmartRecommendations, MOOD_GENRE_MAP } from '../services/recommendationEngine';
@@ -341,6 +343,51 @@ const TrackItem = React.memo(({
   );
 });
 TrackItem.displayName = 'TrackItem';
+
+// Queue changes and toast updates must not rebuild every visible playlist row.
+// Keep the Spotify item intact for playback/menu actions, including duplicate rows.
+const SpotifyPlaylistTrackItem = React.memo(({
+  item, isCurrent, onPress, onMorePress,
+}: {
+  item: any;
+  isCurrent: boolean;
+  onPress: (item: any) => void;
+  onMorePress: (item: any) => void;
+}) => {
+  const handlePress = useCallback(() => onPress(item), [item, onPress]);
+  const handleMorePress = useCallback((event: any) => {
+    event.stopPropagation?.();
+    onMorePress(item);
+  }, [item, onMorePress]);
+  // Spotify's medium artwork remains sharp on high-density screens without
+  // decoding the largest cover for every small row thumbnail.
+  const cover = spotifyGetBestImage(item.album?.images ?? [], 300);
+  return (
+    <GlassCard
+      intensity="subtle"
+      padding="none"
+      style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
+      onPress={handlePress}
+    >
+      <View style={styles.trackItemInner}>
+        <Image source={cover ? { uri: cover } : undefined} style={styles.spotifyPlaylistTrackCover} />
+        <View style={styles.trackDetails}>
+          <Text numberOfLines={1} style={[styles.trackName, isCurrent && styles.activeTrackText]}>{item.name}</Text>
+          <Text numberOfLines={1} style={styles.trackArtist}>
+            {item.artists?.map((artist: any) => artist.name).join(', ') ?? 'Unknown Artist'}
+          </Text>
+        </View>
+        <View style={styles.trackActions}>
+          <Pressable onPress={handleMorePress} hitSlop={12} style={styles.trackMoreBtn}>
+            <Feather name="more-vertical" size={20} color="rgba(255, 255, 255, 0.6)" />
+          </Pressable>
+        </View>
+      </View>
+    </GlassCard>
+  );
+});
+SpotifyPlaylistTrackItem.displayName = 'SpotifyPlaylistTrackItem';
+const spotifyPlaylistTrackKey = (item: any, index: number) => `${item.id}-${index}`;
 
 // Static category data — defined at module level to avoid re-creation on renders
 const CATEGORIES_LIST = [
@@ -1774,21 +1821,28 @@ const SpotifyListView = React.memo(({
 
   // Local toast for Spotify section
   const [spToastMsg, setSpToastMsg] = useState<string | null>(null);
-  const [spToastType, setSpToastType] = useState<'success' | 'warning' | 'error'>('success');
+  const [spToastType, setSpToastType] = useState<MusicToastType>('success');
   const spToastOpacity = useRef(new RNAnimated.Value(0)).current;
   const spToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showSpotifyToast = useCallback((message: string, type: 'success' | 'warning' | 'error' = 'success') => {
+  const showSpotifyToast = useCallback((message: string, type: MusicToastType = 'success') => {
     if (spToastTimerRef.current) clearTimeout(spToastTimerRef.current);
+    spToastOpacity.stopAnimation();
     setSpToastMsg(message);
     setSpToastType(type);
     spToastOpacity.setValue(0);
     RNAnimated.timing(spToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    if (type === 'pending') return;
     spToastTimerRef.current = setTimeout(() => {
-      RNAnimated.timing(spToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
-        setSpToastMsg(null);
+      RNAnimated.timing(spToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setSpToastMsg(null);
       });
     }, 2000);
+  }, [spToastOpacity]);
+  const addWithFeedback = useQueueAdditionFeedback(showSpotifyToast);
+  useEffect(() => () => {
+    if (spToastTimerRef.current) clearTimeout(spToastTimerRef.current);
+    spToastOpacity.stopAnimation();
   }, [spToastOpacity]);
 
   const renderSpotifyToast = useCallback((bottomOffset: number = 130) => {
@@ -1828,7 +1882,7 @@ const SpotifyListView = React.memo(({
           elevation: 10,
           maxWidth: '85%',
         }}>
-          <Feather
+          {spToastType === 'pending' ? <ActivityIndicator size="small" color={Colors.accent.primary} /> : <Feather
             name={spToastType === 'success' ? 'check-circle' : 'alert-circle'}
             size={14}
             color={spToastType === 'error'
@@ -1836,7 +1890,7 @@ const SpotifyListView = React.memo(({
               : spToastType === 'warning'
                 ? Colors.warning
                 : Colors.accent.primary}
-          />
+          />}
           <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption, flexShrink: 1 }}>
             {spToastMsg}
           </Text>
@@ -2734,44 +2788,24 @@ const SpotifyListView = React.memo(({
     handleTrackPressItem(shuffled[0], shuffled, true, contextUri, shuffled[0].uri);
   }, [playlistTracks, handleTrackPressItem, selectedPlaylist]);
 
-  const renderSpotifyTrackItem = useCallback(({ item, index }: { item: any; index: number }) => {
-    const isCurrent = currentTrack?.id === 'spotify_' + item.id;
-    return (
-      <GlassCard
-        intensity="subtle"
-        padding="none"
-        style={[styles.trackItem, isCurrent && styles.activeTrackItem]}
-        onPress={() => {
-          const contextUri = selectedPlaylist ? `spotify:playlist:${selectedPlaylist.id}` : undefined;
-          handleTrackPressItem(item, filteredPlaylistTracks, false, contextUri, item.uri);
-        }}
-      >
-        <View style={styles.trackItemInner}>
-          <Image
-            source={item.album?.images?.[0]?.url ? { uri: item.album.images[0].url } : undefined}
-            style={[styles.trackCover, { borderRadius: 20 }]}
-          />
-          <View style={styles.trackDetails}>
-            <Text numberOfLines={1} style={[styles.trackName, isCurrent && styles.activeTrackText]}>
-              {item.name}
-            </Text>
-            <Text numberOfLines={1} style={styles.trackArtist}>
-              {item.artists?.map((a: any) => a.name).join(', ') ?? 'Unknown Artist'}
-            </Text>
-          </View>
-          <View style={styles.trackActions}>
-            <Pressable
-              onPress={(e) => { e.stopPropagation?.(); handleSpotifyMorePress(item); }}
-              hitSlop={12}
-              style={styles.trackMoreBtn}
-            >
-              <Feather name="more-vertical" size={20} color="rgba(255, 255, 255, 0.6)" />
-            </Pressable>
-          </View>
-        </View>
-      </GlassCard>
-    );
-  }, [currentTrack?.id, filteredPlaylistTracks, handleTrackPressItem, selectedPlaylist, handleSpotifyMorePress]);
+  // Stable row callbacks still read the latest committed filter, playlist, and
+  // play/pause handler. A playback-state change only updates highlighted rows.
+  const playlistTrackPressRef = useRef<(item: any) => void>(() => {});
+  useLayoutEffect(() => {
+    playlistTrackPressRef.current = item => {
+      const contextUri = selectedPlaylist ? `spotify:playlist:${selectedPlaylist.id}` : undefined;
+      handleTrackPressItem(item, filteredPlaylistTracks, false, contextUri, item.uri);
+    };
+  }, [handleTrackPressItem, filteredPlaylistTracks, selectedPlaylist]);
+  const handlePlaylistTrackPress = useCallback((item: any) => playlistTrackPressRef.current(item), []);
+  const renderSpotifyTrackItem = useCallback(({ item }: { item: any }) => (
+    <SpotifyPlaylistTrackItem
+      item={item}
+      isCurrent={currentTrack?.id === 'spotify_' + item.id}
+      onPress={handlePlaylistTrackPress}
+      onMorePress={handleSpotifyMorePress}
+    />
+  ), [currentTrack?.id, handlePlaylistTrackPress, handleSpotifyMorePress]);
 
   // Different component types keep Artists isolated from the other tabs' native
   // scroll offsets/content measurements, including when this branch remounts.
@@ -2911,12 +2945,12 @@ const SpotifyListView = React.memo(({
               <FlatList
                 ref={flatListRef}
                 data={filteredPlaylistTracks}
-                keyExtractor={(item, index) => `${item.id}-${index}`}
+                keyExtractor={spotifyPlaylistTrackKey}
                 renderItem={renderSpotifyTrackItem}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.listScroll}
                 initialNumToRender={15}
-                maxToRenderPerBatch={15}
+                maxToRenderPerBatch={8}
                 windowSize={10}
                 getItemLayout={getItemLayout}
                 onScrollToIndexFailed={handleScrollToIndexFailed}
@@ -3663,17 +3697,10 @@ const SpotifyListView = React.memo(({
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
-                  if (!spotifyMenuTrack) return;
+                  if (!spotifyMenuTrack || isSpotifyMenuClosingRef.current) return;
                   const targetTrack = spotifyMenuTrack;
-                  handleCloseSpotifyMenu(async () => {
-                    try {
-                      const added = await addSpotifyTrackToQueue(convertSpotifyTrackToTrack(targetTrack));
-                      if (added) showSpotifyToast('Added to Queue');
-                      else showSpotifyToast('Could not update the queue', 'error');
-                    } catch {
-                      showSpotifyToast('Could not add to queue — open Spotify and play something first', 'error');
-                    }
-                  });
+                  handleCloseSpotifyMenu();
+                  void addWithFeedback(() => addSpotifyTrackToQueue(convertSpotifyTrackToTrack(targetTrack)));
                 }}
               >
                 <View style={styles.menuOptionIconSlot}>
@@ -4542,21 +4569,29 @@ const RecommendedListView = React.memo(({
 
   // Toast states
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastType, setToastType] = useState<'success' | 'warning' | 'error'>('success');
+  const [toastType, setToastType] = useState<MusicToastType>('success');
   const toastOpacity = useRef(new RNAnimated.Value(0)).current;
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showToast = useCallback((message: string, type: 'success' | 'warning' | 'error' = 'success') => {
+  const showToast = useCallback((message: string, type: MusicToastType = 'success') => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastOpacity.stopAnimation();
     setToastMsg(message);
     setToastType(type);
     toastOpacity.setValue(0);
     RNAnimated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    if (type === 'pending') return;
     toastTimerRef.current = setTimeout(() => {
-      RNAnimated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
-        setToastMsg(null);
+      RNAnimated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setToastMsg(null);
       });
     }, 2000);
+  }, [toastOpacity]);
+
+  const addWithFeedback = useQueueAdditionFeedback(showToast);
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastOpacity.stopAnimation();
   }, [toastOpacity]);
 
   const handleOpenMenu = useCallback((track: any) => {
@@ -5153,17 +5188,10 @@ const RecommendedListView = React.memo(({
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
-                  if (!menuTrack?.track) return;
+                  if (!menuTrack?.track || isMenuClosingRef.current) return;
                   const targetTrack = menuTrack.track;
-                  handleCloseMenu(async () => {
-                    try {
-                      const added = await localAddToQueue(targetTrack);
-                      if (added) showToast('Added to Queue');
-                      else showToast('Could not update the queue', 'error');
-                    } catch {
-                      showToast('Could not add to queue — open Spotify and play something first', 'error');
-                    }
-                  });
+                  handleCloseMenu();
+                  void addWithFeedback(() => localAddToQueue(targetTrack), targetTrack.category === 'spotify');
                 }}
               >
                 <View style={styles.menuOptionIconSlot}>
@@ -5262,7 +5290,7 @@ const RecommendedListView = React.memo(({
             elevation: 6,
             maxWidth: '85%',
           }}>
-            <Feather
+            {toastType === 'pending' ? <ActivityIndicator size="small" color={Colors.accent.primary} /> : <Feather
               name={toastType === 'success' ? 'check-circle' : 'alert-circle'}
               size={14}
               color={toastType === 'error'
@@ -5270,7 +5298,7 @@ const RecommendedListView = React.memo(({
                 : toastType === 'warning'
                   ? Colors.warning
                   : Colors.accent.primary}
-            />
+            />}
             <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption, flexShrink: 1 }}>
               {toastMsg}
             </Text>
@@ -6826,60 +6854,92 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
     };
   });
 
-  // Entrance and Exit Slide and Opacity anims (using SCREEN_HEIGHT to ensure complete slide out)
-  const slideAnim = useRef(new RNAnimated.Value(SCREEN_HEIGHT + 100)).current;
+  // Only travel the sheet's height. Starting a full screen below the viewport
+  // adds an invisible delay and gives a spring unnecessary velocity/overshoot.
+  const slideAnim = useRef(new RNAnimated.Value(COMPACT_HEIGHT + 48)).current;
   const opacityAnim = useRef(new RNAnimated.Value(0)).current;
+  const popupAnimationRef = useRef<RNAnimated.CompositeAnimation | null>(null);
+  const popupShownRef = useRef(false);
+  const popupClosingRef = useRef(false);
 
-  useEffect(() => {
-    RNAnimated.parallel([
+  const handlePopupShow = useCallback(() => {
+    if (popupShownRef.current || popupClosingRef.current) return;
+    popupShownRef.current = true;
+    const animation = RNAnimated.parallel([
       RNAnimated.timing(opacityAnim, {
         toValue: 1,
         duration: 220,
         useNativeDriver: true,
+        isInteraction: false,
       }),
-      RNAnimated.spring(slideAnim, {
+      RNAnimated.timing(slideAnim, {
         toValue: 0,
-        tension: 70,
-        friction: 12,
+        duration: 280,
+        easing: RNEasing.out(RNEasing.cubic),
         useNativeDriver: true,
+        isInteraction: false,
       }),
-    ]).start();
+    ]);
+    popupAnimationRef.current = animation;
+    animation.start();
+  }, [opacityAnim, slideAnim]);
+
+  useEffect(() => () => {
+    popupAnimationRef.current?.stop();
   }, []);
 
   const handleClose = useCallback(() => {
-    RNAnimated.parallel([
+    if (popupClosingRef.current) return;
+    popupClosingRef.current = true;
+    popupAnimationRef.current?.stop();
+    const animation = RNAnimated.parallel([
       RNAnimated.timing(opacityAnim, {
         toValue: 0,
         duration: 180,
         useNativeDriver: true,
+        isInteraction: false,
       }),
       RNAnimated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT + 100,
+        toValue: EXPANDED_HEIGHT + 48,
         duration: 200,
+        easing: RNEasing.in(RNEasing.cubic),
         useNativeDriver: true,
+        isInteraction: false,
       }),
-    ]).start(() => {
-      onClose();
+    ]);
+    popupAnimationRef.current = animation;
+    animation.start(({ finished }) => {
+      if (finished) onClose();
     });
-  }, [onClose, SCREEN_HEIGHT]);
+  }, [onClose, EXPANDED_HEIGHT, opacityAnim, slideAnim]);
 
   const toggleHeight = useCallback(() => {
+    if (popupClosingRef.current) return;
     const nextState = !isExpanded;
     const target = nextState ? EXPANDED_HEIGHT : COMPACT_HEIGHT;
     sheetHeight.value = withSpring(target, {
       damping: 22,
       stiffness: 160,
+      overshootClamping: true,
     });
     setIsExpanded(nextState);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [isExpanded, EXPANDED_HEIGHT, COMPACT_HEIGHT, sheetHeight]);
 
-  const [localQueue, setLocalQueue] = useState<{ track: Track; key: string }[]>([]);
+  // Render the populated list on the first frame, rather than mounting an empty
+  // state and replacing it with all visible rows during the entrance animation.
+  const [localQueue, setLocalQueue] = useState<{ track: Track; key: string }[]>(() =>
+    queue.map((track, idx) => ({ track, key: `${track.id}_${idx}` })));
+  const syncedQueueRef = useRef(queue);
+  const [initialQueueIndex] = useState(() => {
+    const index = queue.findIndex(track => track.id === currentTrack?.id);
+    return index > 2 ? index - 1 : 0;
+  });
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const listContainerRef = useRef<View>(null);
-  const scrollOffsetRef = useRef(0);
+  const scrollOffsetRef = useRef(initialQueueIndex > 0 ? initialQueueIndex * 66 + 6 : 0);
   const initialScrollOffsetRef = useRef(0);
   const dragParamsRef = useRef({ dy: 0, moveY: 0 });
   const listMeasureRef = useRef({ pageY: 0, height: 400 });
@@ -6890,7 +6950,8 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
 
   // Sync queue to local state (only on external queue changes, skip during active drag)
   useEffect(() => {
-    if (stateRef.current.draggedIndex !== null) return;
+    if (stateRef.current.draggedIndex !== null || syncedQueueRef.current === queue) return;
+    syncedQueueRef.current = queue;
     setLocalQueue(queue.map((track, idx) => ({
       track,
       key: `${track.id}_${idx}`
@@ -6905,26 +6966,9 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
     });
   }, []);
 
-  // Scroll to current track on open
-  useEffect(() => {
-    if (currentTrack && localQueue.length > 0) {
-      const currentIdx = localQueue.findIndex(item => item.track.id === currentTrack.id);
-      if (currentIdx > 2) {
-        // Slight delay to let FlatList measure
-        setTimeout(() => {
-          flatListRef.current?.scrollToIndex({
-            index: Math.max(0, currentIdx - 1),
-            animated: true,
-            viewPosition: 0,
-          });
-        }, 150);
-      }
-    }
-    setTimeout(measureList, 300);
-    return () => {
-      autoScrollTimerRef.current = null;
-    };
-  }, [measureList]);
+  useEffect(() => () => {
+    autoScrollTimerRef.current = null;
+  }, []);
 
   const dragYVal = useRef(new RNAnimated.Value(0)).current;
   const dragOffsetRef = useRef(0);
@@ -7141,6 +7185,8 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
       transparent
       animationType="none"
       statusBarTranslucent
+      hardwareAccelerated
+      onShow={handlePopupShow}
       onRequestClose={handleClose}
     >
       <View style={styles.queuePopupBackdropOverlay}>
@@ -7203,20 +7249,21 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
                 <Text style={styles.queueEmptySubtitle}>Play a song from categories or Spotify to build your queue.</Text>
               </View>
             ) : (
-              <View ref={listContainerRef} style={styles.queueListWrapper} collapsable={false}>
+              <View ref={listContainerRef} style={styles.queueListWrapper} collapsable={false} onLayout={measureList}>
                 <FlatList
                   ref={flatListRef}
                   data={localQueue}
                   keyExtractor={(item) => item.key}
                   renderItem={renderItem}
                   getItemLayout={getItemLayout}
+                  initialScrollIndex={initialQueueIndex || undefined}
                   style={styles.queueList}
                   showsVerticalScrollIndicator={true}
                   scrollEnabled={draggedIndex === null}
                   contentContainerStyle={styles.queueListContent}
                   removeClippedSubviews={Platform.OS === 'android'}
-                  initialNumToRender={12}
-                  maxToRenderPerBatch={10}
+                  initialNumToRender={8}
+                  maxToRenderPerBatch={6}
                   windowSize={5}
                   onScroll={handleScroll}
                   scrollEventThrottle={16}
@@ -7397,22 +7444,30 @@ export default function MusicScreen() {
 
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [toastType, setToastType] = useState<'success' | 'warning' | 'error'>('success');
+  const [toastType, setToastType] = useState<MusicToastType>('success');
   const toastOpacity = useRef(new RNAnimated.Value(0)).current;
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showToast = useCallback((message: string, type: 'success' | 'warning' | 'error' = 'success') => {
+  const showToast = useCallback((message: string, type: MusicToastType = 'success') => {
     // Clear any existing toast timer
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastOpacity.stopAnimation();
     setToastMessage(message);
     setToastType(type);
     toastOpacity.setValue(0);
     RNAnimated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    if (type === 'pending') return;
     toastTimeoutRef.current = setTimeout(() => {
-      RNAnimated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
-        setToastMessage(null);
+      RNAnimated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setToastMessage(null);
       });
     }, 2000);
+  }, [toastOpacity]);
+
+  const addWithFeedback = useQueueAdditionFeedback(showToast);
+  useEffect(() => () => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastOpacity.stopAnimation();
   }, [toastOpacity]);
 
   // Spotify Add to Playlist Modal states
@@ -7506,6 +7561,9 @@ export default function MusicScreen() {
   );
   const previousViewRef = useRef<'categories' | 'list' | 'recommended'>('categories');
   const listBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const registerListBackHandler = useCallback((handler: (() => boolean) | null) => {
+    listBackHandlerRef.current = handler;
+  }, []);
   const [selectedCategory, setSelectedCategory] = useState<string>('midnight');
   const [activeCategoryLabel, setActiveCategoryLabel] = useState<string>('Midnight Vibes');
   const [spotifyBottomChromeVisible, setSpotifyBottomChromeVisible] = useState(false);
@@ -7808,6 +7866,10 @@ export default function MusicScreen() {
     setShowQueuePopup(true);
   }, []);
 
+  const handleHideQueue = useCallback(() => {
+    setShowQueuePopup(false);
+  }, []);
+
   const handleShowSettings = useCallback(() => {
     setShowSettingsPopup(true);
   }, []);
@@ -7862,7 +7924,7 @@ export default function MusicScreen() {
               onOpenPlayer={handleMiniPlayerPress}
               onOpenRecommended={handleOpenRecommended}
               isPlayerOpen={view === 'player'}
-              onRegisterBackHandler={(handler) => { listBackHandlerRef.current = handler; }}
+              onRegisterBackHandler={registerListBackHandler}
               onFullCoverChange={handleFullCoverChange}
               playerProgress={viewIndex}
             />
@@ -7948,16 +8010,14 @@ export default function MusicScreen() {
               <Pressable
                 style={styles.menuOption}
                 onPress={() => {
+                  if (isMenuClosingRef.current) return;
                   if (currentTrack && currentTrack.category !== menuTrack?.category) {
                     handleCloseMenu();
                     showToast('Cannot mix categories in queue', 'warning');
                   } else if (menuTrack) {
                     const targetTrack = menuTrack;
                     handleCloseMenu();
-                    void addToQueue(targetTrack).then(added => {
-                      if (added) showToast('Added to Queue');
-                      else showToast('Could not update the queue', 'error');
-                    });
+                    void addWithFeedback(() => addToQueue(targetTrack), targetTrack.category === 'spotify');
                   }
                 }}
               >
@@ -8135,7 +8195,7 @@ export default function MusicScreen() {
       )}
       {/* 4. Play Queue Popup Overlay */}
       {showQueuePopup && (
-        <QueuePopup onClose={() => setShowQueuePopup(false)} />
+        <QueuePopup onClose={handleHideQueue} />
       )}
       {/* 5. Music Settings Popup Overlay */}
       {showSettingsPopup && (
@@ -8280,7 +8340,7 @@ export default function MusicScreen() {
             shadowRadius: 8,
             elevation: 6,
           }}>
-            <Feather
+            {toastType === 'pending' ? <ActivityIndicator size="small" color={Colors.accent.primary} /> : <Feather
               name={toastType === 'success' ? "check-circle" : "alert-circle"}
               size={14}
               color={toastType === 'error'
@@ -8288,7 +8348,7 @@ export default function MusicScreen() {
                 : toastType === 'warning'
                   ? Colors.warning
                   : Colors.accent.primary}
-            />
+            />}
             <Text style={{ color: '#FFFFFF', fontFamily: Fonts.bodySemiBold, fontSize: FontSizes.caption }}>
               {toastMessage}
             </Text>
@@ -8611,6 +8671,13 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: Radius.md,
+    backgroundColor: Colors.background.elevated,
+    marginRight: Spacing.md,
+  },
+  spotifyPlaylistTrackCover: {
+    width: 48,
+    height: 48,
+    borderRadius: 20,
     backgroundColor: Colors.background.elevated,
     marginRight: Spacing.md,
   },
