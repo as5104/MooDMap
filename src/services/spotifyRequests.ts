@@ -12,6 +12,11 @@ export function createSpotifyReadCoordinator(
   let generation = 0;
   let cacheRevision = 0;
   return {
+    forget(token: string, endpoint: string) {
+      const key = `${token}:${endpoint}`;
+      pending.delete(key);
+      cache.delete(key);
+    },
     invalidate() { cacheRevision++; cache.clear(); pending.clear(); },
     clear() { generation++; cacheRevision++; cache.clear(); pending.clear(); },
     read<T>(token: string, endpoint: string, task: () => Promise<T | null>): Promise<T | null> {

@@ -64,6 +64,7 @@ import { getMusicPreferences, saveMusicPreferences } from '../services/musicPref
 import { getSmartRecommendations, MOOD_GENRE_MAP } from '../services/recommendationEngine';
 import { formatDuration as spotifyFormatDur, getBestImage as spotifyGetBestImage } from '../services/spotify';
 import { useAppStore } from '../stores/appStore';
+import { useAlertStore } from '../stores/alertStore';
 import { useTierStore } from '../stores/tierStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -6741,6 +6742,7 @@ interface QueueItemProps {
   index: number;
   isCurrent: boolean;
   isDragging: boolean;
+  canReorder: boolean;
   dragY: any;
   onDragStart: (idx: number) => void;
   onDragMove: (dy: number, moveY: number) => void;
@@ -6753,6 +6755,7 @@ const QueueItem = React.memo(({
   index,
   isCurrent,
   isDragging,
+  canReorder,
   dragY,
   onDragStart,
   onDragMove,
@@ -6760,14 +6763,14 @@ const QueueItem = React.memo(({
   onTrackPress,
 }: QueueItemProps) => {
   // Ref to capture latest props for PanResponder closure safety
-  const callbacksRef = useRef({ onDragStart, onDragMove, onDragEnd, index });
-  callbacksRef.current = { onDragStart, onDragMove, onDragEnd, index };
+  const callbacksRef = useRef({ onDragStart, onDragMove, onDragEnd, index, canReorder });
+  callbacksRef.current = { onDragStart, onDragMove, onDragEnd, index, canReorder };
 
   const panResponderRef = useRef<any>(null);
   if (!panResponderRef.current) {
     panResponderRef.current = PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 3,
+      onStartShouldSetPanResponder: () => callbacksRef.current.canReorder,
+      onMoveShouldSetPanResponder: (_, gs) => callbacksRef.current.canReorder && Math.abs(gs.dy) > 3,
       onPanResponderGrant: () => {
         callbacksRef.current.onDragStart(callbacksRef.current.index);
       },
@@ -6826,7 +6829,7 @@ const QueueItem = React.memo(({
       {/* Drag Handle */}
       <View {...panResponder.panHandlers} style={styles.queueItemDragHandle} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Feather
-          name="menu"
+          name={canReorder ? 'menu' : 'lock'}
           size={16}
           color={isDragging ? '#1DB954' : isCurrent ? 'rgba(29, 185, 84, 0.85)' : 'rgba(255, 255, 255, 0.35)'}
         />
@@ -6837,7 +6840,8 @@ const QueueItem = React.memo(({
 QueueItem.displayName = 'QueueItem';
 
 const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
-  const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue, isQueueRecommended, play, pause, resume, isPlaying } = useMusic();
+  const { queue, currentTrack, currentIndex, setQueue, syncReorderedQueue, isQueueRecommended, isSpotifyQueueReadOnly, refreshSpotifyQueue, play, pause, resume, isPlaying } = useMusic();
+  const canReorder = currentTrack?.category !== 'spotify' || !isSpotifyQueueReadOnly;
 
   const SCREEN_HEIGHT = Dimensions.get('window').height;
   const COMPACT_HEIGHT = Math.min(390, Math.round(SCREEN_HEIGHT * 0.52));
@@ -6882,7 +6886,8 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
     ]);
     popupAnimationRef.current = animation;
     animation.start();
-  }, [opacityAnim, slideAnim]);
+    void refreshSpotifyQueue();
+  }, [opacityAnim, slideAnim, refreshSpotifyQueue]);
 
   useEffect(() => () => {
     popupAnimationRef.current?.stop();
@@ -6945,8 +6950,8 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   const listMeasureRef = useRef({ pageY: 0, height: 400 });
   const autoScrollTimerRef = useRef<any>(null);
 
-  const stateRef = useRef({ localQueue, draggedIndex, currentIndex, currentTrack });
-  stateRef.current = { localQueue, draggedIndex, currentIndex, currentTrack };
+  const stateRef = useRef({ localQueue, draggedIndex, currentIndex, currentTrack, queue, canReorder });
+  stateRef.current = { localQueue, draggedIndex, currentIndex, currentTrack, queue, canReorder };
 
   // Sync queue to local state (only on external queue changes, skip during active drag)
   useEffect(() => {
@@ -6994,6 +6999,7 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
   }, []);
 
   const handleDragStart = useCallback((index: number) => {
+    if (!stateRef.current.canReorder) return;
     setDraggedIndex(index);
     dragYVal.setValue(0);
     dragOffsetRef.current = 0;
@@ -7113,16 +7119,13 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
     setDraggedIndex(null);
 
     // Defer heavy global context sync so the drag styling clears first
-    setTimeout(() => {
+    setTimeout(async () => {
       const syncedTracks = updated.map(i => i.track);
-      let newIndex = 0;
-      if (currentTrack) {
-        newIndex = syncedTracks.findIndex(t => t.id === currentTrack.id);
+      if (!await syncReorderedQueue(syncedTracks)) {
+        setLocalQueue(stateRef.current.queue.map((track, index) => ({ track, key: `${track.id}_${index}` })));
       }
-      setQueue(syncedTracks, newIndex === -1 ? 0 : newIndex);
-      syncReorderedQueue();
     }, 0);
-  }, [dragYVal, currentTrack, setQueue, syncReorderedQueue]);
+  }, [dragYVal, syncReorderedQueue]);
 
   const handleQueueTrackClick = useCallback((clickedTrack: Track, clickedIndex: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -7133,6 +7136,11 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
       } else {
         resume();
       }
+      return;
+    }
+
+    if (!stateRef.current.canReorder) {
+      useAlertStore.getState().showAlert('Queue order', 'Your added songs are waiting in Spotify. Use Next to move through this queue; choosing a different queued song is available after they finish.', [{ text: 'OK' }]);
       return;
     }
 
@@ -7164,6 +7172,7 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
         index={idx}
         isCurrent={isCurrent}
         isDragging={isDragging}
+        canReorder={canReorder}
         dragY={dragYVal}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
@@ -7171,7 +7180,7 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
         onTrackPress={handleQueueTrackClick}
       />
     );
-  }, [currentTrack?.id, draggedIndex, dragYVal, handleDragStart, handleDragMove, handleDragEnd, handleQueueTrackClick]);
+  }, [currentTrack?.id, draggedIndex, dragYVal, handleDragStart, handleDragMove, handleDragEnd, handleQueueTrackClick, canReorder]);
 
   const getItemLayout = useCallback((_: any, index: number) => ({
     length: 66,
@@ -7228,7 +7237,9 @@ const QueuePopup = React.memo(({ onClose }: { onClose: () => void }) => {
                     )}
                   </View>
                   <Text style={styles.queueSubtitleText}>
-                    {localQueue.length} {localQueue.length === 1 ? 'track' : 'tracks'} • Drag to reorder
+                    {canReorder
+                      ? `${localQueue.length} ${localQueue.length === 1 ? 'track' : 'tracks'} • Drag to reorder`
+                      : 'Added songs play first • Reorder after they finish'}
                   </Text>
                 </View>
               </View>

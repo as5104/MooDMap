@@ -226,6 +226,14 @@ export function createSpotifyPlaybackController(deps: PlaybackDependencies) {
 
   return {
     cancelPending() { invalidateVerification(); cancellationGeneration++; },
+    // Native additions do not restart playback or cancel its verification. A
+    // subsequent pause/skip must not silently discard an acknowledged add tap.
+    addNative(token: string, uri: string, isCurrent: () => boolean = () => true) {
+      return enqueue(() => {
+        if (!isCurrent()) throw Object.assign(new Error('Spotify account changed. Please try again.'), { notSent: true });
+        return deps.request(token, `/me/player/queue?uri=${encodeURIComponent(uri)}`, 'POST');
+      });
+    },
     // Pause/skip/seek invalidate any pending fallback before entering the same
     // command queue. A slow verification must never restart a paused song.
     command(token: string, path: string, method = 'PUT', body?: unknown) {

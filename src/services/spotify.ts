@@ -16,6 +16,7 @@ import { File, Paths } from 'expo-file-system';
 import * as WebBrowser from 'expo-web-browser';
 import { createSpotifyPlaybackController, normalizePlaybackUris, type ManagedQueue } from './spotifyPlayback';
 import { createSpotifyReadCoordinator } from './spotifyRequests';
+import { createNativeQueueTracker, NATIVE_QUEUE_REORDER_MESSAGE } from './spotifyNativeQueue';
 import { fetchWithDeadline as spotifyNetworkFetch } from './spotifyNetwork';
 
 // Config
@@ -264,9 +265,14 @@ export function isSpotifySearchRateLimited(): boolean {
 }
 
 const spotifyReads = createSpotifyReadCoordinator();
+let queueSessionRevision = 0;
+let queuePlaybackIntent = 0;
+let queueOwner: string | null = null;
 
 export function clearSpotifyRequestCache(): void {
   spotifyReads.clear();
+  queueSessionRevision++;
+  queueOwner = null;
 }
 
 export const SPOTIFY_ARTIST_CACHE_FILE = new File(Paths.document, 'spotify_artist_cache.json');
@@ -451,6 +457,7 @@ async function spotifyFetch<T>(
 ): Promise<T | null> {
   const isSearch = endpoint.startsWith('/search');
   if (endpoint.startsWith('/me/player') && method !== 'GET') {
+    if (/^\/me\/player\/(pause|next|previous|seek)(?:\?|$)/.test(endpoint)) queuePlaybackIntent++;
     return spotifyPlayback.command(accessToken, endpoint, method, body) as Promise<T | null>;
   }
   if (method === 'GET') {
@@ -464,7 +471,10 @@ async function spotifyFetch<T>(
 // User Data Endpoints
 
 export async function getCurrentUser(accessToken: string): Promise<SpotifyUser | null> {
-  return spotifyFetch<SpotifyUser>(accessToken, '/me');
+  const session = queueSessionRevision;
+  const user = await spotifyFetch<SpotifyUser>(accessToken, '/me');
+  if (session === queueSessionRevision && user?.id) queueOwner = user.id;
+  return user;
 }
 
 export async function getTopTracks(
@@ -506,6 +516,31 @@ export async function getRecentlyPlayed(
 
 const playbackQueueFile = new File(Paths.document, 'spotify_playback_queue.json');
 const playbackQueueStateFile = new File(Paths.document, 'spotify_playback_queue_state.json');
+const nativeQueueFile = new File(Paths.document, 'spotify_native_queue_pending.json');
+const nativeQueueTracker = createNativeQueueTracker({
+  load: async () => nativeQueueFile.exists ? JSON.parse(await nativeQueueFile.text()) : {},
+  save: async state => { nativeQueueFile.write(JSON.stringify(state)); },
+});
+let queueMutationTail: Promise<unknown> = Promise.resolve();
+let nativeAddsInFlight = 0;
+function queueMutation<T>(task: () => Promise<T>): Promise<T> {
+  const result = queueMutationTail.catch(() => {}).then(task);
+  queueMutationTail = result;
+  return result;
+}
+async function nativeQueueOwner(token: string): Promise<string> {
+  const owner = queueOwner ?? (await getCurrentUser(token))?.id;
+  if (!owner) throw new Error('Could not confirm your Spotify account. Please try again.');
+  return owner;
+}
+export async function hasPendingNativeQueue(token: string): Promise<boolean> {
+  if (nativeAddsInFlight > 0) return true;
+  if (!await nativeQueueTracker.anyPending()) return false;
+  return nativeQueueTracker.pending(await nativeQueueOwner(token));
+}
+async function assertNativeQueueEditable(token: string) {
+  if (await hasPendingNativeQueue(token)) throw new Error(NATIVE_QUEUE_REORDER_MESSAGE);
+}
 const spotifyPlayback = createSpotifyPlaybackController({
   request: <T>(token: string, path: string, method = 'GET', body?: unknown) =>
     executeSpotifyFetch<T>(token, path, method, body, false, true),
@@ -561,6 +596,7 @@ export async function getCurrentlyPlaying(
 }
 
 export function cancelPendingPlayback(): void {
+  queuePlaybackIntent++;
   spotifyPlayback.cancelPending();
 }
 
@@ -577,18 +613,43 @@ export async function play(
   contextUri?: string,
   offset?: { position: number } | { uri: string }
 ): Promise<void> {
-  await spotifyPlayback.play(accessToken, uris, positionMs, contextUri, offset);
+  const intent = ++queuePlaybackIntent;
+  if (uris !== undefined && !contextUri) {
+    const session = queueSessionRevision;
+    await queueMutation(async () => {
+      await assertNativeQueueEditable(accessToken);
+      if (intent !== queuePlaybackIntent) return;
+      if (session !== queueSessionRevision) throw new Error('Spotify account changed. Please try again.');
+      await spotifyPlayback.play(accessToken, uris, positionMs, contextUri, offset);
+    });
+  } else {
+    await spotifyPlayback.play(accessToken, uris, positionMs, contextUri, offset);
+  }
 }
 
 export async function getQueue(
   accessToken: string
 ): Promise<{ currently_playing: any; queue: any[] } | null> {
-  return spotifyFetch<{ currently_playing: any; queue: any[] }>(accessToken, '/me/player/queue');
+  const session = queueSessionRevision;
+  const revision = nativeQueueTracker.revision();
+  const data = await spotifyFetch<{ currently_playing: any; queue: any[] }>(accessToken, '/me/player/queue');
+  if (session === queueSessionRevision && nativeAddsInFlight === 0 && await nativeQueueTracker.anyPending()) {
+    const owner = await nativeQueueOwner(accessToken);
+    if (session === queueSessionRevision) await nativeQueueTracker.observe(owner, data, revision);
+  }
+  return data;
 }
 
 /** Edit an active managed playlist in place where the device supports it. */
 export async function updatePlaybackQueue(accessToken: string, uris: string[], positionMs?: number): Promise<void> {
-  await spotifyPlayback.updateQueue(accessToken, uris, positionMs);
+  const session = queueSessionRevision;
+  const intent = ++queuePlaybackIntent;
+  await queueMutation(async () => {
+    await assertNativeQueueEditable(accessToken);
+    if (intent !== queuePlaybackIntent) return;
+    if (session !== queueSessionRevision) throw new Error('Spotify account changed. Please try again.');
+    await spotifyPlayback.updateQueue(accessToken, uris, positionMs);
+  });
 }
 
 export async function pause(accessToken: string): Promise<void> {
@@ -612,13 +673,36 @@ export async function seekToPosition(
 
 export async function addToQueue(
   accessToken: string,
-  trackUri: string
+  trackUri: string,
+  currentUri?: string
 ): Promise<void> {
-  await spotifyFetch(
-    accessToken,
-    `/me/player/queue?uri=${encodeURIComponent(trackUri)}`,
-    'POST'
-  );
+  const [uri] = normalizePlaybackUris(trackUri);
+  const session = queueSessionRevision;
+  nativeAddsInFlight++;
+  try {
+    await queueMutation(async () => {
+      const owner = await nativeQueueOwner(accessToken);
+      if (session !== queueSessionRevision) throw new Error('Spotify account changed. Please try again.');
+      const entryId = await nativeQueueTracker.reserve(owner, uri, currentUri);
+      try {
+        if (session !== queueSessionRevision) {
+          await nativeQueueTracker.reject(owner, entryId);
+          throw new Error('Spotify account changed. Please try again.');
+        }
+        await spotifyPlayback.addNative(accessToken, uri, () => session === queueSessionRevision);
+      } catch (error) {
+        // Timeouts/5xx can arrive after Spotify accepted a command. Keep the
+        // reservation and never automatically resend an uncertain addition.
+        const status = (error as { status?: number })?.status;
+        if ((error as { notSent?: boolean })?.notSent || (status && status >= 400 && status < 500)) await nativeQueueTracker.reject(owner, entryId);
+        throw error;
+      }
+    });
+  } finally {
+    nativeAddsInFlight--;
+    // A read started before the POST must not be shared with its confirmation.
+    spotifyReads.forget(accessToken, '/me/player/queue');
+  }
 }
 
 // Playlist Endpoints
